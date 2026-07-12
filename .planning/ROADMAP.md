@@ -55,6 +55,11 @@ Plans:
 5. All existing search and playback flows continue to work
 
 **Requirements:** CODE-02, CODE-03, BUG-01
+**Plans:** 2 plans in 2 waves
+
+Plans:
+- [ ] 03-01-PLAN.md — Bug fixes: episode sort sentinel (BUG-01) + SuperFlix domain fix (CODE-03)
+- [ ] 03-02-PLAN.md — Error handling migration: sealed class hierarchy, adapter interface, typed errors, orchestrator matching (CODE-02)
 
 ---
 
