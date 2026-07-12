@@ -132,8 +132,8 @@ class LocalStorage {
   /// Saves user data (e.g. AniList user profile) under [key].
   static Future<bool> saveUserData(String key, Map<String, dynamic> data) async {
     ensureInitialized();
-    await _prefs?.setString('anilist_$key', jsonEncode(data));
-    return true;
+    if (_prefs == null) return false;
+    return await _prefs!.setString('anilist_$key', jsonEncode(data));
   }
 
   /// Reads user data saved under [key], or null if none.
@@ -142,5 +142,11 @@ class LocalStorage {
     final raw = _prefs?.getString('anilist_$key');
     if (raw == null) return null;
     return jsonDecode(raw) as Map<String, dynamic>;
+  }
+
+  /// Removes user data stored under [key].
+  static Future<void> removeUserData(String key) async {
+    ensureInitialized();
+    await _prefs?.remove('anilist_$key');
   }
 }

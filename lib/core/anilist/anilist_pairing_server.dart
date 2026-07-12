@@ -121,7 +121,7 @@ class AniListPairingServer {
       if (path == '/' || path.isEmpty) {
         _html(req, _landingPage());
       } else if (path == '/callback') {
-        _html(req, _callbackPage());
+        _html(req, _callbackPage(_csrfToken));
       } else if (path == '/token') {
         await _handleToken(req);
       } else {
@@ -189,8 +189,8 @@ class AniListPairingServer {
     // -----------------------------------------------------------------------
     final origin = req.headers.value('origin');
     final referer = req.headers.value('referer');
-    final tvOrigin = 'http://$_ip';
-    if (origin != null && !origin.startsWith(tvOrigin)) {
+    final tvOrigin = 'http://$_ip:$_port';
+    if (origin != null && origin != tvOrigin) {
       _html(req, _resultPage(false), status: 403);
       return;
     }
@@ -227,14 +227,16 @@ class AniListPairingServer {
   // ---------------------------------------------------------------------------
 
   /// Sends an HTML response with CORS header restricted to the TV's own origin.
-  void _html(HttpRequest req, String body, {int status = 200}) {
-    final origin = _ip != null && _port != null ? 'http://$_ip:$_port' : '*';
+  Future<void> _html(HttpRequest req, String body, {int status = 200}) async {
+    final origin = 'http://$_ip:$_port';
     req.response
       ..statusCode = status
       ..headers.set(HttpHeaders.contentTypeHeader, 'text/html; charset=utf-8')
-      ..headers.set('Access-Control-Allow-Origin', origin);
-    req.response.write(body);
-    req.response.close();
+      ..headers.set('Access-Control-Allow-Origin', origin)
+      ..write(body);
+    try {
+      await req.response.close();
+    } catch (_) {}
   }
 
   /// Landing page — generates a fresh PKCE session on every load.
@@ -266,9 +268,11 @@ padding:16px;border-radius:12px;font-size:18px;font-weight:600}
   /// and POSTs it together with the CSRF token to the local `/token` endpoint.
   /// AniList sends the redirect as a full-page navigation (not fragment),
   /// so we read from `location.search` (query string).
-  String _callbackPage() {
+  String _callbackPage(String? csrfToken) {
+    final token = csrfToken ?? '';
     return '''<!doctype html><html lang="pt-br"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="$token">
 <title>Autorizando...</title>
 <style>
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b0f14;color:#fff;

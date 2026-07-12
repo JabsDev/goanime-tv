@@ -141,6 +141,7 @@ class AniListService {
 
   static Future<void> logout() async {
     await LocalStorage.removeToken();
+    await LocalStorage.removeUserData('user');
   }
 
   static Future<AniListUser?> _fetchUser(String token) async {
