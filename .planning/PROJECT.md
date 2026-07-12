@@ -22,12 +22,12 @@ Users can discover, browse, and watch anime from multiple providers through a si
 - ✓ In-memory TTL caching layer for search, episodes, enrichment, and HTTP — existing
 - ✓ Dark TV-optimized UI with focus-based navigation — existing
 - ✓ Profile screen with history and favorites — existing
+- ✓ SEC-01: Hardcoded client secret removed — PKCE migration eliminates need (Phase 1)
+- ✓ SEC-02: Pairing server LAN access preserved with documented warning — risk accepted (Phase 1)
+- ✓ SEC-03: CSRF protection + Origin/Referer validation + rate limiting on /token (Phase 1)
 
 ### Active
 
-- [ ] SEC-01: Remove or document hardcoded AniList OAuth client secret
-- [ ] SEC-02: Add TLS to AniList pairing server or restrict to localhost
-- [ ] SEC-03: Add authentication/CSRF protection to pairing server
 - [ ] REL-01: Configure Android app signing and release build
 - [ ] REL-02: Set up CI/CD pipeline (GitHub Actions)
 - [ ] REL-03: Create release checklist and Play Store listing assets
@@ -85,4 +85,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-11 after initialization*
+*Last updated: 2026-07-12 after Phase 1 completion*
