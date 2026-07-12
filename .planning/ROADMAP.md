@@ -26,14 +26,21 @@ Plans:
 ### Phase 2: Home Screen Refactor
 **Goal:** Split the 1320-line home_screen.dart into focused, maintainable components
 **Mode:** mvp
+**Status:** ✓ Complete
 **Success Criteria**:
-1. HomeScreen extracted as standalone file (~400 lines)
-2. AnilistLoginDialog extracted as separate widget file
-3. ProfileScreen extracted as separate file
-4. All existing functionality preserved (no regressions in catalog browsing, history, favorites)
-5. Navigation between extracted components works correctly
+1. ✓ HomeScreen extracted as standalone file (~400 lines)
+2. ✓ AnilistLoginDialog extracted as separate widget file
+3. ✓ ProfileScreen extracted as separate file
+4. ✓ All existing functionality preserved (no regressions in catalog browsing, history, favorites)
+5. ✓ Navigation between extracted components works correctly
 
 **Requirements:** CODE-01
+**Plans:** 3/3 plans complete
+
+Plans:
+- [x] 02-01-PLAN.md — Extract AnilistBanner widget + HomeNavigation helpers
+- [x] 02-02-PLAN.md — Extract AnilistLoginDialog with fixes
+- [x] 02-03-PLAN.md — Extract ProfileScreen + final trim of home_screen.dart
 
 ---
 
@@ -83,8 +90,8 @@ Plans:
 
 | Phase | Requirements | Status |
 |-------|-------------|--------|
-| 1 | SEC-01, SEC-02, SEC-03 | Pending |
-| 2 | CODE-01 | Pending |
+| 1 | SEC-01, SEC-02, SEC-03 | ✓ Complete |
+| 2 | CODE-01 | ✓ Complete |
 | 3 | CODE-02, CODE-03, BUG-01 | Pending |
 | 4 | CODE-04, TEST-01, TEST-02 | Pending |
 | 5 | REL-01, REL-02, REL-03 | Pending |
