@@ -15,6 +15,8 @@ import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/play_icon.dart';
 import '../search/search_screen.dart';
+import 'anilist_banner.dart';
+import 'home_navigation.dart';
 import '../detail/detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -382,7 +384,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!_anilistLoggedIn)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            child: _FocusableAnilistBanner(onTap: _showAnilistLogin),
+            child: AnilistBanner(onTap: _showAnilistLogin),
           ),
         if (_anilistLoggedIn && _anilistUser != null)
           Padding(
@@ -441,7 +443,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   title: _trending[i].name,
                   width: bannerWidth,
                   height: bannerHeight,
-                  onTap: () => _openDetail(_trending[i]),
+                  onTap: () => openDetail(context, _trending[i]),
                 ),
               ),
             ),
@@ -462,7 +464,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   title: _recent[i].name,
                   width: cardWidth,
                   height: cardHeight,
-                  onTap: () => _openDetail(_recent[i]),
+                   onTap: () => openDetail(context, _recent[i]),
                 ),
               ),
             ),
@@ -485,7 +487,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: item['title']?.toString() ?? '',
                     width: cardWidth,
                     height: cardHeight,
-                    onTap: () => _openFromHistory(item),
+                    onTap: () => openFromHistory(context, item),
                   ),
                 );
               },
@@ -509,7 +511,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: item['title']?.toString() ?? '',
                     width: cardWidth,
                     height: cardHeight,
-                    onTap: () => _openFromFav(item),
+                    onTap: () => openFromFav(context, item),
                   ),
                 );
               },
@@ -543,7 +545,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   title: entry.media.title,
                   width: w,
                   height: w * 1.4,
-                  onTap: () => _openAnilistDetail(entry.media),
+                  onTap: () => openAnilistDetail(context, entry.media),
                 ),
               );
             },
@@ -553,48 +555,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openDetail(Anime anime) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => DetailScreen(anime: anime)),
-    );
-  }
-
-  void _openAnilistDetail(AniListMedia media) {
-    final anime = Anime(
-      name: media.title,
-      url: '',
-      fallbackImageUrl: media.coverImage,
-    );
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => DetailScreen(anime: anime)),
-    );
-  }
-
-  void _openFromHistory(Map<String, dynamic> item) {
-    final anime = Anime(
-      name: item['title']?.toString() ?? '',
-      url: '',
-      fallbackImageUrl: item['image']?.toString(),
-    );
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => DetailScreen(anime: anime)),
-    );
-  }
-
-  void _openFromFav(Map<String, dynamic> item) {
-    final anime = Anime(
-      name: item['title']?.toString() ?? '',
-      url: '',
-      fallbackImageUrl: item['image']?.toString(),
-    );
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => DetailScreen(anime: anime)),
-    );
-  }
 }
 
 class _AnilistLoginDialog extends StatefulWidget {
@@ -1083,102 +1043,6 @@ class _AnilistLoginDialogState extends State<_AnilistLoginDialog> {
               ),
             ],
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FocusableAnilistBanner extends StatefulWidget {
-  final VoidCallback onTap;
-
-  const _FocusableAnilistBanner({required this.onTap});
-
-  @override
-  State<_FocusableAnilistBanner> createState() => _FocusableAnilistBannerState();
-}
-
-class _FocusableAnilistBannerState extends State<_FocusableAnilistBanner> {
-  bool _isFocused = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (focused) => setState(() => _isFocused = focused),
-      child: Semantics(
-        button: true,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: widget.onTap,
-            onHover: (_) {},
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: _isFocused
-                    ? const LinearGradient(
-                        colors: [Color(0xFF7B73FF), Color(0xFF5C51E0)],
-                      )
-                    : const LinearGradient(
-                        colors: [Color(0xFF6C63FF), Color(0xFF3F51B5)],
-                      ),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: _isFocused ? ThemeConstants.primary : Colors.transparent,
-                  width: 2,
-                ),
-                boxShadow: _isFocused
-                    ? [
-                        BoxShadow(
-                          color: ThemeConstants.primary.withValues(alpha: 0.4),
-                          blurRadius: 20,
-                          spreadRadius: 1,
-                        ),
-                      ]
-                    : [],
-              ),
-              child: Row(
-                children: [
-                  CachedImage(
-                    url: 'https://anilist.co/img/icons/icon.svg',
-                    width: 36,
-                    height: 36,
-                    fallback: const Icon(
-                      Icons.bookmark,
-                      color: Colors.white, size: 36,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Conectar com AniList',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          'Veja suas listas de animes aqui',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 15,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Icon(Icons.arrow_forward_ios,
-                      color: Colors.white, size: 22),
-                ],
-              ),
-            ),
-          ),
         ),
       ),
     );
