@@ -9,7 +9,7 @@
 ### Phase 1: Security Hardening
 **Goal:** Eliminate CRITICAL/HIGH security vulnerabilities in AniList OAuth and pairing server
 **Mode:** mvp
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 **Success Criteria**:
 1. Hardcoded AniList client secret is removed or explicitly documented as a public-insecure secret
 2. Pairing server binds to localhost only (not 0.0.0.0) with CSRF protection
@@ -19,7 +19,7 @@
 **Requirements:** SEC-01, SEC-02, SEC-03
 
 Plans:
-- [ ] 01-01-PLAN.md — Migrate to PKCE, harden /token endpoint with CSRF/origin/rate-limiting, migrate token storage to LocalStorage
+- [x] 01-01-PLAN.md — Migrate to PKCE, harden /token endpoint with CSRF/origin/rate-limiting, migrate token storage to LocalStorage
 
 ---
 
