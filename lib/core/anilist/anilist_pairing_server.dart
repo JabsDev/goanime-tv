@@ -31,6 +31,11 @@ class AniListPairingServer {
   String? _state;
   String? _csrfToken;
 
+  // Rate limiting: IP → { count, windowStart (epoch ms) }.
+  final Map<String, _RateEntry> _rateLimitStore = {};
+  static const int _rateLimitMax = 5;
+  static const Duration _rateLimitWindow = Duration(seconds: 60);
+
   Future<bool> get onLoggedIn => _loggedIn.future;
 
   /// Base pairing URL to encode in the QR code (e.g. http://192.168.0.10:8090/).
@@ -137,7 +142,28 @@ class AniListPairingServer {
   // ---------------------------------------------------------------------------
 
   Future<void> _handleToken(HttpRequest req) async {
-    // Parse POST body (form-encoded or plain text).
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    // -----------------------------------------------------------------------
+    // Rate limiting (T-01-04): max 5 POST / 60s per client IP → 429
+    // -----------------------------------------------------------------------
+    final clientIp = req.connectionInfo?.remoteAddress.address ?? 'unknown';
+    final rateEntry = _rateLimitStore.putIfAbsent(
+      clientIp,
+      () => _RateEntry(0, now),
+    );
+    if (now - rateEntry.windowStart > _rateLimitWindow.inMilliseconds) {
+      // Window expired — reset.
+      rateEntry.count = 0;
+      rateEntry.windowStart = now;
+    }
+    rateEntry.count++;
+    if (rateEntry.count > _rateLimitMax) {
+      _html(req, _resultPage(false), status: 429);
+      return;
+    }
+
+    // Parse POST body.
     final body = req.method == 'POST' ? await utf8.decodeStream(req) : '';
     final params = Uri.splitQueryString(body);
 
@@ -145,11 +171,40 @@ class AniListPairingServer {
     final state = params['state'] ?? '';
     final csrfToken = params['csrf_token'] ?? '';
 
+    // -----------------------------------------------------------------------
+    // CSRF token validation (T-01-02): missing/wrong token → 403
+    // -----------------------------------------------------------------------
+    final expectedCsrf = _csrfToken;
+    if (csrfToken.isEmpty ||
+        expectedCsrf == null ||
+        csrfToken != expectedCsrf) {
+      _html(req, _resultPage(false), status: 403);
+      return;
+    }
+    // Single-use CSRF token — invalidate after first check.
+    _csrfToken = null;
+
+    // -----------------------------------------------------------------------
+    // Origin / Referer validation (T-01-03)
+    // -----------------------------------------------------------------------
+    final origin = req.headers.value('origin');
+    final referer = req.headers.value('referer');
+    final tvOrigin = 'http://$_ip';
+    if (origin != null && !origin.startsWith(tvOrigin)) {
+      _html(req, _resultPage(false), status: 403);
+      return;
+    }
+    if (referer != null && !referer.startsWith(tvOrigin)) {
+      _html(req, _resultPage(false), status: 403);
+      return;
+    }
+
+    // -----------------------------------------------------------------------
+    // State validation and code exchange
+    // -----------------------------------------------------------------------
     var ok = false;
 
-    // Validate state parameter (prevents CSRF-by-redirect).
     if (state.isNotEmpty && state == _state && code.isNotEmpty) {
-      // Exchange code for token via AniList using PKCE.
       final token = await AniListService.exchangeCodeForToken(
         code,
         _codeVerifier ?? '',
@@ -203,6 +258,7 @@ padding:16px;border-radius:12px;font-size:18px;font-weight:600}
 <h1>Conectar AniList</h1>
 <p>Toque no botão abaixo, faça login no AniList e autorize o aplicativo. O login na TV será feito automaticamente.</p>
 <a class="btn" href="$authUrl">Entrar com AniList</a>
+<p style="margin-top:20px;font-size:13px;color:#ffa500">⚠ Este servidor é apenas para uso em rede local. O token de acesso é transmitido por HTTP em sua rede local.</p>
 </div></body></html>''';
   }
 
@@ -279,7 +335,15 @@ display:flex;min-height:100vh;align-items:center;justify-content:center;text-ali
 
   Future<void> dispose() async {
     if (!_loggedIn.isCompleted) _loggedIn.complete(false);
+    _rateLimitStore.clear();
     await _server?.close(force: true);
     _server = null;
   }
+}
+
+/// Per-IP rate limit entry.
+class _RateEntry {
+  int count;
+  int windowStart; // epoch milliseconds
+  _RateEntry(this.count, this.windowStart);
 }

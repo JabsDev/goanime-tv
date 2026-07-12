@@ -104,4 +104,43 @@ class LocalStorage {
   static bool isFavorite(String animeKey) {
     return getFavorites().any((e) => e['key'] == animeKey);
   }
+
+  // ---------------------------------------------------------------------------
+  // Token storage (used by AniListService)
+  // ---------------------------------------------------------------------------
+
+  /// Saves an AniList access token. Returns true on success.
+  static Future<bool> saveToken(String token) async {
+    ensureInitialized();
+    if (!token.startsWith('eyJ')) return false;
+    await _prefs?.setString('anilist_token', token);
+    return true;
+  }
+
+  /// Reads the stored AniList access token, or null if none.
+  static String? getToken() {
+    ensureInitialized();
+    return _prefs?.getString('anilist_token');
+  }
+
+  /// Removes the stored AniList access token.
+  static Future<void> removeToken() async {
+    ensureInitialized();
+    await _prefs?.remove('anilist_token');
+  }
+
+  /// Saves user data (e.g. AniList user profile) under [key].
+  static Future<bool> saveUserData(String key, Map<String, dynamic> data) async {
+    ensureInitialized();
+    await _prefs?.setString('anilist_$key', jsonEncode(data));
+    return true;
+  }
+
+  /// Reads user data saved under [key], or null if none.
+  static Map<String, dynamic>? getUserData(String key) {
+    ensureInitialized();
+    final raw = _prefs?.getString('anilist_$key');
+    if (raw == null) return null;
+    return jsonDecode(raw) as Map<String, dynamic>;
+  }
 }

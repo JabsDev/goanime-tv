@@ -4,8 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:pointycastle/digests/sha256.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/anilist_models.dart';
+import '../storage/local_storage.dart';
 import '../../data/models/anime.dart';
 import '../cache/app_caches.dart';
 import '../constants/app_constants.dart';
@@ -105,47 +105,42 @@ class AniListService {
   }
 
   static Future<bool> isLoggedIn() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.containsKey(_tokenKey);
+    return LocalStorage.getToken() != null;
   }
 
   static Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_tokenKey);
+    return LocalStorage.getToken();
   }
 
   static Future<bool> saveToken(String token) async {
     if (!token.startsWith('eyJ')) return false;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey, token);
+    final saved = await LocalStorage.saveToken(token);
+    if (!saved) return false;
     final user = await _fetchUser(token);
     if (user != null) {
-      await prefs.setString(_userKey, jsonEncode({
+      await LocalStorage.saveUserData('user', {
         'id': user.id,
         'name': user.name,
         'avatar': user.avatar,
-      }));
+      });
       return true;
     }
-    await prefs.remove(_tokenKey);
+    await LocalStorage.removeToken();
     return false;
   }
 
   static Future<AniListUser?> getUser() async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_userKey);
+    final data = LocalStorage.getUserData('user');
     if (data == null) return null;
     try {
-      return AniListUser.fromJson(jsonDecode(data));
+      return AniListUser.fromJson(data);
     } catch (_) {
       return null;
     }
   }
 
   static Future<void> logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_tokenKey);
-    await prefs.remove(_userKey);
+    await LocalStorage.removeToken();
   }
 
   static Future<AniListUser?> _fetchUser(String token) async {
