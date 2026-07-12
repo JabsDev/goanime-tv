@@ -99,6 +99,16 @@ None - no external service configuration required.
 - AnilistLoginDialog compiles independently with zero analysis errors
 - HomeScreen references the dialog via import — no behavioral regressions
 
+## Self-Check: PASSED
+
+- [x] `lib/features/home/anilist_login_dialog.dart` exists with public `AnilistLoginDialog` class
+- [x] Commits 5b12306, e2040f1, 2fc5ca3 all present
+- [x] `_AnilistLoginDialog` / `_AnilistLoginDialogState` not present in home_screen.dart
+- [x] `qr_flutter`, `webview_flutter`, `cached_image`, `anilist_pairing_server` imports removed
+- [x] `import 'anilist_login_dialog.dart'` present and `AnilistLoginDialog()` used
+- [x] Catch block uses debugPrint (not empty)
+- [x] `flutter analyze` passes with zero errors
+
 ---
 
 *Phase: 02-home-screen-refactor*
