@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:pointycastle/digests/sha256.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/anilist_models.dart';
 import '../../data/models/anime.dart';
@@ -12,10 +15,93 @@ class AniListService {
   static const _tokenKey = 'anilist_token';
   static const _userKey = 'anilist_user';
 
+  /// PKCE code verifier stored during auth URL generation.
+  static String? _codeVerifier;
+
+  /// PKCE state parameter stored during auth URL generation.
+  static String? _state;
+
+  /// Generates a cryptographically random base64url string of [byteLength] bytes
+  /// (no padding).
+  static String _randomBase64Url(int byteLength) {
+    final random = Random.secure();
+    final bytes = Uint8List(byteLength);
+    for (var i = 0; i < byteLength; i++) {
+      bytes[i] = random.nextInt(256);
+    }
+    return base64Url.encode(bytes).replaceAll('=', '');
+  }
+
+  /// Computes SHA-256 digest of [input], returns unpadded base64url.
+  static String _sha256Base64Url(String input) {
+    final digest = SHA256Digest();
+    final inputBytes = Uint8List.fromList(utf8.encode(input));
+    final hash = Uint8List(digest.digestSize);
+    digest.update(inputBytes, 0, inputBytes.length);
+    digest.doFinal(hash, 0);
+    return base64Url.encode(hash).replaceAll('=', '');
+  }
+
+  /// Generates a 128-byte PKCE code verifier.
+  static String _generateCodeVerifier() => _randomBase64Url(128);
+
+  /// Generates a 32-byte state parameter.
+  static String _generateState() => _randomBase64Url(32);
+
   static String get authUrl {
+    _codeVerifier = _generateCodeVerifier();
+    final challenge = _sha256Base64Url(_codeVerifier!);
+    _state = _generateState();
     return 'https://anilist.co/api/v2/oauth/authorize'
         '?client_id=${AppConstants.anilistClientId}'
-        '&response_type=token';
+        '&response_type=code'
+        '&code_challenge=$challenge'
+        '&code_challenge_method=S256'
+        '&state=$_state';
+  }
+
+  /// The PKCE code verifier for the current auth session (used by pairing
+  /// server and WebView flow).
+  static String? get currentCodeVerifier => _codeVerifier;
+
+  /// The PKCE state parameter for the current auth session.
+  static String? get currentState => _state;
+
+  /// Exchanges the authorization [code] for an access token using the PKCE
+  /// [verifier]. Returns the access token on success, null on failure.
+  static Future<String?> exchangeCodeForToken(
+    String code,
+    String verifier, {
+    String? redirectUri,
+  }) async {
+    try {
+      final body = {
+        'grant_type': 'authorization_code',
+        'client_id': AppConstants.anilistClientId,
+        'code': code,
+        'code_verifier': verifier,
+        'redirect_uri': redirectUri ?? 'https://anilist.co/api/v2/oauth/callback',
+      };
+      final res = await http
+          .post(
+            Uri.parse(AppConstants.anilistTokenEndpoint),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: body,
+          )
+          .timeout(AppConstants.requestTimeout);
+      if (res.statusCode != 200) {
+        debugPrint('[AniList] Token exchange error ${res.statusCode}: ${res.body}');
+        return null;
+      }
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+      final token = json['access_token'] as String?;
+      if (token == null || !token.startsWith('eyJ')) return null;
+      final saved = await saveToken(token);
+      return saved ? token : null;
+    } catch (e) {
+      debugPrint('[AniList] Token exchange error: $e');
+      return null;
+    }
   }
 
   static Future<bool> isLoggedIn() async {

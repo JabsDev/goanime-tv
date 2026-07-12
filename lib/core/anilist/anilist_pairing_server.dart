@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:pointycastle/digests/sha256.dart';
 import '../constants/app_constants.dart';
 import 'anilist_service.dart';
 
@@ -10,19 +13,23 @@ import 'anilist_service.dart';
 /// Flow:
 ///  1. The TV starts this server and shows a QR of [pairUrl].
 ///  2. The phone scans it and opens the TV-hosted page.
-///  3. The page links to AniList's OAuth (implicit) with `redirect_uri` pointing
+///  3. The page links to AniList's OAuth (PKCE) with `redirect_uri` pointing
 ///     back to this server's `/callback`.
 ///  4. After the user authorizes, AniList redirects the phone to `/callback`
-///     with the token in the URL fragment. A tiny JS reads the fragment and
-///     POSTs the token to `/token`.
-///  5. The server validates + saves the token and completes [onLoggedIn].
-///
-/// No external backend and no manual copy/paste are required.
+///     with `?code=...&state=...` query params. A tiny JS reads the code and
+///     POSTs it (together with a CSRF token) to `/token`.
+///  5. The server validates the state, exchanges the code via AniList's token
+///     endpoint using PKCE, saves the token, and completes [onLoggedIn].
 class AniListPairingServer {
   HttpServer? _server;
   final _loggedIn = Completer<bool>();
   String? _ip;
   int? _port;
+
+  // PKCE session state — generated fresh per landing page load.
+  String? _codeVerifier;
+  String? _state;
+  String? _csrfToken;
 
   Future<bool> get onLoggedIn => _loggedIn.future;
 
@@ -58,13 +65,50 @@ class AniListPairingServer {
     return true;
   }
 
+  // ---------------------------------------------------------------------------
+  // PKCE helpers
+  // ---------------------------------------------------------------------------
+
+  /// Cryptographically random base64url string, [byteLength] bytes, no padding.
+  String _randomBase64Url(int byteLength) {
+    final random = Random.secure();
+    final bytes = Uint8List(byteLength);
+    for (var i = 0; i < byteLength; i++) {
+      bytes[i] = random.nextInt(256);
+    }
+    return base64Url.encode(bytes).replaceAll('=', '');
+  }
+
+  /// SHA-256 digest → unpadded base64url.
+  String _sha256Base64Url(String input) {
+    final digest = SHA256Digest();
+    final inputBytes = Uint8List.fromList(utf8.encode(input));
+    final hash = Uint8List(digest.digestSize);
+    digest.update(inputBytes, 0, inputBytes.length);
+    digest.doFinal(hash, 0);
+    return base64Url.encode(hash).replaceAll('=', '');
+  }
+
+  /// PKCE authorize URL for the current session.  Generates a new code_verifier
+  /// and state on each call so that every landing-page refresh gets fresh
+  /// credentials.
   String get _authorizeUrl {
     final redirect = 'http://$_ip:$_port/callback';
+    _codeVerifier = _randomBase64Url(128);
+    _state = _randomBase64Url(32);
+    final challenge = _sha256Base64Url(_codeVerifier!);
     return 'https://anilist.co/api/v2/oauth/authorize'
         '?client_id=${AppConstants.anilistClientId}'
-        '&response_type=token'
+        '&response_type=code'
+        '&code_challenge=$challenge'
+        '&code_challenge_method=S256'
+        '&state=$_state'
         '&redirect_uri=${Uri.encodeComponent(redirect)}';
   }
+
+  // ---------------------------------------------------------------------------
+  // Request routing
+  // ---------------------------------------------------------------------------
 
   Future<void> _handle(HttpRequest req) async {
     try {
@@ -88,16 +132,33 @@ class AniListPairingServer {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // /token handler
+  // ---------------------------------------------------------------------------
+
   Future<void> _handleToken(HttpRequest req) async {
-    String token = req.uri.queryParameters['token'] ?? '';
-    if (token.isEmpty && req.method == 'POST') {
-      token = (await utf8.decodeStream(req)).trim();
-    }
-    token = token.trim();
+    // Parse POST body (form-encoded or plain text).
+    final body = req.method == 'POST' ? await utf8.decodeStream(req) : '';
+    final params = Uri.splitQueryString(body);
+
+    final code = params['code'] ?? '';
+    final state = params['state'] ?? '';
+    final csrfToken = params['csrf_token'] ?? '';
+
     var ok = false;
-    if (token.startsWith('eyJ')) {
-      ok = await AniListService.saveToken(token);
+
+    // Validate state parameter (prevents CSRF-by-redirect).
+    if (state.isNotEmpty && state == _state && code.isNotEmpty) {
+      // Exchange code for token via AniList using PKCE.
+      final token = await AniListService.exchangeCodeForToken(
+        code,
+        _codeVerifier ?? '',
+      );
+      if (token != null) {
+        ok = true;
+      }
     }
+
     _html(
       req,
       _resultPage(ok),
@@ -106,18 +167,29 @@ class AniListPairingServer {
     if (ok && !_loggedIn.isCompleted) _loggedIn.complete(true);
   }
 
+  // ---------------------------------------------------------------------------
+  // HTML helpers
+  // ---------------------------------------------------------------------------
+
+  /// Sends an HTML response with CORS header restricted to the TV's own origin.
   void _html(HttpRequest req, String body, {int status = 200}) {
+    final origin = _ip != null && _port != null ? 'http://$_ip:$_port' : '*';
     req.response
       ..statusCode = status
       ..headers.set(HttpHeaders.contentTypeHeader, 'text/html; charset=utf-8')
-      ..headers.set('Access-Control-Allow-Origin', '*')
-      ..write(body);
+      ..headers.set('Access-Control-Allow-Origin', origin);
+    req.response.write(body);
     req.response.close();
   }
 
+  /// Landing page — generates a fresh PKCE session on every load.
   String _landingPage() {
+    // Invalidate any previous session and generate fresh credentials.
+    _csrfToken = _randomBase64Url(32);
+    final authUrl = _authorizeUrl; // also sets _codeVerifier and _state
     return '''<!doctype html><html lang="pt-br"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="$_csrfToken">
 <title>Login AniList - GoAnime TV</title>
 <style>
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b0f14;color:#fff;
@@ -130,10 +202,14 @@ padding:16px;border-radius:12px;font-size:18px;font-weight:600}
 </style></head><body><div class="card">
 <h1>Conectar AniList</h1>
 <p>Toque no botão abaixo, faça login no AniList e autorize o aplicativo. O login na TV será feito automaticamente.</p>
-<a class="btn" href="$_authorizeUrl">Entrar com AniList</a>
+<a class="btn" href="$authUrl">Entrar com AniList</a>
 </div></body></html>''';
   }
 
+  /// Callback page — reads the authorization `code` from the query string
+  /// and POSTs it together with the CSRF token to the local `/token` endpoint.
+  /// AniList sends the redirect as a full-page navigation (not fragment),
+  /// so we read from `location.search` (query string).
   String _callbackPage() {
     return '''<!doctype html><html lang="pt-br"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -148,17 +224,18 @@ h1{font-size:20px}p{color:#9aa7b4}
 </div>
 <script>
 (function(){
-  function q(name, str){ var m = str.match(new RegExp(name+'=([^&]+)')); return m ? decodeURIComponent(m[1]) : ''; }
-  var hash = window.location.hash.substring(1);
-  var token = q('access_token', hash);
+  function q(name){ var m = location.search.match(new RegExp('[?&]' + name + '=([^&]*)')); return m ? decodeURIComponent(m[1]) : ''; }
+  var code = q('code');
+  var state = q('state');
+  var csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
   var m = document.getElementById('m');
-  if(!token){ m.textContent = 'Não recebi o token. Volte à TV e tente novamente.'; return; }
-  fetch('/token', {method:'POST', body: token})
+  if(!code){ m.textContent = 'Não recebi o código. Volte à TV e tente novamente.'; return; }
+  fetch('/token', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: 'code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state) + '&csrf_token=' + encodeURIComponent(csrfToken)})
     .then(function(r){ return r.ok; })
     .then(function(ok){
       document.getElementById('c').innerHTML = ok
         ? '<h1>Pronto! ✅</h1><p>Login concluído. Pode voltar para a TV.</p>'
-        : '<h1>Falhou</h1><p>Token inválido. Tente novamente na TV.</p>';
+        : '<h1>Falhou</h1><p>Não foi possível concluir o login. Tente novamente na TV.</p>';
     })
     .catch(function(){ m.textContent = 'Erro de conexão com a TV.'; });
 })();
