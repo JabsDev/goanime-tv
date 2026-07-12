@@ -3,7 +3,6 @@ import '../../core/storage/local_storage.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../shared/widgets/focusable_card.dart';
 import '../../shared/widgets/section_header.dart';
-import '../../data/models/anime.dart';
 import 'home_navigation.dart';
 
 class ProfileScreen extends StatefulWidget {
