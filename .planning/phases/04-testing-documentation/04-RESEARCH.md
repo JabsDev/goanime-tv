@@ -359,27 +359,20 @@ void main() {
 | A4 | Adapter parsing can be tested by injecting a mock `http.Client` | Architecture Patterns | Low — adapters use `apiClient.get(uri)` which calls `http.get(uri)`. Injecting an `http.Client` means the adapter code needs to use `client.get()` instead. This is a mechanical refactoring. |
 | A5 | The existing `test: ^1.25.0` dev dependency is sufficient for `fake_async` | Standard Stack | Medium — `fake_async` is part of the `test` package, which is already a dependency. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **How deep do adapter refactoring changes go?**
-   - What we know: Each adapter uses `apiClient` top-level const. `SuperFlixAdapter` uses Go FFI (no HTTP for search/episodes). `AllAnimeAdapter` uses `apiClient` for GraphQL. `AnimeFireAdapter` and `GoyabuAdapter` use `apiClient` extensively.
-   - What's unclear: Whether D-06 adapter parsing tests require injecting HTTP client into ALL adapters or just the HTML-scraped ones (AnimeFire, Goyabu).
-   - Recommendation: Start with AnimeFire (oldest, most complex HTML) and Goyabu. SuperFlix adapter parsing is FFI-backed — fixture approach is different. AllAnime is GraphQL JSON — use JSON fixtures.
+1. **(RESOLVED) How deep do adapter refactoring changes go?**
+   - Resolution: Start with AnimeFire (oldest, most complex HTML) and Goyabu. SuperFlix adapter parsing is FFI-backed — fixture approach deferred. AllAnime is GraphQL JSON — fixture approach deferred.
+   - Recommendation: AnimeFire adapter parsing tests added in Plan 04-04 with minimal `http.Client?` constructor injection.
 
-2. **How to handle `SourceRegistry._adapters` which creates adapters with `new AnimeFireAdapter()` — no injection point?**
-   - What we know: `SourceRegistry._adapters` creates adapters directly. If we add an optional HTTP client parameter, the registry doesn't need changes (defaults to null → uses real `apiClient`).
-   - What's unclear: Tests that exercise `AnimeScraper.searchAnime` via `SourceRegistry` will still use real adapters.
-   - Recommendation: For D-05 orchestration tests, mock at the `_bestMatch` level (pure static method). Don't try to mock the full `searchAnime` flow in this phase.
+2. **(RESOLVED) How to handle `SourceRegistry._adapters` which creates adapters with `new AnimeFireAdapter()` — no injection point?**
+   - Resolution: Optional `http.Client?` parameter defaults to null → uses real `apiClient`. Registry needs no changes. D-05 orchestration tests mock at `bestMatch` level, not full `searchAnime`.
 
-3. **Should fixture files be committed to git?**
-   - What we know: Fixture files capture site HTML which contains potentially copyrighted content (anime titles, descriptions).
-   - What's unclear: Legal implications of committing scraped HTML snippets.
-   - Recommendation: Commit fixtures. They're small HTML/JSON fragments, functionally equivalent to test data. If concern arises, strip identifiable content from fixtures in a future phase.
+3. **(RESOLVED) Should fixture files be committed to git?**
+   - Resolution: Commit fixtures. They're small HTML/JSON fragments, functionally equivalent to test data. If concern arises, strip identifiable content in a future phase.
 
-4. **How to capture initial fixture files?**
-   - What we know: D-02 says "Capture real HTML responses from each provider as fixture files".
-   - What's unclear: Whether we write a capture script, use the existing integration tests with output logging, or manually save responses.
-   - Recommendation: Add a `scripts/capture_fixtures.dart` that makes HTTP requests and saves responses to fixture files, OR extract from integration test debugPrint output (less automated, simpler).
+4. **(RESOLVED) How to capture initial fixture files?**
+   - Resolution: Capture via manual integration test run output logged with debugPrint. Script deferred — too heavy for this phase scope.
 
 ## Environment Availability
 
