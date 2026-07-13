@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/sources/super_flix_adapter.dart';
 import '../../core/sources/source_registry.dart';
@@ -64,7 +65,7 @@ class _SuperFlixWebScreenState extends State<SuperFlixWebScreen> {
   String get _playerUrl {
     final season = _season ?? '1';
     // Use .pro directly (the canonical player host the others redirect to).
-    return 'https://superflixapi.pro/serie/$_tmdbId/$season/${widget.episode.number}';
+    return '${AppConstants.superFlixBase}/serie/$_tmdbId/$season/${widget.episode.number}';
   }
 
   @override
