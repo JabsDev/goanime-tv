@@ -25,6 +25,22 @@ cd go_superflix
 ./build_android.sh
 ```
 
+## CI/CD
+
+The project uses GitHub Actions for CI:
+
+- **Test pipeline:** Triggered on every push/PR to `main`. Runs `flutter analyze` + `flutter test`.
+- **Release pipeline:** Triggered by pushing a version tag (`v1.0.0`). Builds Go FFI library, then produces signed APK + AAB artifacts.
+- **Artifacts:** Signed APK and AAB are available for download from the Actions tab (90-day retention).
+
+To trigger a release:
+```bash
+# After bumping version in pubspec.yaml
+git tag v1.0.0
+git push origin v1.0.0
+# Wait for CI to complete, then download artifacts from GitHub Actions
+```
+
 ## Project Structure
 
 ```
@@ -84,6 +100,7 @@ This project uses GSD (Get Shit Done) for phased execution.
 - `/gsd-execute-phase N` — Execute a phase
 - `/gsd-transition N` — Complete a phase
 - `/gsd-progress` — View project progress
+- [RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) — Play Store submission steps
 
 ## Architecture Notes
 
