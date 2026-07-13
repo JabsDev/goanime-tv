@@ -4,6 +4,7 @@ import '../cache/app_caches.dart';
 import '../sources/source_registry.dart';
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
+import 'scraper_result.dart';
 
 /// Orchestration layer that aggregates results from every [AnimeSourceAdapter],
 /// enriches them with AniList metadata (cached + deduped) and merges episode
@@ -19,12 +20,35 @@ class AnimeScraper {
 
     try {
       debugPrint('[AnimeScraper] Searching: $animeName');
-      final results = await Future.wait(
-        SourceRegistry.adapters.map((a) => a.search(animeName)),
-      );
+
+      // Per-future error isolation: one adapter's unhandled exception does not
+      // kill other adapter futures via Future.wait (Pitfall 1).
+      final futures = SourceRegistry.adapters.map((a) async {
+        try {
+          return await a.search(animeName);
+        } catch (e) {
+          debugPrint('[AnimeScraper] Unhandled exception from ${a.source}: $e');
+          return ScraperResult<List<Anime>>.failure(UnknownError(
+            message: 'Unhandled: $e',
+            source: a.source,
+            operationDuration: Duration.zero,
+            originalError: e,
+          ));
+        }
+      });
+      final results = await Future.wait(futures);
+
       final allAnimes = <Anime>[];
-      for (final r in results) {
-        allAnimes.addAll(r);
+      for (final result in results) {
+        switch (result) {
+          case Success(data: final animes):
+            allAnimes.addAll(animes);
+          case Failure(error: final err):
+            // Per D-09: errors stay in log layer — UI sees empty states only
+            debugPrint('[AnimeScraper] ${err.source} failed: ${err.message}');
+          case Loading():
+            break; // not produced in Phase 3, included for exhaustiveness
+        }
       }
 
       // Filter out results that lack the identifier needed for episode loading.
@@ -53,6 +77,7 @@ class AnimeScraper {
       AppCaches.search.set(cacheKey, allAnimes);
       return allAnimes;
     } catch (e) {
+      // Safety net — typed errors should be caught above
       debugPrint('[AnimeScraper] Search error: $e');
       return [];
     }
@@ -73,12 +98,12 @@ class AnimeScraper {
       // Resolve the anime context (with provider ids) for each source, then
       // fetch its episodes. Each fetched episode is tagged with its source +
       // owner so stream resolution can dispatch to the right provider later.
-      final fetchers = <String, Future<EpisodesResult>>{};
+      final fetchers = <String, Future<ScraperResult<EpisodesResult>>>{};
       final owners = <String, Anime>{};
       final sourceOf = <String, AnimeSource>{};
 
       void register(String name, AnimeSource src, Anime owner,
-          Future<EpisodesResult> future) {
+          Future<ScraperResult<EpisodesResult>> future) {
         fetchers[name] = future;
         owners[name] = owner;
         sourceOf[name] = src;
@@ -128,7 +153,22 @@ class AnimeScraper {
       if (fetchers.isEmpty) return EpisodesResult([], {});
 
       final sourceKeys = fetchers.keys.toList();
-      final results = await Future.wait(fetchers.values);
+
+      // Per-future error isolation for episode fetchers
+      final futures = fetchers.values.map((f) async {
+        try {
+          return await f;
+        } catch (e) {
+          debugPrint('[AnimeScraper] Episode fetch error: $e');
+          return ScraperResult<EpisodesResult>.failure(UnknownError(
+            message: 'Unhandled episode fetch: $e',
+            source: AnimeSource.animeFire, // approximate; exact source from context
+            operationDuration: Duration.zero,
+            originalError: e,
+          ));
+        }
+      });
+      final results = await Future.wait(futures);
 
       List<Episode> tag(String key, List<Episode> eps) {
         final src = sourceOf[key]!;
@@ -147,16 +187,23 @@ class AnimeScraper {
       for (var i = 0; i < results.length; i++) {
         final result = results[i];
         final key = sourceKeys[i];
-        if (result.sourceOptions.isNotEmpty) {
-          for (final entry in result.sourceOptions.entries) {
-            grouped['$key (${entry.key})'] = tag(key, entry.value);
-          }
-        } else if (result.episodes.isNotEmpty) {
-          grouped[key] = tag(key, result.episodes);
-        }
-        if (firstName == null && result.episodes.isNotEmpty) {
-          firstEpisodes = tag(key, result.episodes);
-          firstName = key;
+        switch (result) {
+          case Success(data: final episodesResult):
+            if (episodesResult.sourceOptions.isNotEmpty) {
+              for (final entry in episodesResult.sourceOptions.entries) {
+                grouped['$key (${entry.key})'] = tag(key, entry.value);
+              }
+            } else if (episodesResult.episodes.isNotEmpty) {
+              grouped[key] = tag(key, episodesResult.episodes);
+            }
+            if (firstName == null && episodesResult.episodes.isNotEmpty) {
+              firstEpisodes = tag(key, episodesResult.episodes);
+              firstName = key;
+            }
+          case Failure(error: final err):
+            debugPrint('[AnimeScraper] $key episodes failed: ${err.message}');
+          case Loading():
+            break;
         }
       }
 
@@ -173,6 +220,7 @@ class AnimeScraper {
       AppCaches.episodes.set(cacheKey, result);
       return result;
     } catch (e) {
+      // Safety net — typed errors should be caught above
       debugPrint('[AnimeScraper] Get episodes error: $e');
       return EpisodesResult([], {});
     }
@@ -181,25 +229,33 @@ class AnimeScraper {
   static Future<Anime?> _findBySource(String name, AnimeSource source) async {
     try {
       final adapter = SourceRegistry.forSource(source);
-      final results = await adapter.search(name);
-      if (results.isEmpty) return null;
+      final result = await adapter.search(name);
+      switch (result) {
+        case Success(data: final results):
+          if (results.isEmpty) return null;
+          bool valid(Anime a) {
+            switch (source) {
+              case AnimeSource.allAnime:
+                return a.allAnimeId != null;
+              case AnimeSource.superFlix:
+                return a.superFlixTmdbId != null;
+              case AnimeSource.animeFire:
+              case AnimeSource.goyabu:
+                return a.url.isNotEmpty;
+            }
+          }
 
-      bool valid(Anime a) {
-        switch (source) {
-          case AnimeSource.allAnime:
-            return a.allAnimeId != null;
-          case AnimeSource.superFlix:
-            return a.superFlixTmdbId != null;
-          case AnimeSource.animeFire:
-          case AnimeSource.goyabu:
-            return a.url.isNotEmpty;
-        }
+          final candidates = results.where(valid).toList();
+          if (candidates.isEmpty) return null;
+          return _bestMatch(name, candidates, source);
+        case Failure(error: final err):
+          debugPrint('[AnimeScraper] _findBySource($source) error: ${err.message}');
+          return null;
+        case Loading():
+          return null;
       }
-
-      final candidates = results.where(valid).toList();
-      if (candidates.isEmpty) return null;
-      return _bestMatch(name, candidates, source);
     } catch (e) {
+      // Safety net — typed errors should be caught above
       debugPrint('[AnimeScraper] _findBySource($source) error: $e');
       return null;
     }

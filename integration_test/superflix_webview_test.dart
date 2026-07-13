@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import 'package:goanime_tv/core/scraper/scraper_result.dart';
 import 'package:goanime_tv/data/models/anime.dart';
 import 'package:goanime_tv/data/models/episode.dart';
 import 'package:goanime_tv/core/sources/source_registry.dart';
@@ -14,7 +15,16 @@ void main() {
 
   testWidgets('SuperFlix WebView resolves a stream', (tester) async {
     final sf = SourceRegistry.forSource(AnimeSource.superFlix);
-    final results = await sf.search('the boys');
+    final searchResult = await sf.search('the boys');
+    late List<Anime> results;
+    switch (searchResult) {
+      case Success(data: final list):
+        results = list;
+      case Failure():
+        results = [];
+      case Loading():
+        results = [];
+    }
     debugPrint('SuperFlix search: ${results.length}');
     final anime = results.firstWhere(
       (a) => a.superFlixTmdbId != null,

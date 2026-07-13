@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../../core/scraper/anime_scraper.dart';
+import '../../core/scraper/scraper_result.dart';
 import '../../core/sources/anime_source_adapter.dart';
 import '../../core/sources/source_registry.dart';
 import '../models/anime.dart';
@@ -33,7 +34,16 @@ class AnimeRepository {
     Future<List<VideoSource>> tryAdapter(
         AnimeSourceAdapter a, Anime? ctx) async {
       try {
-        return await a.getVideoSources(episode, anime: ctx);
+        final result = await a.getVideoSources(episode, anime: ctx);
+        switch (result) {
+          case Success(data: final sources):
+            return sources;
+          case Failure(error: final err):
+            debugPrint('[Repo] Source ${a.source} failed: ${err.message}');
+            return <VideoSource>[];
+          case Loading():
+            return <VideoSource>[];
+        }
       } catch (e) {
         debugPrint('[Repo] Source ${a.source} failed: $e');
         return <VideoSource>[];
@@ -78,10 +88,16 @@ class AnimeRepository {
       return anime;
     }
     try {
-      final results = await SourceRegistry.forSource(source).search(anime.name);
-      for (final r in results) {
-        if (source == AnimeSource.allAnime && r.allAnimeId != null) return r;
-        if (source == AnimeSource.animeFire && r.url.isNotEmpty) return r;
+      final result = await SourceRegistry.forSource(source).search(anime.name);
+      switch (result) {
+        case Success(data: final results):
+          for (final r in results) {
+            if (source == AnimeSource.allAnime && r.allAnimeId != null) return r;
+            if (source == AnimeSource.animeFire && r.url.isNotEmpty) return r;
+          }
+        case Failure():
+        case Loading():
+          break;
       }
     } catch (_) {}
     return anime;
@@ -94,10 +110,16 @@ class AnimeRepository {
     if (anime?.superFlixTmdbId != null) return anime;
     if (anime == null) return null;
     try {
-      final results = await SourceRegistry.forSource(AnimeSource.superFlix)
+      final result = await SourceRegistry.forSource(AnimeSource.superFlix)
           .search(anime.name);
-      for (final r in results) {
-        if (r.superFlixTmdbId != null) return r;
+      switch (result) {
+        case Success(data: final results):
+          for (final r in results) {
+            if (r.superFlixTmdbId != null) return r;
+          }
+        case Failure():
+        case Loading():
+          break;
       }
     } catch (_) {
       // ignore – SuperFlix is only a fallback

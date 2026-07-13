@@ -2,10 +2,37 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import 'package:goanime_tv/core/scraper/scraper_result.dart';
 import 'package:goanime_tv/data/models/anime.dart';
 import 'package:goanime_tv/data/models/episode.dart';
 import 'package:goanime_tv/data/repositories/anime_repository.dart';
 import 'package:goanime_tv/core/sources/source_registry.dart';
+
+/// Unwraps a [ScraperResult] for test assertions. The actual values are only
+/// meaningful when the test device has network access to all anime providers;
+/// on CI or offline runs they will typically be [Failure] variants.
+List<T> _unwrap<T>(ScraperResult<List<T>> result) {
+  switch (result) {
+    case Success(data: final list):
+      return list;
+    case Failure():
+      return <T>[];
+    case Loading():
+      return <T>[];
+  }
+}
+
+/// Unwraps a [ScraperResult] of [EpisodesResult].
+EpisodesResult _unwrapEpisodes(ScraperResult<EpisodesResult> result) {
+  switch (result) {
+    case Success(data: final eps):
+      return eps;
+    case Failure():
+      return EpisodesResult([], {});
+    case Loading():
+      return EpisodesResult([], {});
+  }
+}
 
 /// On-device smoke test that exercises the real scrapers (AnimeFire, AllAnime,
 /// SuperFlix) end-to-end: search -> episode listing -> video source (quality)
@@ -84,7 +111,8 @@ void main() {
   testWidgets('SuperFlix: direct search + episodes + multi-server stream',
       (tester) async {
     final sf = SourceRegistry.forSource(AnimeSource.superFlix);
-    final results = await sf.search('the boys');
+    final searchResult = await sf.search('the boys');
+    final results = _unwrap(searchResult);
     debugPrint('SuperFlix search: ${results.length} results');
     expect(results.isNotEmpty, true, reason: 'SuperFlix search should work');
     final anime = results.firstWhere(
@@ -97,12 +125,14 @@ void main() {
     // by a Cloudflare Turnstile challenge, so episode/stream extraction returns
     // empty without a browser-based clearance. Search still works. We assert
     // only search here and log the (likely gated) episode result.
-    final eps = await sf.getEpisodes(anime);
+    final epsResult = await sf.getEpisodes(anime);
+    final eps = _unwrapEpisodes(epsResult);
     debugPrint('SuperFlix episodes: ${eps.episodes.length} '
         '(0 => Cloudflare Turnstile gated)');
     if (eps.episodes.isNotEmpty) {
       final firstEp = eps.episodes.first;
-      final sources = await sf.getVideoSources(firstEp, anime: anime);
+      final sourcesResult = await sf.getVideoSources(firstEp, anime: anime);
+      final sources = _unwrap(sourcesResult);
       debugPrint('SuperFlix video sources: ${sources.length}');
       for (final s in sources) {
         final u = s.url.length > 90 ? '${s.url.substring(0, 90)}...' : s.url;
@@ -114,7 +144,8 @@ void main() {
   testWidgets('AnimeFire: real series episodes + multi-quality stream',
       (tester) async {
     final af = SourceRegistry.forSource(AnimeSource.animeFire);
-    final results = await af.search('kimetsu no yaiba');
+    final searchResult = await af.search('kimetsu no yaiba');
+    final results = _unwrap(searchResult);
     debugPrint('AnimeFire search: ${results.length}');
     expect(results.isNotEmpty, true);
     // Prefer a full series page (todos-os-episodios) over movies.
@@ -123,7 +154,8 @@ void main() {
       orElse: () => results.first,
     );
     debugPrint('AnimeFire pick: "${anime.name}" url=${anime.url}');
-    final eps = await af.getEpisodes(anime);
+    final epsResult = await af.getEpisodes(anime);
+    final eps = _unwrapEpisodes(epsResult);
     final list = eps.episodes.isNotEmpty
         ? eps.episodes
         : (eps.sourceOptions.isNotEmpty
@@ -132,7 +164,8 @@ void main() {
     debugPrint('AnimeFire episodes: ${list.length}');
     expect(list.isNotEmpty, true, reason: 'AnimeFire should list episodes');
 
-    final sources = await af.getVideoSources(list.first, anime: anime);
+    final sourcesResult = await af.getVideoSources(list.first, anime: anime);
+    final sources = _unwrap(sourcesResult);
     debugPrint('AnimeFire video sources: ${sources.length}');
     for (final s in sources) {
       final u = s.url.length > 90 ? '${s.url.substring(0, 90)}...' : s.url;
@@ -145,14 +178,16 @@ void main() {
   testWidgets('Goyabu: PT-BR search + episodes + multi-quality stream',
       (tester) async {
     final gy = SourceRegistry.forSource(AnimeSource.goyabu);
-    final results = await gy.search('one piece');
+    final searchResult = await gy.search('one piece');
+    final results = _unwrap(searchResult);
     debugPrint('Goyabu search: ${results.length}');
     expect(results.isNotEmpty, true, reason: 'Goyabu search should work');
     // Pick the first result that actually lists episodes (spin-offs may be empty).
     Anime? anime;
     var eps = EpisodesResult([], {});
     for (final r in results) {
-      final e = await gy.getEpisodes(r);
+      final eResult = await gy.getEpisodes(r);
+      final e = _unwrapEpisodes(eResult);
       debugPrint('  candidate "${r.name}" -> ${e.episodes.length} eps');
       if (e.episodes.isNotEmpty) {
         anime = r;
@@ -162,7 +197,8 @@ void main() {
     }
     expect(anime != null, true, reason: 'Goyabu should have a series with episodes');
     debugPrint('Goyabu pick: "${anime!.name}" episodes=${eps.episodes.length}');
-    final sources = await gy.getVideoSources(eps.episodes.first, anime: anime);
+    final sourcesResult = await gy.getVideoSources(eps.episodes.first, anime: anime);
+    final sources = _unwrap(sourcesResult);
     debugPrint('Goyabu video sources: ${sources.length}');
     for (final s in sources) {
       final u = s.url.length > 90 ? '${s.url.substring(0, 90)}...' : s.url;
