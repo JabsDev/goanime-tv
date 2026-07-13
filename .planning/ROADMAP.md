@@ -118,6 +118,14 @@ Plans:
 5. Manual release dry-run succeeds end-to-end
 
 **Requirements:** REL-01, REL-02, REL-03
+**Plans:** 3 plans in 2 waves
+
+Plans:
+**Wave 1**
+- [ ] 05-01-PLAN.md — Local release build: version bump, gitignore, build_android.sh parameterization, signing config in build.gradle (REL-01)
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 05-02-PLAN.md — CI/CD pipeline: GitHub Actions workflow with test job + release job (REL-02, depends on 05-01)
+- [ ] 05-03-PLAN.md — Release assets & documentation: release checklist, privacy policy, screenshot specs, AGENTS.md update (REL-03)
 
 ---
 
