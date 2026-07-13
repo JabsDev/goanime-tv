@@ -152,7 +152,7 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
         final list = (detail[type] as List?)?.cast<String>();
         if (list != null && list.isNotEmpty) {
           final sorted = List<String>.from(list);
-          sorted.sort((a, b) => (double.tryParse(a) ?? 0).compareTo(double.tryParse(b) ?? 0));
+          sorted.sort((a, b) => (double.tryParse(a) ?? double.infinity).compareTo(double.tryParse(b) ?? double.infinity));
           episodeTypes[type] = sorted
               .map((e) => Episode(
                     number: e,

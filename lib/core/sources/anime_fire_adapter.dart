@@ -86,8 +86,8 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
     final episodes = await _fetchEpisodes(anime.url);
     if (episodes.isEmpty) return EpisodesResult([], {});
     episodes.sort((a, b) {
-      final na = int.tryParse(a.number) ?? 0;
-      final nb = int.tryParse(b.number) ?? 0;
+      final na = int.tryParse(a.number) ?? double.infinity.toInt();
+      final nb = int.tryParse(b.number) ?? double.infinity.toInt();
       return na.compareTo(nb);
     });
     return EpisodesResult(episodes, {});

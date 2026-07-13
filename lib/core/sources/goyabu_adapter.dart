@@ -154,8 +154,8 @@ class GoyabuAdapter implements AnimeSourceAdapter {
       final episodes = _parseEpisodesFromJs(res.body);
       if (episodes.isEmpty) return EpisodesResult([], {});
       episodes.sort((a, b) {
-        final na = int.tryParse(RegExp(r'\d+').firstMatch(a.number)?.group(0) ?? '0') ?? 0;
-        final nb = int.tryParse(RegExp(r'\d+').firstMatch(b.number)?.group(0) ?? '0') ?? 0;
+        final na = int.tryParse(RegExp(r'\d+').firstMatch(a.number)?.group(0) ?? '0') ?? double.infinity.toInt();
+        final nb = int.tryParse(RegExp(r'\d+').firstMatch(b.number)?.group(0) ?? '0') ?? double.infinity.toInt();
         return na.compareTo(nb);
       });
       return EpisodesResult(episodes, {});

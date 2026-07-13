@@ -136,7 +136,7 @@ class SuperFlixAdapter implements AnimeSourceAdapter {
             }
           }
           episodes.sort(
-            (a, b) => (double.tryParse(a.number) ?? 0).compareTo(double.tryParse(b.number) ?? 0),
+            (a, b) => (double.tryParse(a.number) ?? double.infinity).compareTo(double.tryParse(b.number) ?? double.infinity),
           );
           return EpisodesResult(episodes, {});
         }
@@ -187,7 +187,7 @@ class SuperFlixAdapter implements AnimeSourceAdapter {
         }
       }
       episodes.sort(
-        (a, b) => (double.tryParse(a.number) ?? 0).compareTo(double.tryParse(b.number) ?? 0),
+        (a, b) => (double.tryParse(a.number) ?? double.infinity).compareTo(double.tryParse(b.number) ?? double.infinity),
       );
       return EpisodesResult(episodes, {});
     } catch (e) {
