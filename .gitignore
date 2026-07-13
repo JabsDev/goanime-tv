@@ -10,3 +10,7 @@ build/
 *.swp
 .DS_Store
 *.so
+
+# Android signing
+*.jks
+key.properties
