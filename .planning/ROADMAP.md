@@ -47,7 +47,7 @@ Plans:
 ### Phase 3: Error Handling & Bug Fixes
 **Goal:** Improve scraper robustness and fix known bugs
 **Mode:** mvp
-**Status:** ✓ Planned
+**Status:** ✓ Complete
 **Success Criteria**:
 1. ✓ Scraper adapter layer distinguishes between network timeout, parse failure, Cloudflare challenge, and empty results
 2. ✓ Appropriate fallback or retry logic for each error type
@@ -61,9 +61,6 @@ Plans:
 Plans:
 - [x] 03-01-PLAN.md — Bug fixes: episode sort sentinel + SuperFlix domain (Wave 1)
 - [x] 03-02-PLAN.md — Error handling: sealed class hierarchy, adapter migration, typed errors (Wave 2, depends on Plan 01)
-**Plans:** 2 plans in 2 waves
-
-Plans:
 - [ ] 03-01-PLAN.md — Bug fixes: episode sort sentinel (BUG-01) + SuperFlix domain fix (CODE-03)
 - [ ] 03-02-PLAN.md — Error handling migration: sealed class hierarchy, adapter interface, typed errors, orchestrator matching (CODE-02)
 
@@ -103,7 +100,7 @@ Plans:
 |-------|-------------|--------|
 | 1 | SEC-01, SEC-02, SEC-03 | ✓ Complete |
 | 2 | CODE-01 | ✓ Complete |
-| 3 | CODE-02, CODE-03, BUG-01 | ✓ Planned |
+| 3 | CODE-02, CODE-03, BUG-01 | ✓ Complete |
 | 4 | CODE-04, TEST-01, TEST-02 | Pending |
 | 5 | REL-01, REL-02, REL-03 | Pending |
 
