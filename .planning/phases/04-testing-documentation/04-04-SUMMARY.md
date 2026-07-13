@@ -105,6 +105,14 @@ Each task was committed atomically:
 - No remaining known issues — all 77 unit tests pass
 - Ready for Phase 5 (AniList integration) when planned
 
+## Self-Check: PASSED
+
+- [x] Created files: test file, fixture, SUMMARY all present
+- [x] Commits: d316546 (Task 1), d298b77 (Task 2), 6f4d095 (metadata)
+- [x] `flutter test test/core/sources/anime_fire_adapter_test.dart` — All 5 tests pass
+- [x] `flutter test test/` — All 77 unit tests pass
+- [x] `flutter analyze` — No new errors/warnings in modified files
+
 ---
 
 *Phase: 04-testing-documentation*
