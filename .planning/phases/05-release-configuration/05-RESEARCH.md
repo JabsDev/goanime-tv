@@ -498,24 +498,26 @@ But wait — the current `version: 1.0.0+1` has versionCode 1. With D-06's formu
 | A2 | `nttld/setup-ndk@v1` supports NDK r28 | CI/CD pipeline | If not available, fall back to r27. Need to verify during CI setup. |
 | A3 | Java 17 is sufficient for current Gradle (8.11.1) | Standard Stack | Gradle 8.x requires Java 17+. Current project uses 8.11.1. [VERIFIED: settings.gradle] |
 | A4 | Play Store data safety declaration can be completed after store listing is created | Release checklist | Must be done during upload. Documented in release checklist. |
-| A5 | 16KB page size is automatically supported by Go 1.24 for Android shared libraries | State of the Art | Go 1.24 may need specific linker flags for 16KB alignment. Needs verification before Play Store upload. Flag in checklist. |
+| A5 | 16KB page size support requires explicit linker flag for Go shared libraries | State of the Art | Go 1.24 does NOT auto-align to 16KB — needs `CGO_LDFLAGS="-Wl,-z,max-page-size=16384"`. Required before Play Store upload. Add to build script and verification. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Go 1.24 and 16KB page size compatibility**
    - What we know: From August 1, 2026, Android TV apps must support 16KB page sizes. Go 1.24 compiles the shared library.
-   - What's unclear: Does Go 1.24's linker automatically align to 16KB pages, or does it need `-ldflags` changes? The `build_android.sh` uses `-ldflags="-s -w"` (strip debug, no DWARF) but doesn't set alignment.
-   - Recommendation: Research Go 1.24 Android 16KB page alignment before Play Store upload. Add verification step to release checklist.
+   - Resolution: **Go 1.24 does NOT automatically align ELF segments to 16KB.** The Go linker must receive `-Wl,-z,max-page-size=16384` via `CGO_LDFLAGS`. Verified via [Android source docs](https://source.android.com/docs/core/architecture/16kb-page-size/16kb#build_shared_libraries_with_16_kb_elf_alignment) ("pass this linker flag: `-Wl,-z,max-page-size=16384`") and confirmed by independent Go+Android 16KB guide at danballard.com (September 2025) showing `CGO_LDFLAGS="-O2 -s -w -Wl,-z,max-page-size=16384"`.
+   - **Action:** Modify `build_android.sh` to set `export CGO_LDFLAGS="-Wl,-z,max-page-size=16384"` before the `go build` commands. The existing `-ldflags="-s -w"` strips debug info but does NOT control page alignment — alignment is a linker ELF concern handled via `CGO_LDFLAGS`. Also add a verification step to the release checklist using `llvm-objdump -p <lib.so> | grep LOAD` to confirm `align 2**14` (16384 = 16KB).
 
 2. **Flutter NDK auto-download vs explicit ndkVersion**
-   - What we know: Flutter Gradle plugin can auto-download NDK. Current setup doesn't set `ndkVersion` in `build.gradle`.
-   - What's unclear: Whether setting `ndkVersion` explicitly in `build.gradle` is necessary or will conflict with Flutter's auto-management.
-   - Recommendation: Don't set `ndkVersion` in `build.gradle` initially. If CI shows NDK version conflicts, pin it explicitly.
+   - What we know: Flutter Gradle plugin can auto-download NDK. Current setup uses `ndkVersion flutter.ndkVersion` in `build.gradle`.
+   - Resolution: **No change needed.** Flutter 3.9.x ships with `flutter.ndkVersion = "28.2.13676358"` (verified in FlutterExtension.kt source — matches local setup). The `nttld/setup-ndk@v1` action in CI also uses NDK r28. Versions are aligned across all three environments (local, Flutter default, CI). No conflict risk. The existing `ndkVersion flutter.ndkVersion` delegation is the correct approach — explicit pinning would add maintenance burden without benefit. If a future Flutter version changes the default NDK and causes mismatch, pin at that point.
 
 3. **Release dry-run — what does "end-to-end" mean exactly**
    - What we know: Success criterion 5 says "Manual release dry-run succeeds end-to-end."
-   - What's unclear: Does this mean uploading to Play Console internal testing track, or just verifying the signed APK installs on a device?
-   - Recommendation: Define as: (1) CI builds signed APK + AAB, (2) APK installs on Android TV device/emulator, (3) AAB uploads to Play Console internal testing track successfully.
+   - Resolution: **Defined as three sequential verifications:**
+     1. CI pipeline triggers on tag push (`git tag v0.1.0-test-dry-run && git push origin v0.1.0-test-dry-run`) and completes successfully — Go FFI build, signed APK, signed AAB all produced as artifacts.
+     2. Signed APK downloaded from CI artifacts, installed on Android TV device/emulator (`flutter install build/app/outputs/flutter-apk/app-release.apk`), confirms basic flows work (search, detail, playback).
+     3. AAB uploaded to Play Console internal testing track (not production) — verifies the AAB is accepted without signature/alignment errors.
+   - This definition is documented in the release checklist (Plan 03) as the dry-run procedure. Only step 1 (CI success) is automated — steps 2 and 3 require developer action.
 
 ## Environment Availability
 
@@ -605,7 +607,7 @@ But wait — the current `version: 1.0.0+1` has versionCode 1. With D-06's formu
 - `nttld/setup-ndk@v1` documentation — NDK setup action provides `ANDROID_NDK_HOME` output. Used in multiple production CI examples [ASSUMED: verified via GitHub Marketplace]
 
 ### Tertiary (LOW confidence)
-- Go 1.24 16KB page alignment for Android shared libraries — Not verified in official Go docs. Needs research before final Play Store upload. Flagged in Open Questions.
+- Go 1.24 16KB page alignment for Android shared libraries — **Now resolved.** Official Android docs confirm `-Wl,-z,max-page-size=16384` linker flag. Verified against multiple Go+Android cross-compilation guides. Moved from open question to actionable plan item.
 
 ## Metadata
 
@@ -614,6 +616,7 @@ But wait — the current `version: 1.0.0+1` has versionCode 1. With D-06's formu
 - Architecture: HIGH — based on codebase audit of actual project state
 - Pitfalls: HIGH — verified via known issues in Flutter releases and CI gotchas
 - Release requirements: MEDIUM — Play Store policies change; 2026 requirements verified but subject to update
+- 16KB page alignment: HIGH — resolved via official Android docs (`-Wl,-z,max-page-size=16384`); confirmed by Go+Android cross-compilation community guides
 
 **Research date:** 2026-07-13
 **Valid until:** 2026-08-13 (30 days — signing/CI patterns are stable; Play Store requirements may update)
