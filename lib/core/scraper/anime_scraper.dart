@@ -247,7 +247,7 @@ class AnimeScraper {
 
           final candidates = results.where(valid).toList();
           if (candidates.isEmpty) return null;
-          return _bestMatch(name, candidates, source);
+          return bestMatch(name, candidates, source);
         case Failure(error: final err):
           debugPrint('[AnimeScraper] _findBySource($source) error: ${err.message}');
           return null;
@@ -264,11 +264,11 @@ class AnimeScraper {
   /// Picks the candidate whose title best matches [query]. Prefers exact/prefix
   /// matches and, for AnimeFire, the full-series page (`todos-os-episodios`)
   /// over movies/spin-offs so catalog titles resolve to the main series.
-  static Anime _bestMatch(
+  static Anime bestMatch(
       String query, List<Anime> candidates, AnimeSource source) {
-    final q = _normalize(query);
+    final q = normalize(query);
     int score(Anime a) {
-      final t = _normalize(a.name);
+      final t = normalize(a.name);
       var s = 0;
       if (t == q) {
         s += 100;
@@ -303,7 +303,7 @@ class AnimeScraper {
     return candidates.first;
   }
 
-  static String _normalize(String s) {
+  static String normalize(String s) {
     var t = s.toLowerCase();
     const from = 'áàãâäéèêëíìîïóòõôöúùûüç';
     const to = 'aaaaaeeeeiiiiooooouuuuc';
