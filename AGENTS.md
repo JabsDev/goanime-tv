@@ -55,6 +55,26 @@ lib/
     └── widgets/                 # FocusableCard, TVButton, etc.
 ```
 
+## Testing
+
+```bash
+# Run all unit tests
+flutter test test/
+
+# Run a single unit test file
+flutter test test/core/cache/ttl_cache_test.dart
+
+# Run integration tests (requires connected Android device or emulator)
+flutter test integration_test/search_detail_playback_test.dart -d <device-id>
+
+# Run all integration tests
+flutter test integration_test/ -d <device-id>
+```
+
+### Mocking
+
+Tests use `mocktail` for HTTP and dependency mocking. Install with `flutter pub get` (already in dev_dependencies).
+
 ## Workflow
 
 This project uses GSD (Get Shit Done) for phased execution.
