@@ -25,12 +25,11 @@ Users can discover, browse, and watch anime from multiple providers through a si
 - ✓ SEC-01: Hardcoded client secret removed — PKCE migration eliminates need (Phase 1)
 - ✓ SEC-02: Pairing server LAN access preserved with documented warning — risk accepted (Phase 1)
 - ✓ SEC-03: CSRF protection + Origin/Referer validation + rate limiting on /token (Phase 1)
+- ✓ REL-01: Configure Android app signing and release build (Phase 5)
+- ✓ REL-02: Set up CI/CD pipeline (GitHub Actions) (Phase 5)
+- ✓ REL-03: Create release checklist and Play Store listing assets (Phase 5)
 
 ### Active
-
-- [ ] REL-01: Configure Android app signing and release build
-- [ ] REL-02: Set up CI/CD pipeline (GitHub Actions)
-- [ ] REL-03: Create release checklist and Play Store listing assets
 - [ ] CODE-01: Split home_screen.dart (1320 lines) into focused components
 - [ ] CODE-02: Add structured error handling to scraper layer
 - [ ] CODE-03: Fix SuperFlix domain inconsistency (.pro vs .best)
@@ -85,4 +84,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-12 after Phase 1 completion*
+*Last updated: 2026-07-13 after Phase 5 completion*
