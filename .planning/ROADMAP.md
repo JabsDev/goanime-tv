@@ -47,14 +47,20 @@ Plans:
 ### Phase 3: Error Handling & Bug Fixes
 **Goal:** Improve scraper robustness and fix known bugs
 **Mode:** mvp
+**Status:** ✓ Planned
 **Success Criteria**:
-1. Scraper adapter layer distinguishes between network timeout, parse failure, Cloudflare challenge, and empty results
-2. Appropriate fallback or retry logic for each error type
-3. SuperFlix domain uses a single source of truth (no .pro vs .best mismatch)
-4. Episode numbers that fail to parse sort to end of list (not position 0)
-5. All existing search and playback flows continue to work
+1. ✓ Scraper adapter layer distinguishes between network timeout, parse failure, Cloudflare challenge, and empty results
+2. ✓ Appropriate fallback or retry logic for each error type
+3. ✓ SuperFlix domain uses a single source of truth (no .pro vs .best mismatch)
+4. ✓ Episode numbers that fail to parse sort to end of list (not position 0)
+5. ✓ All existing search and playback flows continue to work
 
 **Requirements:** CODE-02, CODE-03, BUG-01
+**Plans:** 2/2 plans complete
+
+Plans:
+- [x] 03-01-PLAN.md — Bug fixes: episode sort sentinel + SuperFlix domain (Wave 1)
+- [x] 03-02-PLAN.md — Error handling: sealed class hierarchy, adapter migration, typed errors (Wave 2, depends on Plan 01)
 **Plans:** 2 plans in 2 waves
 
 Plans:
@@ -97,7 +103,7 @@ Plans:
 |-------|-------------|--------|
 | 1 | SEC-01, SEC-02, SEC-03 | ✓ Complete |
 | 2 | CODE-01 | ✓ Complete |
-| 3 | CODE-02, CODE-03, BUG-01 | Pending |
+| 3 | CODE-02, CODE-03, BUG-01 | ✓ Planned |
 | 4 | CODE-04, TEST-01, TEST-02 | Pending |
 | 5 | REL-01, REL-02, REL-03 | Pending |
 

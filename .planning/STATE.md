@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-07-11 after initialization)
 |-------|--------|-------|----------|
 | 1 | ✓ Complete | 4 | 100% |
 | 2 | ✓ Complete | 3 | 100% |
-| 3 | ◆ Planned | 0 | 0% |
+| 3 | ◆ Planned | 2 | 0% |
 | 4 | ○ Pending | 0 | 0% |
 | 5 | ○ Pending | 0 | 0% |
 

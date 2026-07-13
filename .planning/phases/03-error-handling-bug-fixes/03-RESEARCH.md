@@ -453,19 +453,19 @@ return '${AppConstants.superFlixBase}/serie/$_tmdbId/$season/${widget.episode.nu
 | A3 | The existing `apiClient.get` does not already handle TimeoutException | Code Examples | `apiClient` is a thin `http` wrapper; `http` package throws `TimeoutException` on timeout |
 | A4 | The `AnimeRepository` blanket catches should remain unchanged | Common Pitfalls | Repository's catches serve a different purpose (fallback cascading). Risk is low — if repository SHOULD propagate errors, this is a future concern |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **How to extract `operationDuration` in adapter methods?**
    - What we know: Every error variant requires `operationDuration`. Adapter methods currently don't track this.
-   - Recommendation: Use `Stopwatch()..start()` at method entry, capture `stopwatch.elapsed` at exit/error. Add a timing helper utility if code reuse across 4 adapters × 3 methods = 12 call sites justifies it.
+    - Recommendation: Use `Stopwatch()..start()` at method entry, capture `stopwatch.elapsed` at exit/error. Add a timing helper utility if code reuse across 4 adapters × 3 methods = 12 call sites justifies it. → **RESOLVED:** Plans use `Stopwatch` pattern in adapter methods.
 
 2. **AllAnime Cloudflare detection — currently a text-based check for `'AA_CRYPTO_MISSING'` and `'NEED_CAPTCHA'` — should this map to `CloudflareError` or `UnknownError`?**
    - What we know: AllAnime uses a different mechanism (CAPTCHA gating via GraphQL API). The string matches in `_extractFromAllAnime` (line 205) detect "API is Cloudflare/captcha gated."
-   - Recommendation: Map to `CloudflareError` with appropriate detection pattern string for consistency. The planner should decide.
+    - Recommendation: Map to `CloudflareError` with appropriate detection pattern string for consistency. The planner should decide. → **RESOLVED:** Plan 03-02 T2 maps `AA_CRYPTO_MISSING`/`NEED_CAPTCHA` to `CloudflareError`.
 
 3. **Should the `Loading` variant in `ScraperResult` be included?**
    - What we know: D-01 specifies 3 variants: `Loading`, `Success(T)`, `Failure(ScraperError)`. However, `Loading` is never produced by any adapter method in this phase — all returns are synchronous result construction.
-   - Recommendation: Include `Loading` for future use (e.g., a loading state in UI) but note that Phase 3 adapters never return `Loading`. The planner may defer this to a later phase.
+    - Recommendation: Include `Loading` for future use (e.g., a loading state in UI) but note that Phase 3 adapters never return `Loading`. The planner may defer this to a later phase. → **RESOLVED:** Plan 03-02 T1 includes `Loading` variant per D-01 spec.
 
 ## Environment Availability
 
