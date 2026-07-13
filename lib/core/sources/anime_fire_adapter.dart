@@ -15,7 +15,18 @@ import 'anime_source_adapter.dart';
 /// AnimeFire provider: HTML scraping for search, episode listing and video
 /// extraction (multiple qualities via `data-video-src` + Blogger fallback).
 class AnimeFireAdapter implements AnimeSourceAdapter {
-  AnimeFireAdapter();
+  final http.Client? _client;
+
+  AnimeFireAdapter({http.Client? client}) : _client = client;
+
+  /// Dispatches to [http.Client.get] when a mock client is injected, otherwise
+  /// falls back to the app's global [apiClient] singleton.
+  Future<http.Response> _httpGet(Uri uri, {Map<String, String>? headers}) {
+    if (_client != null) {
+      return _client.get(uri, headers: headers);
+    }
+    return apiClient.get(uri, headers: headers);
+  }
 
   static final RegExp _episodeNumRe =
       RegExp(r'epis[oó]dio\s+(\d+)', caseSensitive: false);
@@ -40,12 +51,10 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
       // HTTP call with timeout retry (D-04: retry once on TimeoutException)
       http.Response res;
       try {
-        res = await apiClient
-            .get(Uri.parse(url), headers: {'User-Agent': AppConstants.userAgent});
+        res = await _httpGet(Uri.parse(url), headers: {'User-Agent': AppConstants.userAgent});
       } on TimeoutException {
         debugPrint('[AnimeFire] Search timeout, retrying once...');
-        res = await apiClient
-            .get(Uri.parse(url), headers: {'User-Agent': AppConstants.userAgent});
+        res = await _httpGet(Uri.parse(url), headers: {'User-Agent': AppConstants.userAgent});
       }
 
       if (res.statusCode != 200) {
@@ -182,7 +191,7 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
       final uri = Uri.tryParse(animeUrl);
       if (uri == null || !uri.hasScheme) return [];
 
-      final res = await apiClient.get(
+      final res = await _httpGet(
         uri,
         headers: {
           'User-Agent': AppConstants.userAgent,
@@ -224,7 +233,7 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
   Future<List<VideoSource>> _extractFromAnimeFire(String episodeUrl) async {
     try {
       debugPrint('[AnimeFire] Extracting: $episodeUrl');
-      final res = await apiClient.get(
+      final res = await _httpGet(
         Uri.parse(episodeUrl),
         headers: {
           'User-Agent': AppConstants.userAgent,
@@ -330,7 +339,7 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
   /// per available quality. Falls back to Blogger when the API returns a token.
   Future<List<VideoSource>> _resolveVideoApi(String videoApiUrl) async {
     try {
-      final res = await apiClient.get(
+      final res = await _httpGet(
         Uri.parse(videoApiUrl),
         headers: {
           'User-Agent': AppConstants.userAgent,
