@@ -61,14 +61,13 @@ Plans:
 Plans:
 - [x] 03-01-PLAN.md — Bug fixes: episode sort sentinel + SuperFlix domain (Wave 1)
 - [x] 03-02-PLAN.md — Error handling: sealed class hierarchy, adapter migration, typed errors (Wave 2, depends on Plan 01)
-- [ ] 03-01-PLAN.md — Bug fixes: episode sort sentinel (BUG-01) + SuperFlix domain fix (CODE-03)
-- [ ] 03-02-PLAN.md — Error handling migration: sealed class hierarchy, adapter interface, typed errors, orchestrator matching (CODE-02)
 
 ---
 
 ### Phase 4: Testing & Documentation
 **Goal:** Establish test coverage and developer documentation
 **Mode:** mvp
+**Status:** ○ In Progress
 **Success Criteria**:
 1. Unit tests exist for key scraper orchestration logic
 2. Unit tests exist for each adapter's core parsing methods
@@ -77,6 +76,12 @@ Plans:
 5. Tests pass on CI
 
 **Requirements:** CODE-04, TEST-01, TEST-02
+**Plans:** 3 plans in 3 waves
+
+Plans:
+- [ ] 04-01-PLAN.md — Setup + core utility unit tests (Wave 1)
+- [ ] 04-02-PLAN.md — Scraper orchestration unit tests (Wave 2, depends on Plan 01)
+- [ ] 04-03-PLAN.md — Integration test + AGENTS.md update (Wave 3, depends on Plan 01)
 
 ---
 
