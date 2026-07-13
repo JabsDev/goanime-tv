@@ -87,21 +87,21 @@ Plans:
 5. Tests pass on CI
 
 **Requirements:** CODE-04, TEST-01, TEST-02
-**Plans:** 4 plans in 3 waves
+**Plans:** 4/4 plans complete
 
 Plans:
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — Setup + core utility unit tests (Wave 1)
+- [x] 04-01-PLAN.md — Setup + core utility unit tests (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-02-PLAN.md — Scraper orchestration unit tests (Wave 2, depends on Plan 01)
-- [ ] 04-03-PLAN.md — Integration test + AGENTS.md update (Wave 2, depends on Plan 01)
+- [x] 04-02-PLAN.md — Scraper orchestration unit tests (Wave 2, depends on Plan 01)
+- [x] 04-03-PLAN.md — Integration test + AGENTS.md update (Wave 2, depends on Plan 01)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-04-PLAN.md — Adapter fixture tests: AnimeFireAdapter refactoring + fixture-based parsing tests (Wave 3, depends on Plans 01 + 02)
+- [x] 04-04-PLAN.md — Adapter fixture tests: AnimeFireAdapter refactoring + fixture-based parsing tests (Wave 3, depends on Plans 01 + 02)
 
 ---
 
@@ -128,7 +128,7 @@ Plans:
 | 1 | SEC-01, SEC-02, SEC-03 | ✓ Complete |
 | 2 | CODE-01 | ✓ Complete |
 | 3 | CODE-02, CODE-03, BUG-01 | ✓ Complete |
-| 4 | CODE-04, TEST-01, TEST-02 | Pending |
+| 4 | CODE-04, TEST-01, TEST-02 | ✓ Complete |
 | 5 | REL-01, REL-02, REL-03 | Pending |
 
 **All v1 requirements mapped:** 13/13 ✓

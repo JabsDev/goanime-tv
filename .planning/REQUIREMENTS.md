@@ -24,7 +24,7 @@ Requirements for release readiness. Each maps to roadmap phases.
 - [ ] **CODE-01**: Split `home_screen.dart` (1320 lines) into focused components (HomeScreen, AnilistLoginDialog, ProfileScreen)
 - [ ] **CODE-02**: Add structured error handling to scraper layer (distinguish timeout, parse failure, Cloudflare, empty results)
 - [ ] **CODE-03**: Fix SuperFlix domain inconsistency between `.pro` (WebView) and `.best` (constants)
-- [ ] **CODE-04**: Add AGENTS.md with workflow and build instructions
+- [x] **CODE-04**: Add AGENTS.md with workflow and build instructions
 
 ### Bug Fixes
 
@@ -32,8 +32,8 @@ Requirements for release readiness. Each maps to roadmap phases.
 
 ### Testing
 
-- [ ] **TEST-01**: Add unit tests for core scraper and adapter logic
-- [ ] **TEST-02**: Expand integration test coverage to cover search, detail, and playback flows
+- [x] **TEST-01**: Add unit tests for core scraper and adapter logic
+- [x] **TEST-02**: Expand integration test coverage to cover search, detail, and playback flows
 
 ## v2 Requirements
 
@@ -68,16 +68,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SEC-01 | Phase 1 | Pending |
-| SEC-02 | Phase 1 | Pending |
-| SEC-03 | Phase 1 | Pending |
-| CODE-01 | Phase 2 | Pending |
-| CODE-02 | Phase 3 | Pending |
-| CODE-03 | Phase 3 | Pending |
-| BUG-01 | Phase 3 | Pending |
-| CODE-04 | Phase 4 | Pending |
-| TEST-01 | Phase 4 | Pending |
-| TEST-02 | Phase 4 | Pending |
+| SEC-01 | Phase 1 | Complete |
+| SEC-02 | Phase 1 | Complete |
+| SEC-03 | Phase 1 | Complete |
+| CODE-01 | Phase 2 | Complete |
+| CODE-02 | Phase 3 | Complete |
+| CODE-03 | Phase 3 | Complete |
+| BUG-01 | Phase 3 | Complete |
+| CODE-04 | Phase 4 | Complete |
+| TEST-01 | Phase 4 | Complete |
+| TEST-02 | Phase 4 | Complete |
 | REL-01 | Phase 5 | Pending |
 | REL-02 | Phase 5 | Pending |
 | REL-03 | Phase 5 | Pending |
