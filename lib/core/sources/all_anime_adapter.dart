@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:encrypt/encrypt.dart' as enc;
@@ -7,6 +8,7 @@ import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
 import '../constants/app_constants.dart';
 import '../network/api_client.dart';
+import '../scraper/scraper_result.dart';
 import 'anime_source_adapter.dart';
 
 /// AllAnime provider: GraphQL API for search, episode listing and stream URLs.
@@ -22,7 +24,8 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
   AnimeSource get source => AnimeSource.allAnime;
 
   @override
-  Future<List<Anime>> search(String animeName) async {
+  Future<ScraperResult<List<Anime>>> search(String animeName) async {
+    final stopwatch = Stopwatch()..start();
     try {
       const gql = '''
         query(\$search: SearchInput, \$limit: Int, \$page: Int, \$translationType: VaildTranslationTypeEnumType, \$countryOrigin: VaildCountryOriginEnumType) {
@@ -59,7 +62,13 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
           'Referer': AppConstants.allAnimeReferer,
         },
       );
-      if (res.statusCode != 200) return [];
+      if (res.statusCode != 200) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'Non-200: ${res.statusCode}',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
       final data = jsonDecode(res.body);
       final edges = data['data']?['shows']?['edges'] as List? ?? [];
 
@@ -97,7 +106,7 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
       final shows = byId.values.toList()
         ..sort((a, b) => epCount(b).compareTo(epCount(a)));
 
-      return shows.map((show) {
+      final results = shows.map((show) {
         final name = show['name']?.toString() ??
             show['englishName']?.toString() ??
             '';
@@ -111,15 +120,36 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
           fallbackImageUrl: show['thumbnail']?.toString(),
         );
       }).whereType<Anime>().toList();
+
+      if (results.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No search results',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
+      return ScraperResult.success(results);
     } catch (e) {
       debugPrint('[AllAnime] Search error: $e');
-      return [];
+      return ScraperResult.failure(UnknownError(
+        message: 'Search error: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
     }
   }
 
   @override
-  Future<EpisodesResult> getEpisodes(Anime anime) async {
+  Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime) async {
     final animeId = anime.allAnimeId ?? anime.url;
+    if (animeId.isEmpty) {
+      return ScraperResult.failure(EmptyResultError(
+        message: 'Empty anime ID',
+        source: source,
+        operationDuration: Duration.zero,
+      ));
+    }
     const gql = '''
       query (\$showId: String!) {
         show(_id: \$showId) {
@@ -130,6 +160,7 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
       }
     ''';
     final vars = {'showId': animeId};
+    final stopwatch = Stopwatch()..start();
     try {
       final res = await apiClient.postJson(
         Uri.parse(AppConstants.allAnimeAPI),
@@ -142,10 +173,33 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
           'Referer': AppConstants.allAnimeReferer,
         },
       );
-      if (res.statusCode != 200) return EpisodesResult([], {});
+      if (res.statusCode != 200) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'Non-200: ${res.statusCode}',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
+
+      // Check for Cloudflare/CAPTCHA gating
+      if (res.body.contains('AA_CRYPTO_MISSING') || res.body.contains('NEED_CAPTCHA')) {
+        return ScraperResult.failure(CloudflareError(
+          message: 'API is Cloudflare/captcha gated',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+          detectionPattern: 'AA_CRYPTO_MISSING/NEED_CAPTCHA',
+        ));
+      }
+
       final data = jsonDecode(res.body);
       final detail = data['data']?['show']?['availableEpisodesDetail'];
-      if (detail == null) return EpisodesResult([], {});
+      if (detail == null) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No episode detail in response',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
 
       final episodeTypes = <String, List<Episode>>{};
       for (final type in ['sub', 'dub', 'raw']) {
@@ -163,19 +217,30 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
         }
       }
 
-      if (episodeTypes.isEmpty) return EpisodesResult([], {});
-      if (episodeTypes.length == 1) {
-        return EpisodesResult(episodeTypes.values.first, episodeTypes);
+      if (episodeTypes.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No episode types found',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
       }
-      return EpisodesResult([], episodeTypes);
+      if (episodeTypes.length == 1) {
+        return ScraperResult.success(EpisodesResult(episodeTypes.values.first, episodeTypes));
+      }
+      return ScraperResult.success(EpisodesResult([], episodeTypes));
     } catch (e) {
       debugPrint('[AllAnime] Episodes error: $e');
-      return EpisodesResult([], {});
+      return ScraperResult.failure(UnknownError(
+        message: 'Episodes error: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
     }
   }
 
   @override
-  Future<List<VideoSource>> getVideoSources(
+  Future<ScraperResult<List<VideoSource>>> getVideoSources(
     Episode episode, {
     Anime? anime,
   }) async {
@@ -183,11 +248,18 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
     return _extractFromAllAnime(animeId, episode.url);
   }
 
-  Future<List<VideoSource>> _extractFromAllAnime(
+  Future<ScraperResult<List<VideoSource>>> _extractFromAllAnime(
     String animeId,
     String episodeNumber,
   ) async {
-    if (animeId.isEmpty || episodeNumber.isEmpty) return [];
+    if (animeId.isEmpty || episodeNumber.isEmpty) {
+      return ScraperResult.failure(EmptyResultError(
+        message: 'Empty anime ID or episode number',
+        source: source,
+        operationDuration: Duration.zero,
+      ));
+    }
+    final stopwatch = Stopwatch()..start();
     try {
       final varsMap = {
         'showId': animeId,
@@ -200,14 +272,31 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
           (!body.contains('sourceUrl') && !body.contains('tobeparsed'))) {
         body = await _legacyPOST(varsMap);
       }
-      if (body == null || body.isEmpty) return [];
+      if (body == null || body.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'Empty response from AllAnime API',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
       if (body.contains('AA_CRYPTO_MISSING') || body.contains('NEED_CAPTCHA')) {
         debugPrint('[AllAnime] API is Cloudflare/captcha gated — skipping');
-        return [];
+        return ScraperResult.failure(CloudflareError(
+          message: 'AllAnime API is Cloudflare/captcha gated',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+          detectionPattern: 'AA_CRYPTO_MISSING/NEED_CAPTCHA',
+        ));
       }
 
       final entries = _extractSourceEntries(body);
-      if (entries.isEmpty) return [];
+      if (entries.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No source entries found',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
 
       final results = await Future.wait(
         entries.map((e) => _resolveAllAnimeLinks(e)),
@@ -219,10 +308,22 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
           if (seen.add(s.url)) sources.add(s);
         }
       }
-      return sources;
+      if (sources.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No resolved video sources',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
+      return ScraperResult.success(sources);
     } catch (e) {
       debugPrint('[AllAnime] Extract error: $e');
-      return [];
+      return ScraperResult.failure(UnknownError(
+        message: 'Extract error: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
     }
   }
 

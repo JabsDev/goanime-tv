@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
@@ -6,6 +7,7 @@ import '../../data/models/episode.dart';
 import '../constants/app_constants.dart';
 import '../ffi/superflix_bridge.dart';
 import '../network/api_client.dart';
+import '../scraper/scraper_result.dart';
 import '../utils/text_utils.dart';
 import 'anime_source_adapter.dart';
 
@@ -21,7 +23,8 @@ class SuperFlixAdapter implements AnimeSourceAdapter {
   AnimeSource get source => AnimeSource.superFlix;
 
   @override
-  Future<List<Anime>> search(String animeName) async {
+  Future<ScraperResult<List<Anime>>> search(String animeName) async {
+    final stopwatch = Stopwatch()..start();
     try {
       final normalized = animeName.trim().replaceAll('-', ' ').replaceAll('_', ' ');
 
@@ -29,13 +32,13 @@ class SuperFlixAdapter implements AnimeSourceAdapter {
       if (SuperFlixFFI.instance.loaded) {
         final results = SuperFlixFFI.instance.search(normalized);
         if (results != null && results.isNotEmpty) {
-          return results.map((r) => Anime(
+          return ScraperResult.success(results.map((r) => Anime(
                 name: r['title']?.toString() ?? '',
                 url: '${AppConstants.superFlixBase}/serie/${r['tmdbId']}',
                 source: AnimeSource.superFlix,
                 superFlixTmdbId: r['tmdbId']?.toString(),
                 fallbackImageUrl: r['imageUrl']?.toString(),
-              )).toList();
+              )).toList());
         }
         debugPrint('[SuperFlixFFI] Search returned empty, falling back to HTTP');
       }
@@ -49,7 +52,24 @@ class SuperFlixAdapter implements AnimeSourceAdapter {
           'Referer': AppConstants.superFlixReferer,
         },
       );
-      if (res.statusCode != 200) return [];
+      if (res.statusCode != 200) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'Non-200: ${res.statusCode}',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
+
+      // Cloudflare check (D-08)
+      if (isCloudflareChallenge(res.body, res.headers)) {
+        return ScraperResult.failure(CloudflareError(
+          message: 'Cloudflare challenge detected on search page',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+          detectionPattern: 'isCloudflareChallenge',
+        ));
+      }
+
       final doc = html_parser.parse(res.body);
       final cards = doc.querySelectorAll('.group\\/card');
       final list = <Anime>[];
@@ -76,22 +96,40 @@ class SuperFlixAdapter implements AnimeSourceAdapter {
           fallbackImageUrl: imageUrl.isNotEmpty ? imageUrl : null,
         ));
       }
-      return list;
+      if (list.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No search results found',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
+      return ScraperResult.success(list);
     } catch (e) {
       debugPrint('[SuperFlix] Search error: $e');
-      return [];
+      return ScraperResult.failure(UnknownError(
+        message: 'Search error: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
     }
   }
 
   @override
-  Future<EpisodesResult> getEpisodes(Anime anime) async {
+  Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime) async {
     final tmdbId = anime.superFlixTmdbId;
-    if (tmdbId == null) return EpisodesResult([], {});
+    if (tmdbId == null) {
+      return ScraperResult.failure(EmptyResultError(
+        message: 'No TMDB ID',
+        source: source,
+        operationDuration: Duration.zero,
+      ));
+    }
     return _getSuperFlixEpisodes(tmdbId);
   }
 
   @override
-  Future<List<VideoSource>> getVideoSources(
+  Future<ScraperResult<List<VideoSource>>> getVideoSources(
     Episode episode, {
     Anime? anime,
   }) async {
@@ -101,48 +139,75 @@ class SuperFlixAdapter implements AnimeSourceAdapter {
       tmdbId,
     );
     if (tmdbId == null || season == null) {
-      debugPrint('[SuperFlix] Missing tmdbId/season for stream extraction');
-      return [];
+      return ScraperResult.failure(EmptyResultError(
+        message: 'Missing tmdbId/season for stream extraction',
+        source: source,
+        operationDuration: Duration.zero,
+      ));
     }
-    return _extractFromSuperFlix(tmdbId, season, episode.number);
+    final stopwatch = Stopwatch()..start();
+    try {
+      final sources = await _extractFromSuperFlix(tmdbId, season, episode.number);
+      if (sources.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No video sources resolved',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
+      return ScraperResult.success(sources);
+    } catch (e) {
+      debugPrint('[SuperFlix] Video sources error: $e');
+      return ScraperResult.failure(UnknownError(
+        message: 'Video source error: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
+    }
   }
 
-  Future<EpisodesResult> _getSuperFlixEpisodes(String tmdbId) async {
+  Future<ScraperResult<EpisodesResult>> _getSuperFlixEpisodes(String tmdbId) async {
+    final stopwatch = Stopwatch()..start();
+
+    // FFI path (preferred)
     SuperFlixFFI.instance.load();
     if (SuperFlixFFI.instance.loaded) {
       final result = SuperFlixFFI.instance.getEpisodes(tmdbId);
       if (result != null) {
         if (result.containsKey('error')) {
           debugPrint('[SuperFlixFFI] Episodes error: ${result['error']}');
-          return EpisodesResult([], {});
-        }
-        final seasons = result['seasons'] as Map<String, dynamic>?;
-        if (seasons != null && seasons.isNotEmpty) {
-          final episodes = <Episode>[];
-          for (final sEntry in seasons.entries) {
-            final seasonNum = sEntry.key;
-            final epList = sEntry.value as List;
-            for (final ep in epList) {
-              final epMap = ep as Map;
-              final epNum = epMap['number']?.toString() ?? '';
-              if (epNum.isEmpty) continue;
-              final title = epMap['title']?.toString();
-              episodes.add(Episode(
-                number: epNum,
-                url:
-                    '${AppConstants.superFlixBase}/serie/$tmdbId/$seasonNum/$epNum',
-                title: title,
-              ));
+        } else {
+          final seasons = result['seasons'] as Map<String, dynamic>?;
+          if (seasons != null && seasons.isNotEmpty) {
+            final episodes = <Episode>[];
+            for (final sEntry in seasons.entries) {
+              final seasonNum = sEntry.key;
+              final epList = sEntry.value as List;
+              for (final ep in epList) {
+                final epMap = ep as Map;
+                final epNum = epMap['number']?.toString() ?? '';
+                if (epNum.isEmpty) continue;
+                final title = epMap['title']?.toString();
+                episodes.add(Episode(
+                  number: epNum,
+                  url:
+                      '${AppConstants.superFlixBase}/serie/$tmdbId/$seasonNum/$epNum',
+                  title: title,
+                ));
+              }
             }
+            episodes.sort(
+              (a, b) => (double.tryParse(a.number) ?? double.infinity).compareTo(double.tryParse(b.number) ?? double.infinity),
+            );
+            return ScraperResult.success(EpisodesResult(episodes, {}));
           }
-          episodes.sort(
-            (a, b) => (double.tryParse(a.number) ?? double.infinity).compareTo(double.tryParse(b.number) ?? double.infinity),
-          );
-          return EpisodesResult(episodes, {});
         }
       }
+      debugPrint('[SuperFlixFFI] Episodes empty, falling back to HTTP');
     }
 
+    // HTTP fallback path
     try {
       final url = '${AppConstants.superFlixBase}/serie/$tmdbId';
       final res = await apiClient.get(
@@ -152,20 +217,39 @@ class SuperFlixAdapter implements AnimeSourceAdapter {
           'Referer': AppConstants.superFlixReferer,
         },
       );
-      if (res.statusCode != 200) return EpisodesResult([], {});
       final html = res.body;
 
-      if (html.contains('Verificação') ||
-          html.contains('cf-browser-verification')) {
-        debugPrint('[SuperFlix] Cloudflare challenge detected');
-        return EpisodesResult([], {});
+      // Cloudflare check (D-08) — BEFORE status guard (Cloudflare can return
+      // 200 with a challenge page or 403/503). Headers checked in
+      // isCloudflareChallenge catch CF-Ray/CF-Challenge.
+      if (isCloudflareChallenge(html, res.headers)) {
+        debugPrint('[SuperFlix] Cloudflare challenge on episodes page');
+        return ScraperResult.failure(CloudflareError(
+          message: 'Cloudflare challenge detected on episodes page',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+          detectionPattern: 'isCloudflareChallenge',
+        ));
+      }
+      if (res.statusCode != 200) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'Non-200: ${res.statusCode}',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
       }
 
       final allEpisodesMatch = RegExp(
         r'var ALL_EPISODES\s*=\s*(\{.+?\});',
         dotAll: true,
       ).firstMatch(html);
-      if (allEpisodesMatch == null) return EpisodesResult([], {});
+      if (allEpisodesMatch == null) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No ALL_EPISODES data found',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
 
       final data = jsonDecode(allEpisodesMatch.group(1)!);
       final episodes = <Episode>[];
@@ -186,13 +270,25 @@ class SuperFlixAdapter implements AnimeSourceAdapter {
           ));
         }
       }
+      if (episodes.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No episodes parsed',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
       episodes.sort(
         (a, b) => (double.tryParse(a.number) ?? double.infinity).compareTo(double.tryParse(b.number) ?? double.infinity),
       );
-      return EpisodesResult(episodes, {});
+      return ScraperResult.success(EpisodesResult(episodes, {}));
     } catch (e) {
       debugPrint('[SuperFlix] Episodes error: $e');
-      return EpisodesResult([], {});
+      return ScraperResult.failure(UnknownError(
+        message: 'Episodes HTTP error: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
     }
   }
 
@@ -251,13 +347,15 @@ class SuperFlixAdapter implements AnimeSourceAdapter {
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
       );
-      if (pageRes.statusCode != 200) return [];
       final html = pageRes.body;
-      if (html.contains('Verificação') ||
-          html.contains('cf-browser-verification')) {
+
+      // Cloudflare check (D-08) — multi-pattern, BEFORE status guard
+      if (isCloudflareChallenge(html, pageRes.headers)) {
         debugPrint('[SuperFlix] Cloudflare challenge on player page');
         return [];
       }
+      if (pageRes.statusCode != 200) return [];
+
 
       final csrf = _firstGroup(html, r'var CSRF_TOKEN\s*=\s*"([^"]+)"');
       final pageToken = _firstGroup(html, r'var PAGE_TOKEN\s*=\s*"([^"]+)"');

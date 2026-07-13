@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show HttpClient;
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
+import 'package:http/http.dart' as http;
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
 import '../constants/app_constants.dart';
 import '../network/api_client.dart';
+import '../scraper/scraper_result.dart';
 import '../utils/text_utils.dart';
 import 'anime_source_adapter.dart';
 
@@ -29,13 +32,29 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
   AnimeSource get source => AnimeSource.animeFire;
 
   @override
-  Future<List<Anime>> search(String animeName) async {
+  Future<ScraperResult<List<Anime>>> search(String animeName) async {
     final url =
         '${AppConstants.baseSiteUrl}/pesquisar/${TextUtils.treatName(animeName)}';
+    final stopwatch = Stopwatch()..start();
     try {
-      final res = await apiClient
-          .get(Uri.parse(url), headers: {'User-Agent': AppConstants.userAgent});
-      if (res.statusCode != 200) return [];
+      // HTTP call with timeout retry (D-04: retry once on TimeoutException)
+      http.Response res;
+      try {
+        res = await apiClient
+            .get(Uri.parse(url), headers: {'User-Agent': AppConstants.userAgent});
+      } on TimeoutException {
+        debugPrint('[AnimeFire] Search timeout, retrying once...');
+        res = await apiClient
+            .get(Uri.parse(url), headers: {'User-Agent': AppConstants.userAgent});
+      }
+
+      if (res.statusCode != 200) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'Non-200: ${res.statusCode}',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
       final doc = html_parser.parse(res.body);
       final elements = doc.querySelectorAll('.row.ml-1.mr-1 a');
       final list = <Anime>[];
@@ -56,7 +75,7 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
           ));
         }
       }
-      if (list.isNotEmpty) return list;
+      if (list.isNotEmpty) return ScraperResult.success(list);
 
       // Fallback selector used by newer AnimeFire markup.
       final cards = doc.querySelectorAll('.card_ani');
@@ -74,31 +93,86 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
           fallbackImageUrl: thumb,
         ));
       }
-      return list;
+      if (list.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No results found',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
+      return ScraperResult.success(list);
+    } on TimeoutException {
+      // Second retry also timed out — return typed error
+      return ScraperResult.failure(TimeoutError(
+        message: 'Search timed out after retry',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        timeoutValue: AppConstants.requestTimeout,
+      ));
+    } on FormatException catch (e) {
+      return ScraperResult.failure(ParseFailureError(
+        message: 'HTML parse failure',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        snippet: (e.source?.length ?? 0) > 200
+            ? e.source!.substring(0, 200)
+            : (e.source ?? 'unknown'),
+      ));
     } catch (e) {
       debugPrint('[AnimeFire] Search error: $e');
-      return [];
+      return ScraperResult.failure(UnknownError(
+        message: 'Unexpected error: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
     }
   }
 
   @override
-  Future<EpisodesResult> getEpisodes(Anime anime) async {
+  Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime) async {
+    final stopwatch = Stopwatch()..start();
     final episodes = await _fetchEpisodes(anime.url);
-    if (episodes.isEmpty) return EpisodesResult([], {});
+    if (episodes.isEmpty) {
+      return ScraperResult.failure(EmptyResultError(
+        message: 'No episodes found',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+      ));
+    }
     episodes.sort((a, b) {
       final na = int.tryParse(a.number) ?? double.infinity.toInt();
       final nb = int.tryParse(b.number) ?? double.infinity.toInt();
       return na.compareTo(nb);
     });
-    return EpisodesResult(episodes, {});
+    return ScraperResult.success(EpisodesResult(episodes, {}));
   }
 
   @override
-  Future<List<VideoSource>> getVideoSources(
+  Future<ScraperResult<List<VideoSource>>> getVideoSources(
     Episode episode, {
     Anime? anime,
   }) async {
-    return _extractFromAnimeFire(episode.url);
+    final stopwatch = Stopwatch()..start();
+    try {
+      final sources = await _extractFromAnimeFire(episode.url);
+      if (sources.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No video sources found',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
+      return ScraperResult.success(sources);
+    } catch (e) {
+      debugPrint('[AnimeFire] Video sources error: $e');
+      return ScraperResult.failure(UnknownError(
+        message: 'Video source extraction failed: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
+    }
   }
 
   /// Fetches the episode list by scraping the anime page HTML.

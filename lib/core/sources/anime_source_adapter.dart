@@ -1,5 +1,6 @@
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
+import '../scraper/scraper_result.dart';
 
 /// Port/adapter abstraction for every anime provider.
 ///
@@ -8,17 +9,21 @@ import '../../data/models/episode.dart';
 ///  - list episodes for a given [Anime],
 ///  - resolve playable video sources for an [Episode].
 ///
+/// All methods return [ScraperResult] so callers can distinguish success,
+/// typed errors (timeout, parse failure, Cloudflare, empty results, unknown),
+/// and handle each variant via exhaustive `switch` matching.
+///
 /// This decouples the orchestration layer ([AnimeScraper]) and the repository
 /// from the scraping details, and makes adding a new provider a matter of
 /// implementing this single interface.
 abstract class AnimeSourceAdapter {
   AnimeSource get source;
 
-  Future<List<Anime>> search(String query);
+  Future<ScraperResult<List<Anime>>> search(String query);
 
-  Future<EpisodesResult> getEpisodes(Anime anime);
+  Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime);
 
-  Future<List<VideoSource>> getVideoSources(
+  Future<ScraperResult<List<VideoSource>>> getVideoSources(
     Episode episode, {
     Anime? anime,
   });

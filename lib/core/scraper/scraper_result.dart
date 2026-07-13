@@ -4,8 +4,17 @@ import '../../data/models/anime.dart' show AnimeSource;
 ///
 /// Replaces the blanket `catch (e) { return []; }` pattern with three
 /// exhaustively matchable variants: [Loading], [Success], and [Failure].
+///
+/// Use [ScraperResult.success] to create a [Success] instance and
+/// [ScraperResult.failure] to create a [Failure] instance.
 sealed class ScraperResult<T> {
   const ScraperResult();
+
+  /// Creates a [Success] variant wrapping [data].
+  factory ScraperResult.success(T data) = Success<T>;
+
+  /// Creates a [Failure] variant wrapping [error].
+  factory ScraperResult.failure(ScraperError error) = Failure<T>;
 }
 
 final class Loading<T> extends ScraperResult<T> {

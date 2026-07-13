@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
+import 'package:http/http.dart' as http;
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
 import '../constants/app_constants.dart';
 import '../network/api_client.dart';
+import '../scraper/scraper_result.dart';
 import 'anime_source_adapter.dart';
 
 /// Goyabu provider (PT-BR): WordPress-based site. Search via the WP REST API
@@ -46,22 +49,34 @@ class GoyabuAdapter implements AnimeSourceAdapter {
       };
 
   @override
-  Future<List<Anime>> search(String animeName) async {
+  Future<ScraperResult<List<Anime>>> search(String animeName) async {
     final query = animeName
         .trim()
         .replaceAll('-', ' ')
         .replaceAll('_', ' ')
         .replaceAll(RegExp(r'\s+'), ' ');
+    final stopwatch = Stopwatch()..start();
     try {
       final nonce = await _fetchNonce();
       if (nonce != null) {
         final apiResults = await _searchApi(query, nonce);
-        if (apiResults.isNotEmpty) return apiResults;
+        if (apiResults.isNotEmpty) return ScraperResult.success(apiResults);
       }
-      return _searchHtml(query);
+      final htmlResults = await _searchHtml(query);
+      if (htmlResults.isNotEmpty) return ScraperResult.success(htmlResults);
+      return ScraperResult.failure(EmptyResultError(
+        message: 'No results found',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+      ));
     } catch (e) {
       debugPrint('[Goyabu] Search error: $e');
-      return [];
+      return ScraperResult.failure(UnknownError(
+        message: 'Search error: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
     }
   }
 
@@ -145,23 +160,62 @@ class GoyabuAdapter implements AnimeSourceAdapter {
   }
 
   @override
-  Future<EpisodesResult> getEpisodes(Anime anime) async {
+  Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime) async {
     final url = anime.goyabuUrl ?? anime.url;
-    if (url.isEmpty) return EpisodesResult([], {});
+    if (url.isEmpty) {
+      return ScraperResult.failure(EmptyResultError(
+        message: 'Empty URL',
+        source: source,
+        operationDuration: Duration.zero,
+      ));
+    }
+    final stopwatch = Stopwatch()..start();
     try {
-      final res = await apiClient.get(Uri.parse(url), headers: _headers);
-      if (res.statusCode != 200) return EpisodesResult([], {});
+      // HTTP call with timeout retry (D-04)
+      http.Response res;
+      try {
+        res = await apiClient.get(Uri.parse(url), headers: _headers);
+      } on TimeoutException {
+        debugPrint('[Goyabu] Episodes timeout, retrying once...');
+        res = await apiClient.get(Uri.parse(url), headers: _headers);
+      }
+
+      if (res.statusCode != 200) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'Non-200: ${res.statusCode}',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
       final episodes = _parseEpisodesFromJs(res.body);
-      if (episodes.isEmpty) return EpisodesResult([], {});
+      if (episodes.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No episodes parsed',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
       episodes.sort((a, b) {
         final na = int.tryParse(RegExp(r'\d+').firstMatch(a.number)?.group(0) ?? '0') ?? double.infinity.toInt();
         final nb = int.tryParse(RegExp(r'\d+').firstMatch(b.number)?.group(0) ?? '0') ?? double.infinity.toInt();
         return na.compareTo(nb);
       });
-      return EpisodesResult(episodes, {});
+      return ScraperResult.success(EpisodesResult(episodes, {}));
+    } on TimeoutException {
+      return ScraperResult.failure(TimeoutError(
+        message: 'Episodes timed out after retry',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        timeoutValue: AppConstants.requestTimeout,
+      ));
     } catch (e) {
       debugPrint('[Goyabu] Episodes error: $e');
-      return EpisodesResult([], {});
+      return ScraperResult.failure(UnknownError(
+        message: 'Episodes error: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
     }
   }
 
@@ -204,13 +258,20 @@ class GoyabuAdapter implements AnimeSourceAdapter {
   }
 
   @override
-  Future<List<VideoSource>> getVideoSources(
+  Future<ScraperResult<List<VideoSource>>> getVideoSources(
     Episode episode, {
     Anime? anime,
   }) async {
+    final stopwatch = Stopwatch()..start();
     try {
       final res = await apiClient.get(Uri.parse(episode.url), headers: _headers);
-      if (res.statusCode != 200) return [];
+      if (res.statusCode != 200) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'Non-200: ${res.statusCode}',
+          source: source,
+          operationDuration: stopwatch.elapsed,
+        ));
+      }
       final html = res.body;
       final doc = html_parser.parse(html);
 
@@ -221,38 +282,47 @@ class GoyabuAdapter implements AnimeSourceAdapter {
       final bloggerUrl = playerData.$2;
       if (token.isNotEmpty) {
         final sources = await _decodeBloggerToken(token);
-        if (sources.isNotEmpty) return sources;
+        if (sources.isNotEmpty) return ScraperResult.success(sources);
       }
 
       // Strategy 1: iframe / video element.
       final iframe = doc.querySelector('iframe')?.attributes['src'];
       if (iframe != null && iframe.startsWith('http')) {
-        return [VideoSource(url: iframe, quality: 'Auto', headers: _headers)];
+        return ScraperResult.success([VideoSource(url: iframe, quality: 'Auto', headers: _headers)]);
       }
       final videoSrc = doc.querySelector('video source')?.attributes['src'] ??
           doc.querySelector('video[data-video-src]')?.attributes['data-video-src'];
       if (videoSrc != null && videoSrc.startsWith('http')) {
-        return [VideoSource(url: videoSrc, quality: 'Auto', headers: _headers)];
+        return ScraperResult.success([VideoSource(url: videoSrc, quality: 'Auto', headers: _headers)]);
       }
 
       // Strategy 3: regex video URLs in scripts.
       for (final re in _videoPatterns) {
         final m = re.firstMatch(html);
         if (m != null) {
-          return [
+          return ScraperResult.success([
             VideoSource(url: m.group(1)!, quality: 'Auto', headers: _headers)
-          ];
+          ]);
         }
       }
 
       // Strategy 4: blogger embed URL as last resort.
       if (bloggerUrl.isNotEmpty && bloggerUrl.startsWith('http')) {
-        return [VideoSource(url: bloggerUrl, quality: 'Auto', headers: _headers)];
+        return ScraperResult.success([VideoSource(url: bloggerUrl, quality: 'Auto', headers: _headers)]);
       }
-      return [];
+      return ScraperResult.failure(EmptyResultError(
+        message: 'No video sources found',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+      ));
     } catch (e) {
       debugPrint('[Goyabu] Video error: $e');
-      return [];
+      return ScraperResult.failure(UnknownError(
+        message: 'Video source error: $e',
+        source: source,
+        operationDuration: stopwatch.elapsed,
+        originalError: e,
+      ));
     }
   }
 
