@@ -21,7 +21,7 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
 
   /// Dispatches to [http.Client.get] when a mock client is injected, otherwise
   /// falls back to the app's global [apiClient] singleton.
-  Future<http.Response> _httpGet(Uri uri, {Map<String, String>? headers}) {
+  Future<http.Response> _httpGet(Uri uri, {Map<String, String>? headers}) async {
     if (_client != null) {
       return _client.get(uri, headers: headers);
     }
@@ -84,7 +84,9 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
           ));
         }
       }
-      if (list.isNotEmpty) return ScraperResult.success(list);
+      if (list.isNotEmpty) {
+        return ScraperResult.success(list);
+      }
 
       // Fallback selector used by newer AnimeFire markup.
       final cards = doc.querySelectorAll('.card_ani');
