@@ -345,10 +345,16 @@ class _HomeScreenState extends State<HomeScreen> {
             .where((e) => e.status == 'CURRENT' || e.status == 'REPEATING'))
         .toList();
 
+    final planning = _anilistLists
+        .expand((g) => g.entries.where((e) => e.status == 'PLANNING'))
+        .toList();
+
     final otherGroups = _anilistLists
         .where((g) => g.entries.isNotEmpty &&
             g.entries.every((e) =>
-                e.status != 'CURRENT' && e.status != 'REPEATING'))
+                e.status != 'CURRENT' &&
+                e.status != 'REPEATING' &&
+                e.status != 'PLANNING'))
         .toList();
 
     List<Widget> section(
@@ -465,6 +471,18 @@ class _HomeScreenState extends State<HomeScreen> {
         if (_anilistLoggedIn)
           for (final g in otherGroups)
             if (g.entries.isNotEmpty) _buildAnilistGroup(g, screenWidth),
+        if (_anilistLoggedIn && planning.isNotEmpty)
+          ...section('Planejados', planning.take(20).toList(), cardHeight,
+              (item) {
+            final e = item as AniListEntry;
+            return FocusableCard(
+              imageUrl: e.media.coverImage ?? '',
+              title: e.media.title,
+              width: cardWidth,
+              height: cardHeight,
+              onTap: () => openAnilistDetail(context, e.media),
+            );
+          }, subtitle: '${planning.length} na fila'),
         if (favorites.isNotEmpty)
           ...section('Favoritos', favorites.take(10).toList(), cardHeight,
               (item) {

@@ -1,9 +1,6 @@
 import 'dart:convert';
-import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:pointycastle/digests/sha256.dart';
 import '../../data/models/anilist_models.dart';
 import '../storage/local_storage.dart';
 import '../../data/models/anime.dart';
@@ -12,96 +9,14 @@ import '../constants/app_constants.dart';
 import '../utils/text_utils.dart';
 
 class AniListService {
-  static const _tokenKey = 'anilist_token';
-  static const _userKey = 'anilist_user';
-
-  /// PKCE code verifier stored during auth URL generation.
-  static String? _codeVerifier;
-
-  /// PKCE state parameter stored during auth URL generation.
-  static String? _state;
-
-  /// Generates a cryptographically random base64url string of [byteLength] bytes
-  /// (no padding).
-  static String _randomBase64Url(int byteLength) {
-    final random = Random.secure();
-    final bytes = Uint8List(byteLength);
-    for (var i = 0; i < byteLength; i++) {
-      bytes[i] = random.nextInt(256);
-    }
-    return base64Url.encode(bytes).replaceAll('=', '');
-  }
-
-  /// Computes SHA-256 digest of [input], returns unpadded base64url.
-  static String _sha256Base64Url(String input) {
-    final digest = SHA256Digest();
-    final inputBytes = Uint8List.fromList(utf8.encode(input));
-    final hash = Uint8List(digest.digestSize);
-    digest.update(inputBytes, 0, inputBytes.length);
-    digest.doFinal(hash, 0);
-    return base64Url.encode(hash).replaceAll('=', '');
-  }
-
-  /// Generates a 128-byte PKCE code verifier.
-  static String _generateCodeVerifier() => _randomBase64Url(128);
-
-  /// Generates a 32-byte state parameter.
-  static String _generateState() => _randomBase64Url(32);
-
+  /// Auth URL using the Implicit Grant with AniList's pin redirect.
+  /// The access token appears in the URL fragment
+  /// (`#access_token=...`) or on the pin page itself after authorization.
   static String get authUrl {
-    _codeVerifier = _generateCodeVerifier();
-    final challenge = _sha256Base64Url(_codeVerifier!);
-    _state = _generateState();
     return 'https://anilist.co/api/v2/oauth/authorize'
         '?client_id=${AppConstants.anilistClientId}'
-        '&response_type=code'
-        '&code_challenge=$challenge'
-        '&code_challenge_method=S256'
-        '&state=$_state';
-  }
-
-  /// The PKCE code verifier for the current auth session (used by pairing
-  /// server and WebView flow).
-  static String? get currentCodeVerifier => _codeVerifier;
-
-  /// The PKCE state parameter for the current auth session.
-  static String? get currentState => _state;
-
-  /// Exchanges the authorization [code] for an access token using the PKCE
-  /// [verifier]. Returns the access token on success, null on failure.
-  static Future<String?> exchangeCodeForToken(
-    String code,
-    String verifier, {
-    String? redirectUri,
-  }) async {
-    try {
-      final body = {
-        'grant_type': 'authorization_code',
-        'client_id': AppConstants.anilistClientId,
-        'code': code,
-        'code_verifier': verifier,
-        'redirect_uri': redirectUri ?? 'https://anilist.co/api/v2/oauth/callback',
-      };
-      final res = await http
-          .post(
-            Uri.parse(AppConstants.anilistTokenEndpoint),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: body,
-          )
-          .timeout(AppConstants.requestTimeout);
-      if (res.statusCode != 200) {
-        debugPrint('[AniList] Token exchange error ${res.statusCode}: ${res.body}');
-        return null;
-      }
-      final json = jsonDecode(res.body) as Map<String, dynamic>;
-      final token = json['access_token'] as String?;
-      if (token == null || !token.startsWith('eyJ')) return null;
-      final saved = await saveToken(token);
-      return saved ? token : null;
-    } catch (e) {
-      debugPrint('[AniList] Token exchange error: $e');
-      return null;
-    }
+        '&response_type=token'
+        '&redirect_uri=${Uri.encodeComponent('https://anilist.co/api/v2/oauth/pin')}';
   }
 
   static Future<bool> isLoggedIn() async {
@@ -139,6 +54,26 @@ class AniListService {
     }
   }
 
+  /// ponytail: valida o token no boot re-fetching Viewer. Se OK, atualiza o cache
+  /// local de `user`; se vier null (401/400/network), faz logout limpo. Sem isso,
+  /// um token presente mas inválido deixava `_anilistLoggedIn=true` + user null
+  /// → dropdown aparecia como "Visitante" mas com itens de logado.
+  static Future<AniListUser?> refreshUser() async {
+    final token = await getToken();
+    if (token == null) return null;
+    final user = await _fetchUser(token);
+    if (user == null) {
+      await logout();
+      return null;
+    }
+    await LocalStorage.saveUserData('user', {
+      'id': user.id,
+      'name': user.name,
+      'avatar': user.avatar,
+    });
+    return user;
+  }
+
   static Future<void> logout() async {
     await LocalStorage.removeToken();
     await LocalStorage.removeUserData('user');
@@ -160,33 +95,136 @@ class AniListService {
   static Future<List<AniListGroup>> getUserAnimeList() async {
     final token = await getToken();
     if (token == null) return [];
-    return _fetchAnimeList(token);
+    final lists = await _fetchAnimeList(token);
+    if (lists.isNotEmpty) _persistListsCache(lists);
+    return lists;
+  }
+
+  ///Espelho local da lista AniList (CURRENT/REPEATING/etc). Lê do cache pinta
+  ///instantâneo na home; refresh async sobe a rede (menos requisição, simples).
+  static List<AniListGroup> getCachedAnimeLists() {
+    final raw = LocalStorage.getUserData('lists_cache');
+    if (raw == null) return [];
+    final listsJson = raw['lists'] as List? ?? [];
+    return listsJson
+        .map((l) => AniListGroup.fromJson(l as Map<String, dynamic>))
+        .toList();
+  }
+
+  static void _persistListsCache(List<AniListGroup> lists) {
+    LocalStorage.saveUserData('lists_cache', {
+      'lists': lists
+          .map((l) => {'name': l.name, 'entries': _entriesToJson(l.entries)})
+          .toList(),
+    });
+  }
+
+  static List<Map<String, dynamic>> _entriesToJson(List<AniListEntry> entries) {
+    return entries.map((e) {
+      return <String, dynamic>{
+        'progress': e.progress,
+        'status': e.status,
+        'nextAiringEpisode': e.nextEpisode == null && e.timeUntilAiring == null
+            ? null
+            : {
+                'episode': e.nextEpisode,
+                'timeUntilAiring': e.timeUntilAiring,
+              },
+        'media': {
+          'id': e.media.id,
+          'title': {
+            'romaji': e.media.title,
+            'english': null,
+            'native': null,
+          },
+          'coverImage': {
+            'large': e.media.coverImage,
+            'extraLarge': e.media.coverImageExtra,
+          },
+          'bannerImage': e.media.bannerImage,
+          'episodes': e.media.episodes,
+          'format': e.media.format,
+          'status': e.media.status,
+        },
+      };
+    }).toList();
+  }
+
+  ///Push best-effort: atualiza progresso do anime na lista AniList. Fire-and-
+  ///forget; falha de rede/logado só mantém no local. Throttle por chamada.
+  static Future<bool> updateProgress({
+    required int mediaId,
+    required int progress,
+  }) async {
+    final token = await getToken();
+    if (token == null) return false;
+    const query = '''mutation (\$mediaId: Int, \$progress: Int, \$status: MediaListStatus) {
+      SaveMediaListEntry(mediaId: \$mediaId, progress: \$progress, status: \$status) {
+        id
+        progress
+        status
+      }
+    }''';
+    final res = await _graphQL(
+      query,
+      token,
+      variables: {
+        'mediaId': mediaId,
+        'progress': progress,
+        'status': 'CURRENT',
+      },
+    );
+    return res != null;
   }
 
   static Future<List<AniListGroup>> _fetchAnimeList(String token) async {
     final user = await getUser();
-    if (user == null) return [];
+    if (user == null) {
+      debugPrint('[AniList] _fetchAnimeList: user cache null — aborting');
+      return [];
+    }
+    debugPrint('[AniList] _fetchAnimeList userId=${user.id}');
+    // ponytail: status_not: PLANNING removido — precisamos dos entries
+    // PLANNING para a seção "Planejados" da home. Antes, o filtro excluído
+    // também não justificava watching vir vazio (CURRENT/REPEATING não eram
+    // filtrados), mas expõe maior superfície de teste.
     const query = '''query (\$userId: Int) {
-      MediaListCollection(userId: \$userId, type: ANIME, status_not: PLANNING) {
+      MediaListCollection(userId: \$userId, type: ANIME) {
         lists {
           name
           entries {
+            progress
+            status
+            nextAiringEpisode { episode timeUntilAiring }
             media {
               id
               title { romaji english native }
-              coverImage { large }
+              coverImage { large extraLarge }
+              bannerImage
               episodes
               format
+              status
             }
           }
         }
       }
     }''';
     final res = await _graphQL(query, token, variables: {'userId': user.id});
-    if (res == null) return [];
+    if (res == null) {
+      debugPrint('[AniList] _fetchAnimeList: _graphQL returned null');
+      return [];
+    }
     final collection = res['MediaListCollection'] as Map?;
-    if (collection == null) return [];
+    if (collection == null) {
+      debugPrint('[AniList] _fetchAnimeList: MediaListCollection null. res=$res');
+      return [];
+    }
     final lists = collection['lists'] as List? ?? [];
+    debugPrint('[AniList] _fetchAnimeList: ${lists.length} groups');
+    for (final l in lists) {
+      final entries = (l as Map)['entries'] as List? ?? [];
+      debugPrint('[AniList] group "${l['name']}" entries=${entries.length}');
+    }
     return lists
         .map((l) => AniListGroup.fromJson(l as Map<String, dynamic>))
         .toList();
@@ -327,8 +365,10 @@ class AniListService {
     );
     return Anime(
       name: name,
+      englishName: title['english']?.toString(),
       url: '',
       source: AnimeSource.animeFire,
+      anilistId: m['id'] as int?,
       fallbackImageUrl: cover.best,
       bannerImage: m['bannerImage']?.toString(),
       description: m['description']?.toString(),
@@ -368,6 +408,8 @@ class AniListService {
   }
 
   static void _applyDetail(Anime anime, AniListMediaDetail media) {
+    anime.anilistId ??= media.id;
+    anime.englishName ??= media.englishName;
     anime.bannerImage = media.bannerImage;
     anime.description = media.description;
     anime.episodes = media.episodes;
