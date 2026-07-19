@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/theme_constants.dart';
 import 'cached_image.dart';
+import 'focus_key_handler.dart';
 
 class FocusableCard extends StatefulWidget {
   final String? imageUrl;
@@ -33,6 +34,7 @@ class _FocusableCardState extends State<FocusableCard> {
   Widget build(BuildContext context) {
     return Focus(
       onFocusChange: (focused) => setState(() => _isFocused = focused),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
       child: Semantics(
         button: true,
         child: Material(
@@ -156,6 +158,7 @@ class _FocusableBannerCardState extends State<FocusableBannerCard> {
   Widget build(BuildContext context) {
     return Focus(
       onFocusChange: (focused) => setState(() => _isFocused = focused),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
       child: Semantics(
         button: true,
         child: Material(

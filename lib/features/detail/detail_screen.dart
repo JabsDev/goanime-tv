@@ -5,6 +5,7 @@ import '../../data/repositories/anime_repository.dart';
 import '../../core/storage/local_storage.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../shared/widgets/cached_image.dart';
+import '../../shared/widgets/focus_key_handler.dart';
 import '../player/player_screen.dart';
 import '../superflix/superflix_web_screen.dart';
 
@@ -28,11 +29,13 @@ class _DetailScreenState extends State<DetailScreen> {
   @override
   void initState() {
     super.initState();
+    debugPrint('[Detail] initState name=${widget.anime.name} source=${widget.anime.source}');
     _isFavorite = LocalStorage.isFavorite(widget.anime.name);
     _loadEpisodes();
   }
 
   Future<void> _loadEpisodes() async {
+    debugPrint('[Detail] _loadEpisodes start');
     setState(() => _isLoading = true);
     try {
       final result = await _repo.getEpisodes(widget.anime);
@@ -51,6 +54,10 @@ class _DetailScreenState extends State<DetailScreen> {
           _isLoading = false;
         });
       }
+
+      // Log the result for debugging
+      debugPrint('[Detail] Loaded ${_episodes.length} episodes from ${result.sourceOptions.length} sources');
+      debugPrint('[Detail] _loadEpisodes end eps=${result.episodes.length} sources=${result.sourceOptions.length}');
     } catch (e) {
       debugPrint('[Detail] Load episodes error: $e');
       if (mounted) setState(() => _isLoading = false);
@@ -77,6 +84,7 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Future<void> _playEpisode(int index) async {
+    debugPrint('[Detail] Tap EP index=$index num=${_episodes[index].number} source=${_episodes[index].source} owner=${_episodes[index].owner?.source}');
     _showQualityPicker(_episodes[index], index);
   }
 
@@ -199,7 +207,7 @@ class _DetailScreenState extends State<DetailScreen> {
                                   color: Colors.amber, size: 18),
                               const SizedBox(width: 4),
                               Text(
-                                '${(widget.anime.averageScore! / 10).toStringAsFixed(1)}',
+                                (widget.anime.averageScore! / 10).toStringAsFixed(1),
                                 style: const TextStyle(
                                   fontSize: 16,
                                   color: Colors.amber,
@@ -241,33 +249,9 @@ class _DetailScreenState extends State<DetailScreen> {
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Semantics(
-                        button: true,
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: _toggleFavorite,
-                            customBorder: const CircleBorder(),
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: _isFavorite
-                                    ? ThemeConstants.accent.withValues(alpha: 0.3)
-                                    : ThemeConstants.surfaceLight,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                _isFavorite
-                                    ? Icons.favorite
-                                    : Icons.favorite_border,
-                                color: _isFavorite
-                                    ? ThemeConstants.accent
-                                    : Colors.white,
-                                size: 22,
-                              ),
-                            ),
-                          ),
-                        ),
+                      _FavoriteButton(
+                        isFavorite: _isFavorite,
+                        onTap: _toggleFavorite,
                       ),
                       if (widget.anime.status != null)
                         Padding(
@@ -290,32 +274,31 @@ class _DetailScreenState extends State<DetailScreen> {
           ],
         ),
       ),
-      leading: Semantics(
-        button: true,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () => Navigator.pop(context),
-            customBorder: const CircleBorder(),
-            child: Container(
-              margin: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.4),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.arrow_back,
-                  color: Colors.white, size: 24),
-            ),
-          ),
-        ),
-      ),
+      leading: _BackButton(onTap: () => Navigator.pop(context)),
     );
   }
 
   Widget _buildSliverBody() {
     if (_isLoading) {
-      return const SliverFillRemaining(
-        child: Center(child: CircularProgressIndicator()),
+      // ponytail: cosmetic — spinner sem identificação causa percepção de "nada aconteceu" em TV lenta
+      return SliverFillRemaining(
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(color: ThemeConstants.primary),
+              const SizedBox(height: 16),
+              Text(
+                'Carregando episódios de ${widget.anime.name}...',
+                style: const TextStyle(
+                  color: ThemeConstants.textSecondary,
+                  fontSize: 16,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
       );
     }
 
@@ -383,16 +366,43 @@ class _DetailScreenState extends State<DetailScreen> {
               ],
             ),
           ),
-          if (_episodes.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 40),
-              child: Center(
-                child: Text(
-                  'Nenhum episódio encontrado',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: ThemeConstants.textSecondary,
-                  ),
+            if (_episodes.isEmpty)
+             Padding(
+               padding: const EdgeInsets.only(top: 40),
+               child: Center(
+                 child: Column(
+                   mainAxisSize: MainAxisSize.min,
+                   children: [
+                     const Icon(Icons.sentiment_dissatisfied, color: Colors.white24, size: 48),
+                     const SizedBox(height: 16),
+                     const Text(
+                       'Nada por aqui',
+                       style: TextStyle(
+                         fontSize: 22,
+                         color: ThemeConstants.white,
+                         fontWeight: FontWeight.bold,
+                       ),
+                     ),
+                     const SizedBox(height: 8),
+                     const Text(
+                       'Não conseguimos achar episódios para este anime '
+                       'em nenhuma das fontes (AnimeFire, Goyabu, SuperFlix, '
+                       'AllAnime). Pode ser que o título não esteja indexado ou '
+                       'todas as fontes estejam indisponíveis no momento.',
+                       textAlign: TextAlign.center,
+                       style: TextStyle(
+                         fontSize: 14,
+                         color: ThemeConstants.textSecondary,
+                         height: 1.4,
+                       ),
+                     ),
+                     const SizedBox(height: 24),
+                    _DialogButton(
+                      label: 'Tentar novamente',
+                      primary: true,
+                      onTap: _loadEpisodes,
+                    ),
+                  ],
                 ),
               ),
             )
@@ -445,6 +455,7 @@ class _DetailScreenState extends State<DetailScreen> {
           crossAxisSpacing: 10,
           mainAxisSpacing: 10,
           children: List.generate(_episodes.length, (i) => _EpisodeCard(
+            index: i,
             episode: _episodes[i],
             anime: widget.anime,
             onPlay: () => _playEpisode(i),
@@ -456,11 +467,13 @@ class _DetailScreenState extends State<DetailScreen> {
 }
 
 class _EpisodeCard extends StatefulWidget {
+  final int index;
   final Episode episode;
   final Anime anime;
   final VoidCallback onPlay;
 
   const _EpisodeCard({
+    required this.index,
     required this.episode,
     required this.anime,
     required this.onPlay,
@@ -476,7 +489,17 @@ class _EpisodeCardState extends State<_EpisodeCard> {
   @override
   Widget build(BuildContext context) {
     return Focus(
-      onFocusChange: (focused) => setState(() => _isFocused = focused),
+      onFocusChange: (focused) {
+        setState(() => _isFocused = focused);
+        debugPrint('[EpCard] focus anime=${widget.anime.name} idx=${widget.index} ep=${widget.episode.number} focused=$focused');
+      },
+      onKeyEvent: (node, event) {
+        debugPrint('[EpCard] key anime=${widget.anime.name} idx=${widget.index} ep=${widget.episode.number} logical=${event.logicalKey} physical=${event.physicalKey} time=${event.timeStamp}');
+        // ponytail: FireTV remote envia Select logo seguido de ArrowRight (~7ms).
+        // InkWell.onTap perde a race c/ a trava de foco do ArrowRight. Helper
+        // FocusKeyHandler intercepta Select/Enter/Space e chama onPlay direto.
+        return FocusKeyHandler.handle(node, event, widget.onPlay);
+      },
       child: Semantics(
         button: true,
         child: Material(
@@ -594,12 +617,14 @@ class _QualityDialogState extends State<_QualityDialog> {
   }
 
   Future<void> _loadSources() async {
+    debugPrint('[QualityDialog] loadSources start ep=${widget.episode.number} source=${widget.episode.source ?? widget.anime.source} anime=${widget.anime.name}');
     try {
       var sources = await _repo.getVideoSources(
         widget.episode,
         widget.anime.source,
         anime: widget.anime,
       );
+      debugPrint('[QualityDialog] primary sources count=${sources.length}');
 
       // SuperFlix player pages are gated by Cloudflare Turnstile; when HTTP
       // extraction comes back empty, fall back to the WebView resolver which
@@ -610,6 +635,7 @@ class _QualityDialogState extends State<_QualityDialog> {
           effectiveSource == AnimeSource.superFlix &&
           sfAnime.superFlixTmdbId != null &&
           mounted) {
+        debugPrint('[QualityDialog] invoking SuperFlix WebView resolver');
         sources = await SuperFlixWebScreen.resolve(
           context,
           anime: sfAnime,
@@ -618,16 +644,32 @@ class _QualityDialogState extends State<_QualityDialog> {
       }
 
       if (!mounted) return;
+      debugPrint('[QualityDialog] loadSources done count=${sources.length}');
       setState(() {
         _sources = sources;
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
+      debugPrint('[QualityDialog] Load sources error: $e');
       setState(() {
-        _error = 'Erro ao carregar: $e';
+        _error = 'Fonte indisponível. Tente novamente ou escolha outra fonte.';
         _loading = false;
       });
+    }
+  }
+
+  String _effectiveSourceName() {
+    final src = widget.episode.source ?? widget.anime.source;
+    switch (src) {
+      case AnimeSource.animeFire:
+        return 'AnimeFire';
+      case AnimeSource.goyabu:
+        return 'Goyabu';
+      case AnimeSource.superFlix:
+        return 'SuperFlix';
+      case AnimeSource.allAnime:
+        return 'AllAnime';
     }
   }
 
@@ -635,22 +677,53 @@ class _QualityDialogState extends State<_QualityDialog> {
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: ThemeConstants.surface,
-      insetPadding: const EdgeInsets.all(24),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
+      insetPadding: const EdgeInsets.all(32),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 480),
+        padding: const EdgeInsets.all(28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Selecionar Qualidade',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 6,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: ThemeConstants.primary,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Selecionar Qualidade',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Ep ${widget.episode.number} · ${_effectiveSourceName()}',
+                        style: const TextStyle(
+                          color: ThemeConstants.textSecondary,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             if (_loading)
               const Padding(
                 padding: EdgeInsets.all(24),
@@ -674,42 +747,89 @@ class _QualityDialogState extends State<_QualityDialog> {
               )
             else if (_error != null)
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(8),
                 child: Column(
                   children: [
-                    Text(_error!,
-                        style: const TextStyle(
-                            color: Colors.red, fontSize: 16)),
-                    const SizedBox(height: 16),
-                    Semantics(
-                      button: true,
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => Navigator.pop(context),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 24, vertical: 12),
-                            decoration: BoxDecoration(
-                              color: ThemeConstants.primary,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Text('Fechar',
-                                style: TextStyle(
-                                    color: Colors.white, fontSize: 18)),
-                          ),
+                    const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Não foi possível carregar o vídeo',
+                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'O servidor pode estar temporariamente indisponível. Tente novamente ou escolha outra fonte.',
+                      style: TextStyle(color: ThemeConstants.textSecondary, fontSize: 14),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _DialogButton(
+                          label: 'Tentar novamente',
+                          primary: true,
+                          onTap: () {
+                            setState(() { _error = null; _loading = true; });
+                            _loadSources();
+                          },
                         ),
-                      ),
+                        const SizedBox(width: 12),
+                        _DialogButton(
+                          label: 'Fechar',
+                          onTap: () => Navigator.pop(context),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               )
-            else if (_sources != null && _sources!.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('Nenhum vídeo disponível.',
-                    style: TextStyle(
-                        color: ThemeConstants.textSecondary, fontSize: 16)),
+            else if (_sources == null || _sources!.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  children: [
+                    const Icon(Icons.videocam_off, color: Colors.orange, size: 48),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Nenhuma resolução disponível',
+                      style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Tentamos AnimeFire, Goyabu, SuperFlix e AllAnime '
+                      'para o Ep ${widget.episode.number} deste anime, '
+                      'mas nenhuma fonte resolveu um stream jogável agora. '
+                      'Possíveis motivos: Cloudflare, fonte fora do ar ou o '
+                      'anime ainda não foi indexado por essas fontes.',
+                      style: const TextStyle(
+                        color: ThemeConstants.textSecondary,
+                        fontSize: 14,
+                        height: 1.4,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _DialogButton(
+                          label: 'Tentar novamente',
+                          primary: true,
+                          onTap: () {
+                            setState(() { _loading = true; _sources = null; });
+                            _loadSources();
+                          },
+                        ),
+                        const SizedBox(width: 12),
+                        _DialogButton(
+                          label: 'Voltar',
+                          onTap: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               )
             else
               Column(
@@ -718,44 +838,10 @@ class _QualityDialogState extends State<_QualityDialog> {
                   final idx = e.key;
                   final src = e.value;
                   return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Semantics(
-                      button: true,
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => _navigateToPlayer(idx),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: ThemeConstants.surfaceLight,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: ThemeConstants.primary
-                                    .withValues(alpha: 0.3),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.high_quality,
-                                    color: Colors.white),
-                                const SizedBox(width: 12),
-                                Text(
-                                  src.quality,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 18,
-                                  ),
-                                ),
-                                const Spacer(),
-                                const Icon(Icons.play_arrow,
-                                    color: ThemeConstants.primary),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: _QualityItem(
+                      quality: src.quality,
+                      onTap: () => _navigateToPlayer(idx),
                     ),
                   );
                 }).toList(),
@@ -767,6 +853,7 @@ class _QualityDialogState extends State<_QualityDialog> {
   }
 
   void _navigateToPlayer(int qualityIndex) {
+    debugPrint('[QualityDialog] navigate idx=$qualityIndex');
     Navigator.pop(context);
     Navigator.push(
       context,
@@ -778,6 +865,301 @@ class _QualityDialogState extends State<_QualityDialog> {
           episodeIndex: widget.episodeIndex,
           initialSources: _sources,
           initialIndex: qualityIndex,
+        ),
+      ),
+    );
+  }
+}
+
+// ponytail: antes, itens do dialog eram InkWell sem Focus → D-pad andava
+// invisível. Aproveita o padrão AnimatedContainer com border/shadow primary
+// usado em FocusableCard/EpisodeCard para foco visível no controle.
+class _QualityItem extends StatefulWidget {
+  final String quality;
+  final VoidCallback onTap;
+
+  const _QualityItem({required this.quality, required this.onTap});
+
+  @override
+  State<_QualityItem> createState() => _QualityItemState();
+}
+
+class _QualityItemState extends State<_QualityItem> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
+      child: Semantics(
+        button: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+              decoration: BoxDecoration(
+                color: _isFocused
+                    ? ThemeConstants.primary.withValues(alpha: 0.15)
+                    : ThemeConstants.surfaceLight,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : ThemeConstants.surfaceLight,
+                  width: _isFocused
+                      ? ThemeConstants.focusBorderWidth
+                      : 1,
+                ),
+                boxShadow: _isFocused
+                    ? [
+                        BoxShadow(
+                          color: ThemeConstants.primary.withValues(alpha: 0.4),
+                          blurRadius: ThemeConstants.focusGlowBlur,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : [],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.high_quality,
+                    color: _isFocused
+                        ? ThemeConstants.primary
+                        : ThemeConstants.white,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      widget.quality,
+                      style: TextStyle(
+                        color: _isFocused
+                            ? ThemeConstants.primary
+                            : ThemeConstants.white,
+                        fontSize: 18,
+                        fontWeight: _isFocused
+                            ? FontWeight.bold
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.play_arrow,
+                    color: _isFocused
+                        ? ThemeConstants.primary
+                        : ThemeConstants.textSecondary,
+                    size: 26,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DialogButton extends StatefulWidget {
+  final String label;
+  final bool primary;
+  final VoidCallback onTap;
+
+  const _DialogButton({
+    required this.label,
+    required this.onTap,
+    this.primary = false,
+  });
+
+  @override
+  State<_DialogButton> createState() => _DialogButtonState();
+}
+
+class _DialogButtonState extends State<_DialogButton> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
+      child: Semantics(
+        button: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              decoration: BoxDecoration(
+                color: widget.primary
+                    ? (_isFocused
+                        ? ThemeConstants.primary
+                        : ThemeConstants.primaryDark)
+                    : (_isFocused
+                        ? ThemeConstants.surfaceLight
+                        : ThemeConstants.surface),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : (widget.primary
+                          ? ThemeConstants.primary
+                          : ThemeConstants.surfaceLight),
+                  width: _isFocused
+                      ? ThemeConstants.focusBorderWidth
+                      : 1,
+                ),
+                boxShadow: _isFocused
+                    ? [
+                        BoxShadow(
+                          color: ThemeConstants.primary.withValues(alpha: 0.5),
+                          blurRadius: ThemeConstants.focusGlowBlur,
+                        ),
+                      ]
+                    : [],
+              ),
+              child: Text(
+                widget.label,
+                style: TextStyle(
+                  color: widget.primary
+                      ? Colors.white
+                      : (_isFocused
+                          ? ThemeConstants.primary
+                          : ThemeConstants.white),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ponytail: botão favorito focável — antes InkWell sem Focus invisível no remote.
+class _FavoriteButton extends StatefulWidget {
+  final bool isFavorite;
+  final VoidCallback onTap;
+
+  const _FavoriteButton({required this.isFavorite, required this.onTap});
+
+  @override
+  State<_FavoriteButton> createState() => _FavoriteButtonState();
+}
+
+class _FavoriteButtonState extends State<_FavoriteButton> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
+      child: Semantics(
+        button: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            customBorder: const CircleBorder(),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: widget.isFavorite
+                    ? ThemeConstants.accent.withValues(alpha: 0.3)
+                    : ThemeConstants.surfaceLight,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : Colors.transparent,
+                  width: ThemeConstants.focusBorderWidth,
+                ),
+                boxShadow: _isFocused
+                    ? [
+                        BoxShadow(
+                          color: ThemeConstants.primary.withValues(alpha: 0.5),
+                          blurRadius: ThemeConstants.focusGlowBlur,
+                        ),
+                      ]
+                    : [],
+              ),
+              child: Icon(
+                widget.isFavorite ? Icons.favorite : Icons.favorite_border,
+                color: widget.isFavorite ? ThemeConstants.accent : Colors.white,
+                size: 22,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BackButton extends StatefulWidget {
+  final VoidCallback onTap;
+
+  const _BackButton({required this.onTap});
+
+  @override
+  State<_BackButton> createState() => _BackButtonState();
+}
+
+class _BackButtonState extends State<_BackButton> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
+      child: Semantics(
+        button: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            customBorder: const CircleBorder(),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.4),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : Colors.transparent,
+                  width: ThemeConstants.focusBorderWidth,
+                ),
+                boxShadow: _isFocused
+                    ? [
+                        BoxShadow(
+                          color: ThemeConstants.primary.withValues(alpha: 0.5),
+                          blurRadius: ThemeConstants.focusGlowBlur,
+                        ),
+                      ]
+                    : [],
+              ),
+              child: Icon(
+                Icons.arrow_back,
+                color: _isFocused ? ThemeConstants.primary : Colors.white,
+                size: 24,
+              ),
+            ),
+          ),
         ),
       ),
     );
