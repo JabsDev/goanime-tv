@@ -425,10 +425,13 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-        // Continue assistindo — AniList quando logado; histórico local offline.
+        // Continue assistindo — AniList quando logado e com CURRENT/REPEATING;
+        // histórico local como fallback (logado sem listas ativas OU deslogado).
+        // ponytail: antes o else if travava em !_anilistLoggedIn, criando um
+        // limbo onde logado sem watching escondia o histórico local.
         if (_anilistLoggedIn && watching.isNotEmpty)
           ..._buildWatchingSection(watching, screenWidth)
-        else if (!_anilistLoggedIn && history.isNotEmpty)
+        else if (history.isNotEmpty)
           ...section('Continue assistindo', history.take(10).toList(), cardHeight,
               (item) {
             final m = item as Map<String, dynamic>;
