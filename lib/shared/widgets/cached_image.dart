@@ -34,9 +34,14 @@ class CachedImage extends StatelessWidget {
       width: width,
       height: height,
       fadeInDuration: const Duration(milliseconds: 200),
-      memCacheWidth: width != null ? width!.toInt() * 2 : null,
-      placeholder: (_, __) => fallback ?? const SizedBox.shrink(),
-      errorWidget: (_, __, ___) => fallback ?? const SizedBox.shrink(),
+      // ponytail: width pode chegar como double.infinity (GridView cells sem
+      // LayoutBuilder) — .toInt() em Infinity lança UnsupportedError e crasha
+      // a tela de busca. Blinda: só converte quando finite.
+      memCacheWidth: (width != null && width!.isFinite && width! > 0)
+          ? width!.toInt() * 2
+          : null,
+      placeholder: (_, _) => fallback ?? const SizedBox.shrink(),
+      errorWidget: (_, _, _) => fallback ?? const SizedBox.shrink(),
     );
 
     if (borderRadius != null) {
