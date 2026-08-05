@@ -31,7 +31,6 @@ class AnimeScraper {
           return ScraperResult<List<Anime>>.failure(UnknownError(
             message: 'Unhandled: $e',
             source: a.source,
-            operationDuration: Duration.zero,
             originalError: e,
           ));
         }
@@ -62,7 +61,10 @@ class AnimeScraper {
             return a.superFlixTmdbId != null;
           case AnimeSource.animeFire:
           case AnimeSource.goyabu:
+          case AnimeSource.betterAnime:
             return a.url.isNotEmpty;
+          default:
+            return false;
         }
       }
       allAnimes.removeWhere((a) => !hasValidId(a));
@@ -131,6 +133,14 @@ class AnimeScraper {
       sfOwner ??= await _findBySource(anime.name, AnimeSource.superFlix);
       gyOwner ??= await _findBySource(anime.name, AnimeSource.goyabu);
 
+      // AniList metadata (anilistId != null on entry; AniListAdapter.getEpisodes
+      // uses anime.anilistId! directly, no retry needed).
+      if (anime.anilistId != null) {
+        final alAdapter = SourceRegistry.forSource(AnimeSource.anilist);
+        register('AniList', AnimeSource.anilist, anime,
+            alAdapter.getEpisodes(anime));
+      }
+
       // Register in PT-BR priority order so the default episode list and the
       // source dropdown prefer working PT-BR providers.
       if (afOwner != null) {
@@ -157,16 +167,15 @@ class AnimeScraper {
       // Per-future error isolation for episode fetchers
       final futures = fetchers.values.map((f) async {
         try {
-          return await f;
-        } catch (e) {
-          debugPrint('[AnimeScraper] Episode fetch error: $e');
-          return ScraperResult<EpisodesResult>.failure(UnknownError(
-            message: 'Unhandled episode fetch: $e',
-            source: AnimeSource.animeFire, // approximate; exact source from context
-            operationDuration: Duration.zero,
-            originalError: e,
-          ));
-        }
+           return await f;
+         } catch (e) {
+           debugPrint('[AnimeScraper] Episode fetch error: $e');
+           return ScraperResult<EpisodesResult>.failure(UnknownError(
+             message: 'Unhandled episode fetch: $e',
+             source: AnimeSource.animeFire, // approximate; exact source from context
+             originalError: e,
+           ));
+         }
       });
       final results = await Future.wait(futures);
 
@@ -183,6 +192,33 @@ class AnimeScraper {
       final grouped = <String, List<Episode>>{};
       var firstEpisodes = <Episode>[];
       String? firstName;
+
+      // Phase 2: Helper to merge episodes by number, prefer AniList metadata
+      List<Episode> mergeEpisodes(List<Episode> base, List<Episode> anilist) {
+        final merged = <Episode>[];
+        for (final ep in base) {
+          merged.add(ep);
+        }
+        for (final anilistEp in anilist) {
+          final existingEp = AnimeScraper.firstWhereOrNull(merged, (Episode ep) => ep.number == anilistEp.number);
+          if (existingEp != null) {
+            // Prefer AniList metadata for thumbnail, title, description
+            final mergedEp = Episode(
+              number: anilistEp.number,
+              url: existingEp.url, // Use AnimeFire URL for streaming
+              thumbnail: anilistEp.thumbnail ?? existingEp.thumbnail,
+              title: anilistEp.title ?? existingEp.title,
+              description: anilistEp.description ?? existingEp.description,
+              source: existingEp.source, // Prefer AnimeFire source for streaming
+              owner: existingEp.owner,
+            );
+            merged.add(mergedEp);
+          } else {
+            merged.add(anilistEp);
+          }
+        }
+        return merged.toList()..sort((a, b) => a.number.compareTo(b.number));
+      }
 
       for (var i = 0; i < results.length; i++) {
         final result = results[i];
@@ -204,6 +240,26 @@ class AnimeScraper {
             debugPrint('[AnimeScraper] $key episodes failed: ${err.message}');
           case Loading():
             break;
+        }
+      }
+
+      // Phase 2: Merge grouped episodes for sources with both AnimeFire and AniList
+      if (firstName != null && firstName.contains('AniList')) {
+        // Find corresponding AnimeFire result
+        final animeFireKey = results.asMap().entries
+            .firstWhere((e) => e.value is Success && e.value is Success)
+            .key;
+        final animeFireResult = results[animeFireKey] as Success;
+        if (animeFireResult.data.episodes.isNotEmpty) {
+          // Merge the episode lists, prefer AniList metadata
+          final merged = mergeEpisodes(
+            animeFireResult.data.episodes,
+            grouped[firstName]!,
+          );
+          // Replace the firstEpisodes with the merged result
+          firstEpisodes = merged;
+          grouped.remove(firstName);
+          grouped['AnimeFire + AniList'] = merged;
         }
       }
 
@@ -233,17 +289,20 @@ class AnimeScraper {
       switch (result) {
         case Success(data: final results):
           if (results.isEmpty) return null;
-          bool valid(Anime a) {
-            switch (source) {
-              case AnimeSource.allAnime:
-                return a.allAnimeId != null;
-              case AnimeSource.superFlix:
-                return a.superFlixTmdbId != null;
-              case AnimeSource.animeFire:
-              case AnimeSource.goyabu:
-                return a.url.isNotEmpty;
-            }
-          }
+           bool valid(Anime a) {
+             switch (source) {
+               case AnimeSource.allAnime:
+                 return a.allAnimeId != null;
+               case AnimeSource.superFlix:
+                 return a.superFlixTmdbId != null;
+               case AnimeSource.animeFire:
+               case AnimeSource.goyabu:
+               case AnimeSource.betterAnime:
+                 return a.url.isNotEmpty;
+               default:
+                 return false;
+             }
+           }
 
           final candidates = results.where(valid).toList();
           if (candidates.isEmpty) return null;
@@ -314,5 +373,14 @@ class AnimeScraper {
     t = t.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
     t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
     return t;
+  }
+
+  /// Helper to find first element matching test, return null if not found
+  /// ponytail: one-liner fallback from dart:collection if needed
+  static Episode? firstWhereOrNull(Iterable<Episode> iterable, bool Function(Episode) test) {
+    for (final item in iterable) {
+      if (test(item)) return item;
+    }
+    return null;
   }
 }

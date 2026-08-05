@@ -46,7 +46,6 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
   Future<ScraperResult<List<Anime>>> search(String animeName) async {
     final url =
         '${AppConstants.baseSiteUrl}/pesquisar/${TextUtils.treatName(animeName)}';
-    final stopwatch = Stopwatch()..start();
     try {
       // HTTP call with timeout retry (D-04: retry once on TimeoutException)
       http.Response res;
@@ -61,7 +60,6 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
         return ScraperResult.failure(EmptyResultError(
           message: 'Non-200: ${res.statusCode}',
           source: source,
-          operationDuration: stopwatch.elapsed,
         ));
       }
       final doc = html_parser.parse(res.body);
@@ -108,7 +106,6 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
         return ScraperResult.failure(EmptyResultError(
           message: 'No results found',
           source: source,
-          operationDuration: stopwatch.elapsed,
         ));
       }
       return ScraperResult.success(list);
@@ -117,46 +114,105 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
       return ScraperResult.failure(TimeoutError(
         message: 'Search timed out after retry',
         source: source,
-        operationDuration: stopwatch.elapsed,
-        timeoutValue: AppConstants.requestTimeout,
       ));
-    } on FormatException catch (e) {
+    } on FormatException {
       return ScraperResult.failure(ParseFailureError(
         message: 'HTML parse failure',
         source: source,
-        operationDuration: stopwatch.elapsed,
-        snippet: (e.source?.length ?? 0) > 200
-            ? e.source!.substring(0, 200)
-            : (e.source ?? 'unknown'),
       ));
     } catch (e) {
       debugPrint('[AnimeFire] Search error: $e');
       return ScraperResult.failure(UnknownError(
         message: 'Unexpected error: $e',
         source: source,
-        operationDuration: stopwatch.elapsed,
-        originalError: e,
       ));
     }
   }
 
   @override
   Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime) async {
+    debugPrint('[AnimeFireAdapter] getEpisodes START anime=${anime.name}');
+    debugPrint('[AnimeFireAdapter] anime.url=${anime.url}');
+
     final stopwatch = Stopwatch()..start();
-    final episodes = await _fetchEpisodes(anime.url);
-    if (episodes.isEmpty) {
-      return ScraperResult.failure(EmptyResultError(
-        message: 'No episodes found',
+
+    try {
+      final uri = Uri.parse(anime.url);
+      debugPrint('[AnimeFireAdapter] Fetching episodes from: $uri');
+
+      final res = await _httpGet(uri, headers: {
+        'User-Agent': AppConstants.userAgent,
+      });
+
+      debugPrint('[AnimeFireAdapter] Response status: ${res.statusCode}');
+
+      if (res.statusCode != 200) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'Non-200: ${res.statusCode}',
+          source: source,
+        ));
+      }
+
+      final doc = html_parser.parse(res.body);
+      debugPrint('[AnimeFireAdapter] Parsed HTML, looking for episodes');
+
+      final episodeUrls = _extractEpisodeUrls(doc, anime);
+      debugPrint('[AnimeFireAdapter] Found ${episodeUrls.length} episode URLs');
+
+      if (episodeUrls.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No episode URLs found in HTML',
+          source: source,
+        ));
+      }
+
+      final episodes = episodeUrls.asMap().entries.map((entry) {
+        final num = entry.key + 1;
+        return Episode(
+          number: num.toString(),
+          url: entry.value,
+          title: 'Episódio $num',
+          owner: anime,
+        );
+      }).toList();
+
+      return ScraperResult.success(EpisodesResult(
+        episodes,
+        {source.toString(): episodes},
+      ));
+    } catch (e, stackTrace) {
+      debugPrint('[AnimeFireAdapter] getEpisodes ERROR: $e\n$stackTrace');
+      return ScraperResult.failure(UnknownError(
+        message: 'getEpisodes error: $e',
         source: source,
-        operationDuration: stopwatch.elapsed,
+        originalError: e,
       ));
     }
-    episodes.sort((a, b) {
-      final na = int.tryParse(a.number) ?? double.infinity.toInt();
-      final nb = int.tryParse(b.number) ?? double.infinity.toInt();
-      return na.compareTo(nb);
-    });
-    return ScraperResult.success(EpisodesResult(episodes, {}));
+  }
+
+  /// Extracts episode URLs from HTML document
+  List<String> _extractEpisodeUrls(dynamic doc, Anime anime) {
+    final episodeUrls = <String>[];
+
+    final episodeElements = doc.querySelectorAll('a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex');
+
+    debugPrint('[AnimeFireAdapter] Found ${episodeElements.length} episode elements');
+
+    for (final element in episodeElements) {
+      final linkElement = element.querySelector('a[href]');
+      if (linkElement != null) {
+        final href = linkElement.attributes['href'];
+        if (href != null && href.isNotEmpty) {
+          final episodeUrl = Uri.parse(href).replace(
+            scheme: 'https',
+            host: 'animefire.io',
+          );
+          episodeUrls.add(episodeUrl.toString());
+        }
+      }
+    }
+
+    return episodeUrls;
   }
 
   @override
@@ -164,14 +220,12 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
     Episode episode, {
     Anime? anime,
   }) async {
-    final stopwatch = Stopwatch()..start();
     try {
       final sources = await _extractFromAnimeFire(episode.url);
       if (sources.isEmpty) {
         return ScraperResult.failure(EmptyResultError(
           message: 'No video sources found',
           source: source,
-          operationDuration: stopwatch.elapsed,
         ));
       }
       return ScraperResult.success(sources);
@@ -180,7 +234,6 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
       return ScraperResult.failure(UnknownError(
         message: 'Video source extraction failed: $e',
         source: source,
-        operationDuration: stopwatch.elapsed,
         originalError: e,
       ));
     }
@@ -400,8 +453,11 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
     }
   }
 
-  Future<List<VideoSource>> _extractFromBlogger(String bloggerUrl) async {
+  Future<List<VideoSource>> _extractFromBlogger(String bloggerUrl,
+      {int hop = 0}) async {
     try {
+      // ponytail: hop ceiling on redirect recursion, no visited-set.
+      if (hop > 5) return <VideoSource>[];
       debugPrint('[AnimeFire] Blogger: $bloggerUrl');
       final client = HttpClient();
       client.autoUncompress = false;
@@ -438,7 +494,7 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
         }
         if (location != null) {
           client.close(force: true);
-          return _extractFromBlogger(location);
+          return _extractFromBlogger(location, hop: hop + 1);
         }
       }
 
@@ -558,6 +614,44 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
       debugPrint('[AnimeFire] Blogger error: $e');
       return [];
     }
+  }
+
+  @override
+  Future<AvailabilityReport> checkAvailability(String animeName) async {
+    final report = AvailabilityReport(
+      source: source,
+      animeName: animeName,
+    );
+
+    try {
+      final result = await search(animeName);
+      switch (result) {
+        case Success(data: final animes):
+          if (animes.isNotEmpty) {
+            report.status = AvailabilityStatus.available;
+            report.episodeCount = animes.first.episodes ?? 0;
+            return report;
+          }
+        case Failure(error: final err):
+          if (err is EmptyResultError) {
+            report.status = AvailabilityStatus.notFound;
+            report.reason = 'Anime not found in catalog';
+          } else if (err is UnknownError) {
+            report.status = AvailabilityStatus.error;
+            report.reason = 'Unknown error: ${err.message}';
+          } else if (err is TimeoutError) {
+            report.status = AvailabilityStatus.timeout;
+            report.reason = 'Request timed out';
+          }
+        case Loading():
+          break;
+      }
+    } on Exception catch (e) {
+      report.status = AvailabilityStatus.exception;
+      report.reason = 'Exception: $e';
+    }
+
+    return report;
   }
 
   String _resolveUrl(String ref) {
