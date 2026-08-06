@@ -179,7 +179,9 @@ class AnimeScraper {
           case Success(data: final episodesResult):
             if (episodesResult.sourceOptions.isNotEmpty) {
               for (final entry in episodesResult.sourceOptions.entries) {
-                grouped['$key (${entry.key})'] = tag(key, entry.value);
+                // ponytail: cada fonte registra um único sub-item; usa a chave
+                // amigável ('AnimeFire') sem o nome do enum entre parênteses.
+                grouped[key] = tag(key, entry.value);
               }
             } else if (episodesResult.episodes.isNotEmpty) {
               grouped[key] = tag(key, episodesResult.episodes);

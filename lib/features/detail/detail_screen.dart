@@ -532,7 +532,9 @@ if (_episodes.isEmpty)
 
   Widget _buildSliverEpisodeGrid() {
     final width = MediaQuery.sizeOf(context).width;
-    final crossAxisCount = width > 900 ? 5 : width > 600 ? 4 : 2;
+    // ponytail: FireTV reporta density 320 (dpr 2.0) → logical width = 960.
+    // 3 colunas nessa faixa dão card ~300lp p/ título de 3 linhas caber.
+    final crossAxisCount = width > 1400 ? 5 : width > 900 ? 3 : width > 600 ? 2 : 1;
     final progress = LocalStorage.getWatchProgress(widget.anime.name);
     final watchedSet =
         (progress?['watched'] as List?)?.cast<int>().toSet() ?? <int>{};
@@ -551,7 +553,7 @@ if (_episodes.isEmpty)
       sliver: SliverGrid.builder(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
-          childAspectRatio: 2.8,
+          childAspectRatio: 2.2,
           crossAxisSpacing: 10,
           mainAxisSpacing: 10,
         ),
@@ -593,7 +595,8 @@ class _EpisodeCardState extends State<_EpisodeCard> {
   bool _isFocused = false;
 
   // B6: a fonte fabrica "Episódio N"; repetir como texto trunca feio
-  // ("Epis…"). Quando o título é genérico, mostra só o badge "EP N".
+  // ("Epis…"). Para títulos estúrgicos (só "Episódio N"), mostra o número em
+  // destaque no lugar do título — evita o card vazio e reforça o número.
   Widget _buildTitle() {
     final t = widget.episode.title;
     final generic = t == null ||
@@ -601,9 +604,9 @@ class _EpisodeCardState extends State<_EpisodeCard> {
         RegExp(r'^epis[oó]dio\s+\d+$', caseSensitive: false).hasMatch(t);
     if (generic) {
       return Text(
-        'EP ${widget.episode.number}',
+        'Episódio ${widget.episode.number}',
         style: const TextStyle(
-          fontSize: 16,
+          fontSize: 15,
           fontWeight: FontWeight.bold,
           color: ThemeConstants.white,
         ),
@@ -612,14 +615,73 @@ class _EpisodeCardState extends State<_EpisodeCard> {
       );
     }
     return Text(
-      t!,
+      t,
       style: const TextStyle(
         fontSize: 15,
         fontWeight: FontWeight.w500,
         color: ThemeConstants.white,
+        height: 1.25,
       ),
-      maxLines: 1,
+      maxLines: 3,
       overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  Widget _buildCover() {
+    final thumb = widget.episode.thumbnail;
+    final poster = widget.anime.imageUrl;
+    final hasThumb = thumb != null && thumb.isNotEmpty;
+    final hasPoster = poster.isNotEmpty;
+    return Container(
+      width: 120,
+      height: double.infinity,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: ThemeConstants.surfaceLight,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (hasThumb || hasPoster)
+            CachedImage(
+              url: hasThumb ? thumb : poster,
+              fit: BoxFit.cover,
+              fallback: Container(color: ThemeConstants.surfaceLight),
+            ),
+          if (!hasThumb && !hasPoster)
+            Center(
+              child: Text(
+                'EP ${widget.episode.number}',
+                style: const TextStyle(
+                  color: ThemeConstants.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          Positioned(
+            left: 4,
+            top: 4,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'EP ${widget.episode.number}',
+                style: const TextStyle(
+                  color: ThemeConstants.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -670,39 +732,20 @@ class _EpisodeCardState extends State<_EpisodeCard> {
               ),
               child: Row(
                 children: [
-                  // B6: sem thumbnail → ícone de play (placeholder visual) em
-                  // vez de fundo escuro mudo; "EP N" vira o label principal.
-                  Builder(builder: (context) {
-                    final hasThumb = widget.episode.thumbnail != null &&
-                        widget.episode.thumbnail!.isNotEmpty;
-                    return Container(
-                      width: 72,
-                      height: double.infinity,
-                      decoration: BoxDecoration(
-                        color: _isFocused
-                            ? ThemeConstants.primaryDark
-                            : ThemeConstants.surfaceLight,
-                        borderRadius: BorderRadius.circular(7),
-                        image: hasThumb
-                            ? DecorationImage(
-                                image: NetworkImage(widget.episode.thumbnail!),
-                                fit: BoxFit.cover,
-                              )
-                            : null,
-                      ),
-                      child: hasThumb
-                          ? null
-                          : const Center(
-                              child: Icon(Icons.play_arrow,
-                                  color: ThemeConstants.textSecondary,
-                                  size: 28),
-                            ),
-                    );
-                  }),
-                  const SizedBox(width: 10),
-                  Expanded(child: _buildTitle()),
+                  _buildCover(),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildTitle(),
+                      ],
+                    ),
+                  ),
                   Padding(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.only(right: 10),
                     child: Icon(
                       Icons.play_circle_filled,
                       color: _isFocused
@@ -1348,7 +1391,7 @@ class _SourceSelectorState extends State<_SourceSelector> {
         return PopupMenuItem<String>(
           value: e.key,
           child: Text(
-            '${e.key} (${e.value.length})',
+            e.key,
             style: const TextStyle(
               color: ThemeConstants.white,
               fontSize: 14,
@@ -1363,9 +1406,6 @@ class _SourceSelectorState extends State<_SourceSelector> {
 
   @override
   Widget build(BuildContext context) {
-    final count = widget.selectedSource == null
-        ? 0
-        : widget.options[widget.selectedSource]?.length ?? 0;
     return Focus(
       onFocusChange: (f) => setState(() => _isFocused = f),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, _openMenu),
@@ -1403,7 +1443,7 @@ class _SourceSelectorState extends State<_SourceSelector> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    '${widget.selectedSource ?? ''} ($count)',
+                    widget.selectedSource ?? '',
                     style: TextStyle(
                       color: _isFocused
                           ? ThemeConstants.primary
