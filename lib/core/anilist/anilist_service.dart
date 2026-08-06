@@ -1,51 +1,70 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'dart:typed_data';
 import '../../data/models/anilist_models.dart';
-import '../storage/local_storage.dart';
+import 'anilist_auth_service.dart';
 import '../../data/models/anime.dart';
 import '../cache/app_caches.dart';
 import '../constants/app_constants.dart';
 import '../utils/text_utils.dart';
 
+/// Ponytail: Manages AniList API requests and authentication state.
 class AniListService {
-  /// Auth URL using the Implicit Grant with AniList's pin redirect.
-  /// The access token appears in the URL fragment
-  /// (`#access_token=...`) or on the pin page itself after authorization.
+  static String _currentState = '';
+
+  static String get currentState {
+    return _currentState;
+  }
+
+  /// Authorize URL generic use (QR/scan): Implicit Grant — no PKCE, because
+  /// AniList rejects code/verifier exchanges with `401 invalid_client`. The
+  /// access token comes back in the redirect URI fragment.
   static String get authUrl {
     return 'https://anilist.co/api/v2/oauth/authorize'
         '?client_id=${AppConstants.anilistClientId}'
         '&response_type=token'
-        '&redirect_uri=${Uri.encodeComponent('https://anilist.co/api/v2/oauth/pin')}';
+        '&state=${_generateState()}'
+        '&redirect_uri=${Uri.encodeComponent(AppConstants.anilistRedirectUri)}';
   }
 
   static Future<bool> isLoggedIn() async {
-    return LocalStorage.getToken() != null;
+    return AnilistAuthService.getToken() != null;
   }
 
   static Future<String?> getToken() async {
-    return LocalStorage.getToken();
+    return AnilistAuthService.getToken();
   }
 
   static Future<bool> saveToken(String token) async {
     if (!token.startsWith('eyJ')) return false;
-    final saved = await LocalStorage.saveToken(token);
+    final saved = await AnilistAuthService.saveToken(token);
     if (!saved) return false;
     final user = await _fetchUser(token);
     if (user != null) {
-      await LocalStorage.saveUserData('user', {
+      await AnilistAuthService.saveUserData('user', {
         'id': user.id,
         'name': user.name,
         'avatar': user.avatar,
       });
       return true;
     }
-    await LocalStorage.removeToken();
+    await AnilistAuthService.removeToken();
     return false;
   }
 
+  static String _generateState() {
+    final random = Random.secure();
+    final bytes = Uint8List(32);
+    for (var i = 0; i < 32; i++) {
+      bytes[i] = random.nextInt(256);
+    }
+    return base64Url.encode(bytes).replaceAll('=', '');
+  }
+
   static Future<AniListUser?> getUser() async {
-    final data = LocalStorage.getUserData('user');
+    final data = await AnilistAuthService.getUserData('user');
     if (data == null) return null;
     try {
       return AniListUser.fromJson(data);
@@ -66,7 +85,7 @@ class AniListService {
       await logout();
       return null;
     }
-    await LocalStorage.saveUserData('user', {
+    await AnilistAuthService.saveUserData('user', {
       'id': user.id,
       'name': user.name,
       'avatar': user.avatar,
@@ -75,8 +94,8 @@ class AniListService {
   }
 
   static Future<void> logout() async {
-    await LocalStorage.removeToken();
-    await LocalStorage.removeUserData('user');
+    await AnilistAuthService.removeToken();
+    await AnilistAuthService.removeUserData('user');
   }
 
   static Future<AniListUser?> _fetchUser(String token) async {
@@ -100,10 +119,22 @@ class AniListService {
     return lists;
   }
 
+  static Future<AniListEntry?> getMediaListEntry(int mediaId) async {
+    final lists = await getUserAnimeList();
+    for (var list in lists) {
+      for (var entry in list.entries) {
+        if (entry.media.id == mediaId) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
   ///Espelho local da lista AniList (CURRENT/REPEATING/etc). Lê do cache pinta
   ///instantâneo na home; refresh async sobe a rede (menos requisição, simples).
-  static List<AniListGroup> getCachedAnimeLists() {
-    final raw = LocalStorage.getUserData('lists_cache');
+  static Future<List<AniListGroup>> getCachedAnimeLists() async {
+    final raw = await AnilistAuthService.getUserData('lists_cache');
     if (raw == null) return [];
     final listsJson = raw['lists'] as List? ?? [];
     return listsJson
@@ -111,8 +142,20 @@ class AniListService {
         .toList();
   }
 
+  static Future<int?> getCachedProgress(int mediaId) async {
+    final lists = await getCachedAnimeLists();
+    for (var list in lists) {
+      for (var entry in list.entries) {
+        if (entry.media.id == mediaId) {
+          return entry.progress ?? 0;
+        }
+      }
+    }
+    return null;
+  }
+
   static void _persistListsCache(List<AniListGroup> lists) {
-    LocalStorage.saveUserData('lists_cache', {
+    AnilistAuthService.saveUserData('lists_cache', {
       'lists': lists
           .map((l) => {'name': l.name, 'entries': _entriesToJson(l.entries)})
           .toList(),
@@ -155,6 +198,7 @@ class AniListService {
   static Future<bool> updateProgress({
     required int mediaId,
     required int progress,
+    String? status,
   }) async {
     final token = await getToken();
     if (token == null) return false;
@@ -171,7 +215,7 @@ class AniListService {
       variables: {
         'mediaId': mediaId,
         'progress': progress,
-        'status': 'CURRENT',
+        'status': status ?? 'CURRENT',
       },
     );
     return res != null;
@@ -461,6 +505,55 @@ class AniListService {
     } catch (e) {
       debugPrint('[AniList] Enrich error: $e');
       return null;
+    }
+  }
+
+  /// Fetches detailed episode information from AniList for a specific media.
+  /// Returns a list of AniListEpisode objects, each containing episode number,
+  /// title, description, and thumbnail if available.
+  static Future<List<AniListEpisode>> getEpisodesV2(int mediaId) async {
+    final token = await getToken();
+    if (token == null) return [];
+
+    const query = '''
+      query (\$mediaId: Int) {
+        Media(id: \$mediaId) {
+          id
+          episodesV2 {
+            episodeNumber
+            title
+            description
+            thumbnail
+          }
+        }
+      }
+    ''';
+
+    try {
+      final res = await http.post(
+        Uri.parse(AppConstants.anilistApi),
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: jsonEncode({'query': query, 'variables': {'mediaId': mediaId}}),
+      );
+
+      if (res.statusCode != 200) {
+        debugPrint('[AniList] getEpisodesV2 error ${res.statusCode}');
+        return [];
+      }
+
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+      final data = json['data'] as Map<String, dynamic>?;
+      final media = data?['Media'] as Map<String, dynamic>?;
+      final episodesV2 = media?['episodesV2'] as List?;
+
+      if (episodesV2 == null) return [];
+
+      return episodesV2
+          .map((ep) => AniListEpisode.fromMap(ep as Map<String, dynamic>))
+          .toList();
+    } catch (e, stackTrace) {
+      debugPrint('[AniList] getEpisodesV2 error: $e\n$stackTrace');
+      return [];
     }
   }
 }

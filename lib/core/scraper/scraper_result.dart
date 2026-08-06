@@ -1,19 +1,10 @@
 import '../../data/models/anime.dart' show AnimeSource;
 
-/// Typed result from any scraper/adapter operation.
-///
-/// Replaces the blanket `catch (e) { return []; }` pattern with three
-/// exhaustively matchable variants: [Loading], [Success], and [Failure].
-///
-/// Use [ScraperResult.success] to create a [Success] instance and
-/// [ScraperResult.failure] to create a [Failure] instance.
 sealed class ScraperResult<T> {
   const ScraperResult();
 
-  /// Creates a [Success] variant wrapping [data].
   factory ScraperResult.success(T data) = Success<T>;
 
-  /// Creates a [Failure] variant wrapping [error].
   factory ScraperResult.failure(ScraperError error) = Failure<T>;
 }
 
@@ -24,46 +15,38 @@ final class Loading<T> extends ScraperResult<T> {
 final class Success<T> extends ScraperResult<T> {
   final T data;
   const Success(this.data);
+
+  bool get isSuccess => true;
 }
 
 final class Failure<T> extends ScraperResult<T> {
   final ScraperError error;
   const Failure(this.error);
+
+  bool get isSuccess => false;
 }
 
-/// Typed error variants for scraper operations.
-///
-/// Every variant carries a human-readable [message], the [AnimeSource] that
-/// produced the error, and timing information via [operationDuration].
 sealed class ScraperError {
   final String message;
   final AnimeSource source;
-  final Duration operationDuration;
 
   const ScraperError({
     required this.message,
     required this.source,
-    required this.operationDuration,
   });
 }
 
 final class TimeoutError extends ScraperError {
-  final Duration timeoutValue;
   const TimeoutError({
     required super.message,
     required super.source,
-    required super.operationDuration,
-    required this.timeoutValue,
   });
 }
 
 final class ParseFailureError extends ScraperError {
-  final String snippet;
   const ParseFailureError({
     required super.message,
     required super.source,
-    required super.operationDuration,
-    required this.snippet,
   });
 }
 
@@ -72,7 +55,6 @@ final class CloudflareError extends ScraperError {
   const CloudflareError({
     required super.message,
     required super.source,
-    required super.operationDuration,
     required this.detectionPattern,
   });
 }
@@ -81,36 +63,43 @@ final class EmptyResultError extends ScraperError {
   const EmptyResultError({
     required super.message,
     required super.source,
-    required super.operationDuration,
   });
 }
 
 final class UnknownError extends ScraperError {
-  final Object? originalError;
   const UnknownError({
     required super.message,
     required super.source,
-    required super.operationDuration,
-    this.originalError,
+    Object? originalError,
   });
 }
 
-/// Multi-pattern Cloudflare challenge detection.
-///
-/// Checks for known Cloudflare challenge indicators in both HTML content and
-/// response headers. The HTTP status code (403/503) should be checked by the
-/// caller before invoking this function.
-///
-/// **Detection patterns:**
-/// - Content: `Verificação`, `cf-browser-verification`, `cf-challenge`
-/// - Headers: `CF-Ray`, `CF-Challenge` header keys
+/// Error type enumeration for fallback routing
+enum ScraperErrorType {
+  emptyResult,   // Anime não encontrado
+  unknown,       // Erro desconhecido
+  timeout,       // Timeout
+  cloudflare,    // Cloudflare/WAF
+}
+
+/// Extended error with fallback error type
+class FallbackScraperError extends ScraperError {
+  final ScraperErrorType errorType;
+  final Map<String, dynamic> context;
+
+  const FallbackScraperError({
+    required super.message,
+    required super.source,
+    required this.errorType,
+    this.context = const {},
+  });
+}
+
 bool isCloudflareChallenge(String html, Map<String, String> headers) {
-  // Content-based patterns
   if (html.contains('Verificação')) return true;
   if (html.contains('cf-browser-verification')) return true;
   if (html.contains('cf-challenge')) return true;
 
-  // Header-based patterns
   for (final key in headers.keys) {
     if (key.startsWith('CF-Ray') || key.startsWith('CF-Challenge')) {
       return true;
@@ -118,4 +107,29 @@ bool isCloudflareChallenge(String html, Map<String, String> headers) {
   }
 
   return false;
+}
+
+/// Result record for scraping metrics
+class SearchResult {
+  final String animeName;
+  final int duration;
+  final List<ScraperAttempt> attempts;
+  final bool success;
+  final DateTime timestamp;
+
+  const SearchResult({
+    required this.animeName,
+    required this.duration,
+    required this.attempts,
+    required this.success,
+    required this.timestamp,
+  });
+}
+
+/// Single scraping attempt record
+class ScraperAttempt {
+  final bool success;
+  final AnimeSource source;
+
+  const ScraperAttempt(this.success, this.source);
 }

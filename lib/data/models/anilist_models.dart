@@ -9,7 +9,9 @@ class AniListUser {
     return AniListUser(
       id: json['id'] as int,
       name: json['name'] as String,
-      avatar: (json['avatar'] as Map?)?['large']?.toString(),
+      avatar: json['avatar'] is Map
+          ? (json['avatar'] as Map)['large']?.toString()
+          : json['avatar']?.toString(),
     );
   }
 }
@@ -18,40 +20,74 @@ class AniListMedia {
   final int id;
   final String title;
   final String? coverImage;
+  final String? coverImageExtra;
+  final String? bannerImage;
   final int? episodes;
   final String? format;
+  final String? status;
 
   AniListMedia({
     required this.id,
     required this.title,
     this.coverImage,
+    this.coverImageExtra,
+    this.bannerImage,
     this.episodes,
     this.format,
+    this.status,
   });
 
   factory AniListMedia.fromJson(Map<String, dynamic> json) {
     final titleObj = json['title'] as Map? ?? {};
+    final cover = json['coverImage'] as Map?;
     return AniListMedia(
       id: json['id'] as int,
       title: titleObj['romaji']?.toString() ??
              titleObj['english']?.toString() ??
              titleObj['native']?.toString() ??
              'Unknown',
-      coverImage: (json['coverImage'] as Map?)?['large']?.toString(),
+      coverImage: cover?['large']?.toString(),
+      coverImageExtra: cover?['extraLarge']?.toString(),
+      bannerImage: json['bannerImage']?.toString(),
       episodes: json['episodes'] as int?,
       format: json['format']?.toString(),
+      status: json['status']?.toString(),
     );
   }
 }
 
 class AniListEntry {
   final AniListMedia media;
+  final int? progress;
+  final String? status;
+  final int? nextEpisode;
+  final int? timeUntilAiring;
+  // ponytail: MediaList.updatedAt (Unix seconds) — "When the entry data was
+  // last updated". Usado para ordenar "Continue assistindo" por último
+  // assistido no client. Vem do nível do entry no schema AniList.
+  final int? updatedAt;
 
-  AniListEntry({required this.media});
+  AniListEntry({
+    required this.media,
+    this.progress,
+    this.status,
+    this.nextEpisode,
+    this.timeUntilAiring,
+    this.updatedAt,
+  });
 
-  factory AniListEntry.fromJson(Map<String, dynamic> json) {
+  // ponytail: nextAiringEpisode pertence a MediaList.media no schema AniList,
+// não ao entry. Lendo do mapa aninhado para casar com a query GraphQL.
+factory AniListEntry.fromJson(Map<String, dynamic> json) {
+    final media = (json['media'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final next = media['nextAiringEpisode'] as Map?;
     return AniListEntry(
-      media: AniListMedia.fromJson(json['media'] as Map<String, dynamic>),
+      media: AniListMedia.fromJson(media),
+      progress: json['progress'] as int?,
+      status: json['status']?.toString(),
+      nextEpisode: next?['episode'] as int?,
+      timeUntilAiring: next?['timeUntilAiring'] as int?,
+      updatedAt: json['updatedAt'] as int?,
     );
   }
 }
@@ -84,6 +120,7 @@ class AniListCoverImage {
 
 class AniListMediaDetail {
   final int id;
+  final String? englishName;
   final String? bannerImage;
   final String? description;
   final int? episodes;
@@ -94,6 +131,7 @@ class AniListMediaDetail {
 
   AniListMediaDetail({
     required this.id,
+    this.englishName,
     this.bannerImage,
     this.description,
     this.episodes,
@@ -104,8 +142,10 @@ class AniListMediaDetail {
   });
 
   factory AniListMediaDetail.fromJson(Map<String, dynamic> json) {
+    final title = json['title'] as Map? ?? {};
     return AniListMediaDetail(
       id: json['id'] as int? ?? 0,
+      englishName: title['english']?.toString(),
       bannerImage: json['bannerImage']?.toString(),
       description: json['description']?.toString(),
       episodes: json['episodes'] as int?,
@@ -165,6 +205,29 @@ class AniListGroup {
       entries: entriesJson
           .map((e) => AniListEntry.fromJson(e as Map<String, dynamic>))
           .toList(),
+    );
+  }
+}
+
+class AniListEpisode {
+  final String number;
+  final String? title;
+  final String? description;
+  final String? thumbnail;
+
+  AniListEpisode({
+    required this.number,
+    this.title,
+    this.description,
+    this.thumbnail,
+  });
+
+  factory AniListEpisode.fromMap(Map<String, dynamic> map) {
+    return AniListEpisode(
+      number: map['episodeNumber']?.toString() ?? '',
+      title: map['title']?.toString(),
+      description: map['description']?.toString(),
+      thumbnail: map['thumbnail']?.toString(),
     );
   }
 }

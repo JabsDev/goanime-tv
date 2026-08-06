@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/storage/settings_service.dart';
+import 'focus_key_handler.dart';
 
 class TVButton extends StatefulWidget {
   final String label;
@@ -26,8 +28,10 @@ class _TVButtonState extends State<TVButton> {
 
   @override
   Widget build(BuildContext context) {
+    final s = SettingsService.instance;
     return Focus(
       onFocusChange: (focused) => setState(() => _isFocused = focused),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onPressed),
       child: Semantics(
         button: true,
         child: Material(
@@ -36,7 +40,7 @@ class _TVButtonState extends State<TVButton> {
             onTap: widget.onPressed,
             onHover: (_) {},
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: s.animDuration,
               width: widget.width,
               height: 56,
               decoration: BoxDecoration(
@@ -50,7 +54,7 @@ class _TVButtonState extends State<TVButton> {
                       : ThemeConstants.textSecondary,
                   width: _isFocused ? 3 : 1,
                 ),
-                boxShadow: _isFocused
+                boxShadow: (_isFocused && s.shadowsEnabled)
                     ? [
                         BoxShadow(
                           color: ThemeConstants.primary.withValues(alpha: 0.4),

@@ -18,39 +18,40 @@ class AppTheme {
       ),
       textTheme: const TextTheme(
         headlineLarge: TextStyle(
-          fontSize: 32,
+          fontSize: 36,
           fontWeight: FontWeight.bold,
           color: ThemeConstants.white,
         ),
         headlineMedium: TextStyle(
-          fontSize: 24,
+          fontSize: 28,
           fontWeight: FontWeight.bold,
           color: ThemeConstants.white,
         ),
         titleLarge: TextStyle(
-          fontSize: 20,
+          fontSize: 24,
           fontWeight: FontWeight.w600,
           color: ThemeConstants.white,
         ),
         titleMedium: TextStyle(
-          fontSize: 18,
+          fontSize: 20,
           fontWeight: FontWeight.w600,
           color: ThemeConstants.white,
         ),
         bodyLarge: TextStyle(
-          fontSize: 16,
+          fontSize: 18,
           color: ThemeConstants.white,
         ),
         bodyMedium: TextStyle(
-          fontSize: 14,
+          fontSize: 16,
           color: ThemeConstants.textSecondary,
         ),
         labelLarge: TextStyle(
-          fontSize: 16,
+          fontSize: 18,
           fontWeight: FontWeight.w500,
           color: ThemeConstants.white,
         ),
       ),
+      focusColor: ThemeConstants.primary.withValues(alpha: 0.25),
     );
   }
 }

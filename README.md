@@ -1,76 +1,27 @@
-# GoAnime TV
+# goanime_tv
 
-Android TV app for anime streaming based on [GoAnime](https://github.com/alvarorichard/GoAnime) scraping engine.
+A new Flutter project.
 
-## Features
+## Fontes (AnimeSource)
 
-- **Home Screen** with trending, recent, and continue-watching sections
-- **Search** with on-screen TV keyboard and multi-source results
-- **Detail Screen** with episode grid, genres, and favorite toggle
-- **Video Player** with quality selection, resume playback, and auto-next episode
-- **Profile** with watch history and favorites
+Status dos provedores de stream/episódios:
 
-## Build Instructions
+- **AnimeFire** — OK. Busca, grade de episódios e vídeo por scraping HTML.
+- **AniList** — OK. Fornece metadados (não stream).
+- **Goyabu** — pendente (integração não implementada).
+- **SuperFlix** — pendente (integração não implementada).
+- **AllAnime** — indisponível (requer captcha Cloudflare/Turnstile, externo ao app).
 
-### Prerequisites
+## Getting Started
 
-- Flutter SDK 3.9.2+
-- Android Studio with Android TV emulator
+This project is a starting point for a Flutter application.
 
-### Setup
+A few resources to get you started if this is your first Flutter project:
 
-```bash
-flutter pub get
-```
+- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
+- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
 
-### Run on Android TV emulator
-
-```bash
-flutter run -d android
-```
-
-### Build APK
-
-```bash
-flutter build apk --debug
-```
-
-APK output: `build/app/outputs/flutter-apk/app-debug.apk`
-
-### Build Release APK
-
-```bash
-flutter build apk --release
-```
-
-## Architecture
-
-```
-lib/
-├── main.dart                    # Entry point
-├── app.dart                     # App shell
-├── core/
-│   ├── constants/               # URLs, configs, theme values
-│   ├── scraper/                 # AnimeFire & AllAnime scraping
-│   └── storage/                 # SharedPreferences wrapper
-├── data/
-│   ├── models/                  # Anime, Episode, VideoSource
-│   └── repositories/            # AnimeRepository
-├── features/
-│   ├── home/                    # Home screen + Profile
-│   ├── search/                  # Search with TV keyboard
-│   ├── detail/                  # Anime detail + episodes
-│   └── player/                  # Video player with TV controls
-└── shared/
-    ├── widgets/                 # FocusableCard, TVButton
-    └── theme/                   # Dark TV theme
-```
-
-## Sources
-
-- **AnimeFire** (PT-BR) — HTML scraping
-- **AllAnime** (EN) — GraphQL API
-
-## Disclaimer
-
-For personal/educational use only.
+For help getting started with Flutter development, view the
+[online documentation](https://docs.flutter.dev/), which offers tutorials,
+samples, guidance on mobile development, and a full API reference.

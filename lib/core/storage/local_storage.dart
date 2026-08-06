@@ -1,9 +1,38 @@
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../profile/profile_store.dart';
+import '../utils/text_utils.dart';
+
 class LocalStorage {
   static SharedPreferences? _prefs;
+
+  /// B1: normaliza a chave pública (nome do anime) para que favoritos/
+  /// histórico/progresso salvos sob um título velho sujo (com nota/faixa)
+  /// continuem "casando" com o nome limpo do scraper.
+  static String _normalizeKey(String key) => TextUtils.cleanTitle(key.trim());
+
+  /// Procura o progresso cuja chave NORMALIZADA casa com [key], tolerando
+  /// chaves legadas ainda gravadas com título sujo.
+  static Map<String, dynamic>? _findProgress(String key) {
+    final entries = ProfileStore.instance.getAllProgress().entries;
+    for (final e in entries) {
+      if (_normalizeKey(e.key) == key) return e.value;
+    }
+    return null;
+  }
+
+  /// Normaliza os títulos guardados (chave + título) para exibição, de modo
+  /// que entradas legadas ainda mostrem o nome limpo.
+  static List<Map<String, dynamic>> _normalizedEntries(
+      List<Map<String, dynamic>> list) {
+    return list.map((e) {
+      final title = e['title']?.toString() ?? '';
+      final clean = TextUtils.cleanTitle(title);
+      if (clean == title) return e;
+      return {...e, 'title': clean};
+    }).toList();
+  }
 
   static Future<void> init() async {
     try {
@@ -29,19 +58,73 @@ class LocalStorage {
     required int totalEpisodes,
   }) async {
     ensureInitialized();
-    final data = {
+    final key = _normalizeKey(animeKey);
+    // ponytail: preserva conjunto 'watched' ao reescrever progress. Antes o
+    // overwrite incondicional descartava todos os eps já marcados — fatal para
+    // fluxos não-contíguos (ex.: assistir 1-8 e 12).
+    final existing = _findProgress(key);
+    final watched = (existing?['watched'] as List?)?.cast<int>().toList() ??
+        const <int>[];
+    await ProfileStore.instance.setProgress(key, {
       'episode': episodeNumber,
       'position': position.inMilliseconds,
       'totalEpisodes': totalEpisodes,
-    };
-    await _prefs?.setString('progress_$animeKey', jsonEncode(data));
+      'watched': watched,
+    });
   }
 
   static Map<String, dynamic>? getWatchProgress(String animeKey) {
     ensureInitialized();
-    final raw = _prefs?.getString('progress_$animeKey');
-    if (raw == null) return null;
-    return jsonDecode(raw) as Map<String, dynamic>;
+    return _findProgress(_normalizeKey(animeKey));
+  }
+
+  // Marca um episódio como assistido no conjunto do perfil atual.
+  // Totalmente idempotente: re-marcar um índice existente não cresce a lista
+  // nem reescreve o disco (toSet().add + early-return).
+  static Future<void> markEpisodeWatched({
+    required String animeKey,
+    required int episodeIndex,
+  }) async {
+    ensureInitialized();
+    final key = _normalizeKey(animeKey);
+    final existing = _findProgress(key) ?? <String, dynamic>{};
+    final watched =
+        ((existing['watched'] as List?)?.cast<int>() ?? const <int>[]).toSet();
+    if (!watched.add(episodeIndex)) return;
+    existing['watched'] = watched.toList();
+    await ProfileStore.instance.setProgress(key, existing);
+  }
+
+  /// Casa o conjunto assistido local com um progresso N (vindo do AniList ou
+  /// do high-water-mark local), marcando CONTÍGUO 0..N-1. Honra a regra
+  /// "último assistido = N ⇒ marca 1..N" (Q4) e AniList como fonte de verdade
+  /// cross-device (Q5). Idempotente: nada a fazer se o conjunto já cobre.
+  /// Preserva position/episode existentes; só avança episode se N-1 > atual.
+  /// Não DESCASCA nada — só adiciona (max-merge p/ não perder progresso).
+  static Future<void> reconcileWatched({
+    required String animeKey,
+    required int progress,
+  }) async {
+    if (progress <= 0) return;
+    ensureInitialized();
+    final key = _normalizeKey(animeKey);
+    final existing = _findProgress(key) ?? <String, dynamic>{};
+    final watched =
+        ((existing['watched'] as List?)?.cast<int>() ?? const <int>[]).toSet();
+    final target = <int>{for (var i = 0; i < progress; i++) i};
+    final newEp = progress - 1;
+    final ep = existing['episode'] as int? ?? -1;
+    if (watched.containsAll(target)) {
+      // já coberto — só alinha high-water-mark se trás avanço
+      if (newEp <= ep) return;
+      existing['episode'] = newEp;
+      await ProfileStore.instance.setProgress(key, existing);
+      return;
+    }
+    watched.addAll(target);
+    existing['watched'] = watched.toList()..sort();
+    if (newEp > ep) existing['episode'] = newEp;
+    await ProfileStore.instance.setProgress(key, existing);
   }
 
   static Future<void> addToHistory({
@@ -50,103 +133,64 @@ class LocalStorage {
     required String imageUrl,
     required int lastEpisode,
     required int totalEpisodes,
+    int? anilistId,
   }) async {
     ensureInitialized();
+    final key = _normalizeKey(animeKey);
     final history = getHistory();
-    history.removeWhere((e) => e['key'] == animeKey);
+    history.removeWhere(
+        (e) => _normalizeKey(e['key']?.toString() ?? '') == key);
     history.insert(0, {
-      'key': animeKey,
-      'title': title,
+      'key': key,
+      'title': TextUtils.cleanTitle(title),
       'image': imageUrl,
       'lastEpisode': lastEpisode,
       'totalEpisodes': totalEpisodes,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
+      if (anilistId != null) 'anilistId': anilistId,
     });
     if (history.length > 50) history.removeRange(50, history.length);
-    await _prefs?.setString('history', jsonEncode(history));
+    await ProfileStore.instance.setHistory(history);
   }
 
   static List<Map<String, dynamic>> getHistory() {
     ensureInitialized();
-    final raw = _prefs?.getString('history');
-    if (raw == null) return [];
-    return (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    return _normalizedEntries(ProfileStore.instance.getHistory());
   }
 
   static Future<void> toggleFavorite({
     required String animeKey,
     required String title,
     required String imageUrl,
+    int? anilistId,
   }) async {
     ensureInitialized();
+    final key = _normalizeKey(animeKey);
     final favorites = getFavorites();
-    final idx = favorites.indexWhere((e) => e['key'] == animeKey);
+    final idx = favorites
+        .indexWhere((e) => _normalizeKey(e['key']?.toString() ?? '') == key);
     if (idx >= 0) {
       favorites.removeAt(idx);
     } else {
       favorites.add({
-        'key': animeKey,
-        'title': title,
+        'key': key,
+        'title': TextUtils.cleanTitle(title),
         'image': imageUrl,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
+    'anilistId': anilistId,
       });
     }
-    await _prefs?.setString('favorites', jsonEncode(favorites));
+    await ProfileStore.instance.setFavorites(favorites);
   }
 
   static List<Map<String, dynamic>> getFavorites() {
     ensureInitialized();
-    final raw = _prefs?.getString('favorites');
-    if (raw == null) return [];
-    return (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    return _normalizedEntries(ProfileStore.instance.getFavorites());
   }
 
   static bool isFavorite(String animeKey) {
-    return getFavorites().any((e) => e['key'] == animeKey);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Token storage (used by AniListService)
-  // ---------------------------------------------------------------------------
-
-  /// Saves an AniList access token. Returns true on success.
-  static Future<bool> saveToken(String token) async {
-    ensureInitialized();
-    if (!token.startsWith('eyJ')) return false;
-    await _prefs?.setString('anilist_token', token);
-    return true;
-  }
-
-  /// Reads the stored AniList access token, or null if none.
-  static String? getToken() {
-    ensureInitialized();
-    return _prefs?.getString('anilist_token');
-  }
-
-  /// Removes the stored AniList access token.
-  static Future<void> removeToken() async {
-    ensureInitialized();
-    await _prefs?.remove('anilist_token');
-  }
-
-  /// Saves user data (e.g. AniList user profile) under [key].
-  static Future<bool> saveUserData(String key, Map<String, dynamic> data) async {
-    ensureInitialized();
-    if (_prefs == null) return false;
-    return await _prefs!.setString('anilist_$key', jsonEncode(data));
-  }
-
-  /// Reads user data saved under [key], or null if none.
-  static Map<String, dynamic>? getUserData(String key) {
-    ensureInitialized();
-    final raw = _prefs?.getString('anilist_$key');
-    if (raw == null) return null;
-    return jsonDecode(raw) as Map<String, dynamic>;
-  }
-
-  /// Removes user data stored under [key].
-  static Future<void> removeUserData(String key) async {
-    ensureInitialized();
-    await _prefs?.remove('anilist_$key');
+    final key = _normalizeKey(animeKey);
+    return getFavorites()
+        .any((e) => _normalizeKey(e['key']?.toString() ?? '') == key);
   }
 }

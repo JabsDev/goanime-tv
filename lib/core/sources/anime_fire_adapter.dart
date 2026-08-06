@@ -28,8 +28,6 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
     return apiClient.get(uri, headers: headers);
   }
 
-  static final RegExp _episodeNumRe =
-      RegExp(r'epis[oó]dio\s+(\d+)', caseSensitive: false);
   static final RegExp _mp4Re =
       RegExp(r"""https?://[^"\'<>]+\.mp4(?:\?[^"\'<>]*)?""");
   static final RegExp _m3u8Re =
@@ -41,6 +39,10 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
 
   @override
   AnimeSource get source => AnimeSource.animeFire;
+
+  // B11: busca funcional (única implementada de fato).
+  @override
+  bool get implemented => true;
 
   @override
   Future<ScraperResult<List<Anime>>> search(String animeName) async {
@@ -66,12 +68,17 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
       final elements = doc.querySelectorAll('.row.ml-1.mr-1 a');
       final list = <Anime>[];
       for (final el in elements) {
-        final name = el.text.trim();
+        // B1: el.text concatena badges de nota/faixa etária dos filhos do <a>.
+        final name = TextUtils.cleanTitle(el.text.trim());
         final href = el.attributes['href'] ?? '';
         String? thumb;
         final img = el.querySelector('img.imgAnimes');
         if (img != null) {
-          thumb = img.attributes['data-src'] ?? img.attributes['src'];
+          // B3: data-src costuma ser caminho relativo e src um gif de
+          // placeholder. Normaliza para URL absoluta e descarta placeholders.
+          thumb = _normalizeThumb(
+            img.attributes['data-src'] ?? img.attributes['src'],
+          );
         }
         if (name.isNotEmpty && href.isNotEmpty) {
           list.add(Anime(
@@ -90,11 +97,11 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
       final cards = doc.querySelectorAll('.card_ani');
       for (final card in cards) {
         final titleElem = card.querySelector('.ani_name a');
-        final title = titleElem?.text.trim() ?? '';
+        final title = TextUtils.cleanTitle(titleElem?.text.trim() ?? '');
         final href = titleElem?.attributes['href'] ?? '';
         if (title.isEmpty || href.isEmpty) continue;
         final img = card.querySelector('.div_img img');
-        final thumb = img?.attributes['src'];
+        final thumb = _normalizeThumb(img?.attributes['src']);
         list.add(Anime(
           name: title,
           url: _resolveUrl(href),
@@ -134,9 +141,13 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
     debugPrint('[AnimeFireAdapter] getEpisodes START anime=${anime.name}');
     debugPrint('[AnimeFireAdapter] anime.url=${anime.url}');
 
-    final stopwatch = Stopwatch()..start();
-
     try {
+      if (anime.url.isEmpty) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'No anime URL provided',
+          source: source,
+        ));
+      }
       final uri = Uri.parse(anime.url);
       debugPrint('[AnimeFireAdapter] Fetching episodes from: $uri');
 
@@ -199,16 +210,13 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
     debugPrint('[AnimeFireAdapter] Found ${episodeElements.length} episode elements');
 
     for (final element in episodeElements) {
-      final linkElement = element.querySelector('a[href]');
-      if (linkElement != null) {
-        final href = linkElement.attributes['href'];
-        if (href != null && href.isNotEmpty) {
-          final episodeUrl = Uri.parse(href).replace(
-            scheme: 'https',
-            host: 'animefire.io',
-          );
-          episodeUrls.add(episodeUrl.toString());
-        }
+      final href = element.attributes['href'];
+      if (href != null && href.isNotEmpty) {
+        final episodeUrl = Uri.parse(href).replace(
+          scheme: 'https',
+          host: 'animefire.io',
+        );
+        episodeUrls.add(episodeUrl.toString());
       }
     }
 
@@ -236,50 +244,6 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
         source: source,
         originalError: e,
       ));
-    }
-  }
-
-  /// Fetches the episode list by scraping the anime page HTML.
-  Future<List<Episode>> _fetchEpisodes(String animeUrl) async {
-    try {
-      debugPrint('[AnimeFire] Fetching episodes: $animeUrl');
-      final uri = Uri.tryParse(animeUrl);
-      if (uri == null || !uri.hasScheme) return [];
-
-      final res = await _httpGet(
-        uri,
-        headers: {
-          'User-Agent': AppConstants.userAgent,
-          'Referer': '${AppConstants.baseSiteUrl}/',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        },
-      );
-      if (res.statusCode != 200) return [];
-
-      final doc = html_parser.parse(res.body);
-      final blocks = doc.querySelectorAll(
-        'a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex',
-      );
-      if (blocks.isEmpty) return [];
-
-      final episodes = <Episode>[];
-      for (final el in blocks) {
-        final href = el.attributes['href'] ?? '';
-        if (href.isEmpty) continue;
-        final text = el.text.trim();
-        final numMatch = _episodeNumRe.firstMatch(text);
-        final number = numMatch?.group(1) ?? '${episodes.length + 1}';
-        final title = text.isNotEmpty ? text : 'Episódio $number';
-        episodes.add(Episode(
-          number: number,
-          url: _resolveUrl(href),
-          title: title,
-        ));
-      }
-      return episodes;
-    } catch (e) {
-      debugPrint('[AnimeFire] Episodes error: $e');
-      return [];
     }
   }
 
@@ -658,5 +622,16 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
     if (ref.startsWith('http')) return ref;
     if (ref.startsWith('/')) return '${AppConstants.baseSiteUrl}$ref';
     return '${AppConstants.baseSiteUrl}/$ref';
+  }
+
+  /// B3: normalizes a scraped image URL. Relative paths get the site origin
+  /// (AnimeFire serves posters under `/uploads/...`); data-URIs/placeholder
+  /// gifs are dropped so `fallbackImageUrl` stays null and the AniList cover
+  /// fills in via enrich instead of issuing a broken request.
+  String? _normalizeThumb(String? thumb) {
+    if (thumb == null || thumb.isEmpty) return null;
+    if (thumb.startsWith('data:')) return null;
+    if (thumb.endsWith('.gif') || thumb.contains('placeholder')) return null;
+    return _resolveUrl(thumb);
   }
 }

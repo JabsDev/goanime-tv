@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/storage/settings_service.dart';
 import '../../shared/widgets/cached_image.dart';
 
 class AnilistBanner extends StatefulWidget {
@@ -16,6 +17,7 @@ class _AnilistBannerState extends State<AnilistBanner> {
 
   @override
   Widget build(BuildContext context) {
+    final s = SettingsService.instance;
     return Focus(
       onFocusChange: (focused) => setState(() => _isFocused = focused),
       child: Semantics(
@@ -26,7 +28,7 @@ class _AnilistBannerState extends State<AnilistBanner> {
             onTap: widget.onTap,
             onHover: (_) {},
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: s.animDuration,
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 gradient: _isFocused
@@ -41,7 +43,7 @@ class _AnilistBannerState extends State<AnilistBanner> {
                   color: _isFocused ? ThemeConstants.primary : Colors.transparent,
                   width: 2,
                 ),
-                boxShadow: _isFocused
+                boxShadow: (_isFocused && s.shadowsEnabled)
                     ? [
                         BoxShadow(
                           color: ThemeConstants.primary.withValues(alpha: 0.4),

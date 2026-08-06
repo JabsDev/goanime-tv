@@ -15,6 +15,7 @@ import 'anilist_banner.dart';
 import 'home_navigation.dart';
 import 'anilist_login_dialog.dart';
 import 'favorites_screen.dart';
+import '../settings/settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -49,7 +50,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     // pintar cache do AniList instantaneamente (lista vinda da última sessão)
-    _anilistLists = AniListService.getCachedAnimeLists();
+    AniListService.getCachedAnimeLists().then((lists) {
+      if (mounted) setState(() => _anilistLists = lists);
+    });
     _loadDataWithTimeout();
   }
 
@@ -86,7 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
     }
-    final cached = AniListService.getCachedAnimeLists();
+    final cached = await AniListService.getCachedAnimeLists();
     setState(() {
       _anilistLoggedIn = true;
       _anilistUser = user;
@@ -197,10 +200,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const Spacer(),
-          _navItem(
-            Icons.search,
-            'Buscar',
-            () => Navigator.push(
+          _FocusableNavItem(
+            icon: Icons.search,
+            label: 'Buscar',
+            autofocus: true,
+            onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const SearchScreen()),
             ),
@@ -216,10 +220,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
-  }
-
-  Widget _navItem(IconData icon, String label, VoidCallback onTap) {
-    return _FocusableNavItem(icon: icon, label: label, onTap: onTap);
   }
 
   void _showProfileMenu() {
@@ -296,6 +296,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
             ],
+            // B10: SettingsScreen era órfã — nenhum fluxo navegava até ela.
+            // Sempre visível (logado ou não).
+            _menuEntry(
+              icon: Icons.settings,
+              label: 'Configurações',
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -574,11 +587,16 @@ class _FocusableNavItem extends StatefulWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final bool autofocus;
 
   const _FocusableNavItem({
     required this.icon,
     required this.label,
     required this.onTap,
+    // B13: autofocus no "Buscar" dá anel de foco visível desde o boot (Home
+    // antes era montada sem nenhum item focado → primeira tecla "acordava" o
+    // traversal e o screenshot saía sem indicador).
+    this.autofocus = false,
   });
 
   @override
@@ -591,6 +609,7 @@ class _FocusableNavItemState extends State<_FocusableNavItem> {
   @override
   Widget build(BuildContext context) {
     return Focus(
+      autofocus: widget.autofocus,
       onFocusChange: (f) => setState(() => _isFocused = f),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
       child: Semantics(

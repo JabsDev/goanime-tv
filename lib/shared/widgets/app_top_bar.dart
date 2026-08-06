@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/storage/settings_service.dart';
 import 'focus_key_handler.dart';
 
 /// Top bar padrão do app — gradient surface→background, ícone opcional, título
@@ -81,6 +82,7 @@ class _TopBarBackButtonState extends State<_TopBarBackButton> {
 
   @override
   Widget build(BuildContext context) {
+    final s = SettingsService.instance;
     return Focus(
       onFocusChange: (f) => setState(() => _isFocused = f),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
@@ -92,7 +94,7 @@ class _TopBarBackButtonState extends State<_TopBarBackButton> {
             onTap: widget.onTap,
             customBorder: const CircleBorder(),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: s.animDuration,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: _isFocused
@@ -103,11 +105,11 @@ class _TopBarBackButtonState extends State<_TopBarBackButton> {
                   color: _isFocused ? ThemeConstants.primary : Colors.transparent,
                   width: ThemeConstants.focusBorderWidth,
                 ),
-                boxShadow: _isFocused
+                boxShadow: (_isFocused && s.shadowsEnabled)
                     ? [
                         BoxShadow(
                           color: ThemeConstants.primary.withValues(alpha: 0.5),
-                          blurRadius: ThemeConstants.focusGlowBlur,
+                          blurRadius: s.focusGlowBlur,
                         ),
                       ]
                     : [],

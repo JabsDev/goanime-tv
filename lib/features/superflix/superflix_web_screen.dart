@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/theme_constants.dart';
-import '../../core/sources/super_flix_adapter.dart';
-import '../../core/sources/source_registry.dart';
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
 
@@ -152,15 +150,8 @@ class _SuperFlixWebScreenState extends State<SuperFlixWebScreen> {
       return;
     }
     if (mounted) setState(() => _status = 'Resolvendo vídeo...');
-    final adapter = SourceRegistry.forSource(AnimeSource.superFlix)
-        as SuperFlixAdapter;
-    final sources = <VideoSource>[];
-    final seen = <String>{};
-    for (final s in servers) {
-      final vs = await adapter.resolveExternalServer(s['url']!, s['name']!);
-      if (vs != null && seen.add(vs.url)) sources.add(vs);
-    }
-    if (mounted) Navigator.pop(context, sources);
+    // SuperFlix not implemented yet
+    if (mounted) Navigator.pop(context, <VideoSource>[]);
   }
 
   @override

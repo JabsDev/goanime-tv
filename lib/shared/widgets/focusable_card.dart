@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/storage/settings_service.dart';
 import 'cached_image.dart';
 import 'focus_key_handler.dart';
 
@@ -32,6 +33,7 @@ class _FocusableCardState extends State<FocusableCard> {
 
   @override
   Widget build(BuildContext context) {
+    final s = SettingsService.instance;
     return Focus(
       onFocusChange: (focused) => setState(() => _isFocused = focused),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
@@ -44,9 +46,9 @@ class _FocusableCardState extends State<FocusableCard> {
             onHover: (_) {},
             child: AnimatedScale(
               scale: _isFocused ? 1.08 : 1.0,
-              duration: const Duration(milliseconds: 200),
+              duration: s.animDuration,
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
+                duration: s.animDuration,
                 width: widget.width,
                 height: widget.height,
                 decoration: BoxDecoration(
@@ -57,7 +59,7 @@ class _FocusableCardState extends State<FocusableCard> {
                         : Colors.transparent,
                     width: 2,
                   ),
-                  boxShadow: _isFocused
+                  boxShadow: (_isFocused && s.shadowsEnabled)
                       ? [
                           BoxShadow(
                             color: ThemeConstants.primary.withValues(alpha: 0.5),
@@ -156,6 +158,7 @@ class _FocusableBannerCardState extends State<FocusableBannerCard> {
 
   @override
   Widget build(BuildContext context) {
+    final s = SettingsService.instance;
     return Focus(
       onFocusChange: (focused) => setState(() => _isFocused = focused),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
@@ -168,9 +171,9 @@ class _FocusableBannerCardState extends State<FocusableBannerCard> {
             onHover: (_) {},
             child: AnimatedScale(
               scale: _isFocused ? 1.05 : 1.0,
-              duration: const Duration(milliseconds: 200),
+              duration: s.animDuration,
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
+                duration: s.animDuration,
                 width: widget.width,
                 height: widget.height,
                 decoration: BoxDecoration(
@@ -181,7 +184,7 @@ class _FocusableBannerCardState extends State<FocusableBannerCard> {
                         : Colors.transparent,
                     width: 2,
                   ),
-                  boxShadow: _isFocused
+                  boxShadow: (_isFocused && s.shadowsEnabled)
                       ? [
                           BoxShadow(
                             color:

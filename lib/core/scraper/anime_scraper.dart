@@ -23,7 +23,11 @@ class AnimeScraper {
 
       // Per-future error isolation: one adapter's unhandled exception does not
       // kill other adapter futures via Future.wait (Pitfall 1).
-      final futures = SourceRegistry.adapters.map((a) async {
+      // B11: roda só as fontes implementadas — antes a busca disparava ~12
+      // requests para adapters que retornam "not implemented"/vazios.
+      final futures = SourceRegistry.adapters
+          .where((a) => a.implemented)
+          .map((a) async {
         try {
           return await a.search(animeName);
         } catch (e) {

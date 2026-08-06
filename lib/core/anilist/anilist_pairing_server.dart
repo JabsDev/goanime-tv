@@ -2,32 +2,47 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:pointycastle/digests/sha256.dart';
 import '../constants/app_constants.dart';
 import 'anilist_service.dart';
 
-/// Local LAN pairing server for AniList login without typing a token on the TV.
+/// Loopback pairing server for AniList login without typing a token on the TV.
 ///
-/// Flow:
-///  1. The TV starts this server and shows a QR of [pairUrl].
-///  2. The phone scans it and opens the TV-hosted page.
-///  3. The page links to AniList's OAuth (PKCE) with `redirect_uri` pointing
-///     back to this server's `/callback`.
-///  4. After the user authorizes, AniList redirects the phone to `/callback`
-///     with `?code=...&state=...` query params. A tiny JS reads the code and
-///     POSTs it (together with a CSRF token) to `/token`.
-///  5. The server validates the state, exchanges the code via AniList's token
-///     endpoint using PKCE, saves the token, and completes [onLoggedIn].
+/// Flow (Implicit Grant — no client_secret in the APK, no LAN required):
+///  1. The TV starts this server bound to `127.0.0.1:8090` and the WebView
+///     loads the authorize URL, which points AniList's redirect_uri back to
+///     `http://127.0.0.1:8090/callback`.
+///  2. After the user authorizes on AniList (inside the in-app WebView), the
+///     browser is redirected to `/callback#access_token=...&state=...`. The
+///     token travels in the URL fragment (never sent to any server), per the
+///     OAuth2 Implicit Grant.
+///  3. The callback page's JS reads `access_token` and `state` from
+///     `location.hash`, then POSTs both (with a CSRF token) to `/token`.
+///  4. The server validates the state and CSRF token and saves the token via
+///     [AniListService.saveToken]. On success, [onLoggedIn] completes with
+///     `true`.
+///
+/// Note: PKCE (Authorization Code Flow) is NOT supported by AniList — the
+/// token endpoint rejects code+verifier exchanges with `401 invalid_client`.
+/// Implicit Grant is the supported no-secret flow (see
+/// https://docs.anilist.co/guide/auth/implicit).
+///
+/// Why loopback (127.0.0.1) instead of LAN IP: the redirect_uri is registered
+/// once in the AniList developer console and must be stable across devices. A
+/// LAN IP changes per network, so it can't be registered. `127.0.0.1` is
+/// always the local device, so the same redirect_uri works on every install
+/// — and the in-app WebView is the one performing the OAuth, so it hits the
+/// server running in the same process. No external device can reach the
+/// loopback server, which is also a security improvement over the previous
+/// `InternetAddress.anyIPv4` bind.
 class AniListPairingServer {
   HttpServer? _server;
   final _loggedIn = Completer<bool>();
-  String? _ip;
-  int? _port;
+  static const int _port = 8090;
+  static const String _host = '127.0.0.1';
 
-  // PKCE session state — generated fresh per landing page load.
-  String? _codeVerifier;
+  // OAuth state for the current session — generated fresh per authorize-URL
+  // load and validated against the state AniList echoes back on the callback.
   String? _state;
   String? _csrfToken;
 
@@ -38,29 +53,19 @@ class AniListPairingServer {
 
   Future<bool> get onLoggedIn => _loggedIn.future;
 
-  /// Base pairing URL to encode in the QR code (e.g. http://192.168.0.10:8090/).
-  String? get pairUrl =>
-      (_ip != null && _port != null) ? 'http://$_ip:$_port/' : null;
+  /// Base URL served by this server — always `http://127.0.0.1:8090/`.
+  String? get pairUrl => _server != null ? 'http://$_host:$_port/' : null;
 
   bool get isRunning => _server != null;
 
+  /// Binds the loopback IPv4 address on the fixed port registered with AniList.
+  /// Returns `false` if the port is already in use (rare on a TV, but surfaced
+  /// so the UI can tell the user to close whatever is holding it).
   Future<bool> start() async {
-    _ip = await _lanIp();
-    if (_ip == null) {
-      debugPrint('[AniListPairing] No LAN IP found');
-      return false;
-    }
-    for (final port in const [8090, 8091, 8092, 8093, 8099]) {
-      try {
-        _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
-        _port = port;
-        break;
-      } catch (_) {
-        continue;
-      }
-    }
-    if (_server == null) {
-      debugPrint('[AniListPairing] Could not bind any port');
+    try {
+      _server = await HttpServer.bind(InternetAddress.loopbackIPv4, _port);
+    } catch (e) {
+      debugPrint('[AniListPairing] Could not bind 127.0.0.1:$_port — $e');
       return false;
     }
     debugPrint('[AniListPairing] Serving at $pairUrl');
@@ -71,7 +76,7 @@ class AniListPairingServer {
   }
 
   // ---------------------------------------------------------------------------
-  // PKCE helpers
+  // Helpers
   // ---------------------------------------------------------------------------
 
   /// Cryptographically random base64url string, [byteLength] bytes, no padding.
@@ -84,31 +89,31 @@ class AniListPairingServer {
     return base64Url.encode(bytes).replaceAll('=', '');
   }
 
-  /// SHA-256 digest → unpadded base64url.
-  String _sha256Base64Url(String input) {
-    final digest = SHA256Digest();
-    final inputBytes = Uint8List.fromList(utf8.encode(input));
-    final hash = Uint8List(digest.digestSize);
-    digest.update(inputBytes, 0, inputBytes.length);
-    digest.doFinal(hash, 0);
-    return base64Url.encode(hash).replaceAll('=', '');
-  }
-
-  /// PKCE authorize URL for the current session.  Generates a new code_verifier
-  /// and state on each call so that every landing-page refresh gets fresh
-  /// credentials.
+  /// ponytail: authorize URL for the current session. Implicit Grant
+  /// (`response_type=token`): AniList returns the JWT in the redirect fragment.
   String get _authorizeUrl {
-    final redirect = 'http://$_ip:$_port/callback';
-    _codeVerifier = _randomBase64Url(128);
-    _state = _randomBase64Url(32);
-    final challenge = _sha256Base64Url(_codeVerifier!);
     return 'https://anilist.co/api/v2/oauth/authorize'
         '?client_id=${AppConstants.anilistClientId}'
-        '&response_type=code'
-        '&code_challenge=$challenge'
-        '&code_challenge_method=S256'
+        '&response_type=token'
         '&state=$_state'
-        '&redirect_uri=${Uri.encodeComponent(redirect)}';
+        '&redirect_uri=${Uri.encodeComponent(AppConstants.anilistRedirectUri)}';
+  }
+
+  /// Gera a sessão e retorna a URL de autorização pronta para o WebView.
+  /// A landing page também chama isso, mas o WebView da TV pode carregar a URL
+  /// direto — poupa o clique intermediário (que não chega ao WebView da Fire TV).
+  String? get authorizeUrl {
+    if (_server == null) return null;
+    _startSession();
+    return _authorizeUrl;
+  }
+
+  void _startSession() {
+    _csrfToken = _randomBase64Url(32);
+    // currentState vem default como '' (não-null), então `??` nunca dispara e
+    // _state ficava vazio → /token rejeitava com 403. Cai no random se vazio.
+    final cs = AniListService.currentState;
+    _state = cs.isNotEmpty ? cs : _randomBase64Url(32);
   }
 
   // ---------------------------------------------------------------------------
@@ -153,7 +158,6 @@ class AniListPairingServer {
       () => _RateEntry(0, now),
     );
     if (now - rateEntry.windowStart > _rateLimitWindow.inMilliseconds) {
-      // Window expired — reset.
       rateEntry.count = 0;
       rateEntry.windowStart = now;
     }
@@ -167,9 +171,17 @@ class AniListPairingServer {
     final body = req.method == 'POST' ? await utf8.decodeStream(req) : '';
     final params = Uri.splitQueryString(body);
 
-    final code = params['code'] ?? '';
+    final token = params['token'] ?? '';
     final state = params['state'] ?? '';
     final csrfToken = params['csrf_token'] ?? '';
+
+    // -----------------------------------------------------------------------
+    // State validation (T-01-02): missing/wrong state → 403
+    // -----------------------------------------------------------------------
+    if (state.isEmpty || state != _state) {
+      _html(req, _resultPage(false), status: 403);
+      return;
+    }
 
     // -----------------------------------------------------------------------
     // CSRF token validation (T-01-02): missing/wrong token → 403
@@ -189,7 +201,7 @@ class AniListPairingServer {
     // -----------------------------------------------------------------------
     final origin = req.headers.value('origin');
     final referer = req.headers.value('referer');
-    final tvOrigin = 'http://$_ip:$_port';
+    final tvOrigin = 'http://$_host:$_port';
     if (origin != null && origin != tvOrigin) {
       _html(req, _resultPage(false), status: 403);
       return;
@@ -200,18 +212,13 @@ class AniListPairingServer {
     }
 
     // -----------------------------------------------------------------------
-    // State validation and code exchange
+    // Save token (Implicit Grant): the callback page POSTs the access token
+    // it read from the URL fragment. On success completes [onLoggedIn].
     // -----------------------------------------------------------------------
     var ok = false;
 
-    if (state.isNotEmpty && state == _state && code.isNotEmpty) {
-      final token = await AniListService.exchangeCodeForToken(
-        code,
-        _codeVerifier ?? '',
-      );
-      if (token != null) {
-        ok = true;
-      }
+    if (token.startsWith('eyJ')) {
+      ok = await AniListService.saveToken(token);
     }
 
     _html(
@@ -226,9 +233,9 @@ class AniListPairingServer {
   // HTML helpers
   // ---------------------------------------------------------------------------
 
-  /// Sends an HTML response with CORS header restricted to the TV's own origin.
+  /// Sends an HTML response with CORS header restricted to the loopback origin.
   Future<void> _html(HttpRequest req, String body, {int status = 200}) async {
-    final origin = 'http://$_ip:$_port';
+    final origin = 'http://$_host:$_port';
     req.response
       ..statusCode = status
       ..headers.set(HttpHeaders.contentTypeHeader, 'text/html; charset=utf-8')
@@ -239,11 +246,12 @@ class AniListPairingServer {
     } catch (_) {}
   }
 
-  /// Landing page — generates a fresh PKCE session on every load.
+  /// Landing page — generates a fresh CSRF token and state on every load
+  /// and reads the state from `AniListService.currentState` so it matches the URL
+  /// the WebView is about to navigate to.
   String _landingPage() {
-    // Invalidate any previous session and generate fresh credentials.
-    _csrfToken = _randomBase64Url(32);
-    final authUrl = _authorizeUrl; // also sets _codeVerifier and _state
+    _startSession();
+    final authUrl = _authorizeUrl;
     return '''<!doctype html><html lang="pt-br"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="csrf-token" content="$_csrfToken">
@@ -260,14 +268,14 @@ padding:16px;border-radius:12px;font-size:18px;font-weight:600}
 <h1>Conectar AniList</h1>
 <p>Toque no botão abaixo, faça login no AniList e autorize o aplicativo. O login na TV será feito automaticamente.</p>
 <a class="btn" href="$authUrl">Entrar com AniList</a>
-<p style="margin-top:20px;font-size:13px;color:#ffa500">⚠ Este servidor é apenas para uso em rede local. O token de acesso é transmitido por HTTP em sua rede local.</p>
+<p style="margin-top:20px;font-size:13px;color:#9aa7b4">Servidor loopback 127.0.0.1:$_port — visível apenas para este dispositivo.</p>
 </div></body></html>''';
   }
 
-  /// Callback page — reads the authorization `code` from the query string
-  /// and POSTs it together with the CSRF token to the local `/token` endpoint.
-  /// AniList sends the redirect as a full-page navigation (not fragment),
-  /// so we read from `location.search` (query string).
+  /// Callback page — Implicit Grant puts the access token in the URL fragment
+  /// (`location.hash`), which is never sent to the server. The JS reads
+  /// `access_token` and `state` from the hash and POSTs both (with the CSRF
+  /// token) to the local `/token` endpoint.
   String _callbackPage(String? csrfToken) {
     final token = csrfToken ?? '';
     return '''<!doctype html><html lang="pt-br"><head>
@@ -284,13 +292,18 @@ h1{font-size:20px}p{color:#9aa7b4}
 </div>
 <script>
 (function(){
-  function q(name){ var m = location.search.match(new RegExp('[?&]' + name + '=([^&]*)')); return m ? decodeURIComponent(m[1]) : ''; }
-  var code = q('code');
-  var state = q('state');
+  var hash = location.hash.substring(1);
+  var params = new URLSearchParams(hash);
+  var token = params.get('access_token');
+  var state = params.get('state');
   var csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
   var m = document.getElementById('m');
-  if(!code){ m.textContent = 'Não recebi o código. Volte à TV e tente novamente.'; return; }
-  fetch('/token', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: 'code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state) + '&csrf_token=' + encodeURIComponent(csrfToken)})
+  if(!token){ m.textContent = 'Não recebi o token. Volte à TV e tente novamente.'; return; }
+  fetch('/token', {
+    method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'token=' + encodeURIComponent(token) + '&state=' + encodeURIComponent(state) + '&csrf_token=' + encodeURIComponent(csrfToken)
+  })
     .then(function(r){ return r.ok; })
     .then(function(ok){
       document.getElementById('c').innerHTML = ok
@@ -309,32 +322,6 @@ h1{font-size:20px}p{color:#9aa7b4}
 display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;padding:24px}</style>
 </head><body><div><h1>${ok ? 'Login concluído ✅' : 'Token inválido'}</h1>
 <p>${ok ? 'Pode voltar para a TV.' : 'Tente novamente.'}</p></div></body></html>''';
-  }
-
-  /// Best-effort LAN IPv4 discovery, preferring private ranges.
-  static Future<String?> _lanIp() async {
-    try {
-      final interfaces = await NetworkInterface.list(
-        type: InternetAddressType.IPv4,
-        includeLoopback: false,
-      );
-      String? fallback;
-      for (final iface in interfaces) {
-        for (final addr in iface.addresses) {
-          final ip = addr.address;
-          if (ip.startsWith('192.168.') ||
-              ip.startsWith('10.') ||
-              ip.startsWith('172.')) {
-            return ip;
-          }
-          fallback ??= ip;
-        }
-      }
-      return fallback;
-    } catch (e) {
-      debugPrint('[AniListPairing] LAN IP error: $e');
-      return null;
-    }
   }
 
   Future<void> dispose() async {

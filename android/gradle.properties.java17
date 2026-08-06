@@ -1,0 +1,7 @@
+# Configuration for Gradle Java 17
+
+# Set the Java home path
+org.gradle.java.home=/usr/lib/jvm/java-26-openjdk
+
+# If Java 17 is available, uncomment below:
+# org.gradle.java.home=/usr/local/java17

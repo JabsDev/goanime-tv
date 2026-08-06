@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import '../../core/anilist/anilist_service.dart';
+import '../../core/navigation/route_observer.dart';
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
 import '../../data/repositories/anime_repository.dart';
 import '../../core/storage/local_storage.dart';
+import '../../core/storage/settings_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/focus_key_handler.dart';
@@ -18,7 +21,7 @@ class DetailScreen extends StatefulWidget {
   State<DetailScreen> createState() => _DetailScreenState();
 }
 
-class _DetailScreenState extends State<DetailScreen> {
+class _DetailScreenState extends State<DetailScreen> with RouteAware {
   final AnimeRepository _repo = AnimeRepository();
   List<Episode> _episodes = [];
   bool _isLoading = true;
@@ -31,7 +34,80 @@ class _DetailScreenState extends State<DetailScreen> {
     super.initState();
     debugPrint('[Detail] initState name=${widget.anime.name} source=${widget.anime.source}');
     _isFavorite = LocalStorage.isFavorite(widget.anime.name);
+    // B4: resultado vindo da busca traz só dados do scraper. Se não há
+    // metadata e não veio do catálogo AniList (que já é rico), enriquece
+    // aqui p/ paridade com a Home (sinopse/backdrop/gêneros/capa).
+    if ((widget.anime.description == null ||
+            widget.anime.description!.isEmpty ||
+            widget.anime.genres.isEmpty) &&
+        widget.anime.anilistId == null) {
+      AniListService.enrich(widget.anime).then((_) {
+        if (mounted) setState(() {});
+      });
+    }
     _loadEpisodes();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    routeObserver.subscribe(this, ModalRoute.of(context)!);
+  }
+
+  @override
+  void dispose() {
+    routeObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    // Voltou do player (ou outra rota empilhada). Re-casa local × AniList e
+    // repinta a grade p/ refletir eps marcados assistidos durante o playback.
+    debugPrint('[Detail] didPopNext — re-casando com AniList');
+    _reconcileWithAnilist();
+  }
+
+  /// Backsync cross-device: busca o status+progresso do entry no AniList,
+  /// funde com o high-water local (max-merge p/ não perder progresso offline),
+  /// marca o conjunto assistido CONTÍGUO 0..N-1, e back-push se local à frente.
+  /// AniList prevalece (Q5); local à frente sobe p/ AniList. (Regra Q4: 1..N.)
+  Future<void> _reconcileWithAnilist() async {
+    final id = widget.anime.anilistId;
+    if (id == null) return;
+    final entry = await AniListService.getMediaListEntry(id);
+    if (!mounted) return;
+    final localProg = LocalStorage.getWatchProgress(widget.anime.name);
+    final watched =
+        (localProg?['watched'] as List?)?.cast<int>().toSet() ?? <int>{};
+    // legacy fallback (pré-migração, sem chave 'watched'): high-water do
+    // último episode INDEX jogado.
+    final legacyEp = localProg?['episode'] as int? ?? -1;
+    int localHigh;
+    if (watched.isEmpty) {
+      localHigh = legacyEp + 1;
+    } else {
+      localHigh = watched.reduce((a, b) => a > b ? a : b) + 1;
+    }
+    if (localHigh < 0) localHigh = 0;
+    final anilistProgress = entry?.progress ?? 0;
+    final effective = anilistProgress > localHigh ? anilistProgress : localHigh;
+    if (effective > 0) {
+      await LocalStorage.reconcileWatched(
+          animeKey: widget.anime.name, progress: effective);
+    }
+    if (mounted) setState(() {});
+    // back-push: local à frente do AniList (offline / push anterior falhou).
+    if (entry != null && entry.progress != null && localHigh > entry.progress!) {
+      final total = widget.anime.episodes ?? _episodes.length;
+      final status =
+          (total > 0 && localHigh >= total) ? 'COMPLETED' : 'CURRENT';
+      AniListService.updateProgress(
+              mediaId: id, progress: localHigh, status: status)
+          .then((ok) => debugPrint(
+              '[Detail] back-push local=$localHigh > anilist=${entry.progress} status=$status ok=$ok'))
+          .catchError((e) => debugPrint('[Detail] back-push error: $e'));
+    }
   }
 
   Future<void> _loadEpisodes() async {
@@ -58,6 +134,7 @@ class _DetailScreenState extends State<DetailScreen> {
       // Log the result for debugging
       debugPrint('[Detail] Loaded ${_episodes.length} episodes from ${result.sourceOptions.length} sources');
       debugPrint('[Detail] _loadEpisodes end eps=${result.episodes.length} sources=${result.sourceOptions.length}');
+      _reconcileWithAnilist();
     } catch (e) {
       debugPrint('[Detail] Load episodes error: $e');
       if (mounted) setState(() => _isLoading = false);
@@ -79,6 +156,7 @@ class _DetailScreenState extends State<DetailScreen> {
       animeKey: widget.anime.name,
       title: widget.anime.name,
       imageUrl: widget.anime.imageUrl,
+      anilistId: widget.anime.anilistId,
     );
     setState(() => _isFavorite = !_isFavorite);
   }
@@ -101,6 +179,29 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
+  void _showEpisodeDescription(BuildContext context, Episode episode) {
+    if (episode.description == null || episode.description!.isEmpty) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(episode.title ?? 'Episódio ${episode.number}'),
+        content: SingleChildScrollView(
+          child: Text(
+            episode.description ?? '',
+            style: const TextStyle(fontSize: 14),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Fechar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -109,6 +210,10 @@ class _DetailScreenState extends State<DetailScreen> {
         slivers: [
           _buildSliverHeader(),
           _buildSliverBody(),
+          // ponytail: grid virtualizado como sliver sibling. Antes era
+          // GridView.count shrinkWrap com List.generate — long shows instanciavam
+          // 1000+ _EpisodeCard Statefuls upfront.
+          if (!_isLoading && _episodes.isNotEmpty) _buildSliverEpisodeGrid(),
         ],
       ),
     );
@@ -246,35 +351,40 @@ class _DetailScreenState extends State<DetailScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _FavoriteButton(
-                        isFavorite: _isFavorite,
-                        onTap: _toggleFavorite,
-                      ),
-                      if (widget.anime.status != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Text(
-                            widget.anime.status!.replaceAll('_', ' '),
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: widget.anime.status == 'FINISHED'
-                                  ? Colors.green
-                                  : Colors.orange,
-                            ),
-                          ),
+                  if (widget.anime.status != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: Text(
+                        widget.anime.status!.replaceAll('_', ' '),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: widget.anime.status == 'FINISHED'
+                              ? Colors.green
+                              : Colors.orange,
                         ),
-                    ],
-                  ),
+                      ),
+                    ),
                 ],
               ),
             ),
           ],
         ),
       ),
+      // B2: o coração fica na barra PINNED (actions), não no FlexibleSpaceBar
+      // que colapsa ao scrollar — antes ele saía do viewport e ficava
+      // inacessível por D-pad. Aqui permanece visível junto do voltar.
       leading: _BackButton(onTap: () => Navigator.pop(context)),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: Center(
+            child: _FavoriteButton(
+              isFavorite: _isFavorite,
+              onTap: _toggleFavorite,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -366,102 +476,95 @@ class _DetailScreenState extends State<DetailScreen> {
               ],
             ),
           ),
-            if (_episodes.isEmpty)
-             Padding(
-               padding: const EdgeInsets.only(top: 40),
-               child: Center(
-                 child: Column(
-                   mainAxisSize: MainAxisSize.min,
-                   children: [
-                     const Icon(Icons.sentiment_dissatisfied, color: Colors.white24, size: 48),
-                     const SizedBox(height: 16),
-                     const Text(
-                       'Nada por aqui',
-                       style: TextStyle(
-                         fontSize: 22,
-                         color: ThemeConstants.white,
-                         fontWeight: FontWeight.bold,
-                       ),
+if (_episodes.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 40),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.sentiment_dissatisfied, color: Colors.white24, size: 48),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Nada por aqui',
+                        style: TextStyle(
+                          fontSize: 22,
+                          color: ThemeConstants.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Não conseguimos achar episódios para este anime '
+                        'em nenhuma das fontes (AnimeFire, AniList, Goyabu, '
+                        'SuperFlix, AllAnime). Pode ser que o título não esteja '
+                        'indexado ou todas as fontes estejam indisponíveis no momento.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: ThemeConstants.textSecondary,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                     _DialogButton(
+                       label: 'Tentar novamente',
+                       primary: true,
+                       onTap: _loadEpisodes,
                      ),
-                     const SizedBox(height: 8),
-                     const Text(
-                       'Não conseguimos achar episódios para este anime '
-                       'em nenhuma das fontes (AnimeFire, Goyabu, SuperFlix, '
-                       'AllAnime). Pode ser que o título não esteja indexado ou '
-                       'todas as fontes estejam indisponíveis no momento.',
-                       textAlign: TextAlign.center,
-                       style: TextStyle(
-                         fontSize: 14,
-                         color: ThemeConstants.textSecondary,
-                         height: 1.4,
-                       ),
-                     ),
-                     const SizedBox(height: 24),
-                    _DialogButton(
-                      label: 'Tentar novamente',
-                      primary: true,
-                      onTap: _loadEpisodes,
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            _buildEpisodeGrid(),
-        ]),
-      ),
-    );
-  }
+                   ],
+                 ),
+               ),
+             )
+           // else: episodes grid rendered as a separate sliver sibling (see build()).
+         ]),
+       ),
+     );
+   }
 
   Widget _buildSourceSelector() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: ThemeConstants.surfaceLight,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ThemeConstants.primary.withValues(alpha: 0.4)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: _selectedSource,
-          dropdownColor: ThemeConstants.surface,
-          style: const TextStyle(
-            color: ThemeConstants.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-          icon: const Icon(Icons.source, color: ThemeConstants.primary, size: 20),
-          items: _sourceOptions.entries.map((e) {
-            return DropdownMenuItem<String>(
-              value: e.key,
-              child: Text('${e.key} (${e.value.length})'),
-            );
-          }).toList(),
-          onChanged: _onSourceChanged,
-        ),
-      ),
+    return _SourceSelector(
+      selectedSource: _selectedSource,
+      options: _sourceOptions,
+      onChanged: _onSourceChanged,
     );
   }
 
-  Widget _buildEpisodeGrid() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth > 900 ? 5 : constraints.maxWidth > 600 ? 4 : 2;
-        return GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
+  Widget _buildSliverEpisodeGrid() {
+    final width = MediaQuery.sizeOf(context).width;
+    final crossAxisCount = width > 900 ? 5 : width > 600 ? 4 : 2;
+    final progress = LocalStorage.getWatchProgress(widget.anime.name);
+    final watchedSet =
+        (progress?['watched'] as List?)?.cast<int>().toSet() ?? <int>{};
+    // ponytail: pinta prefixo contíguo 0..maxWatchedIdx. Combina high-water do
+    // último ep tocado (progress['episode']) com o maior índice no conjunto
+    // 'watched' (preenchido pelo gate de 75% do player e pelo reconcileWatched
+    // quando o AniList reporta progress N). Garante que TODOS os eps até o
+    // último assistido fiquem verdes, mesmo em fluxos não-contíguos.
+    final epIndex = (progress?['episode'] as int?) ?? -1;
+    final maxWatchedIdx = [
+      if (watchedSet.isNotEmpty) watchedSet.reduce((a, b) => a > b ? a : b),
+      epIndex,
+    ].fold<int>(-1, (a, b) => a > b ? a : b);
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+      sliver: SliverGrid.builder(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
           childAspectRatio: 2.8,
           crossAxisSpacing: 10,
           mainAxisSpacing: 10,
-          children: List.generate(_episodes.length, (i) => _EpisodeCard(
-            index: i,
-            episode: _episodes[i],
-            anime: widget.anime,
-            onPlay: () => _playEpisode(i),
-          )),
-        );
-      },
+        ),
+        itemCount: _episodes.length,
+        itemBuilder: (context, i) => _EpisodeCard(
+          key: ValueKey('${_selectedSource}_$i'),
+          index: i,
+          episode: _episodes[i],
+          anime: widget.anime,
+          isWatched: i <= maxWatchedIdx,
+          onPlay: () => _playEpisode(i),
+        ),
+      ),
     );
   }
 }
@@ -470,12 +573,15 @@ class _EpisodeCard extends StatefulWidget {
   final int index;
   final Episode episode;
   final Anime anime;
+  final bool isWatched;
   final VoidCallback onPlay;
 
   const _EpisodeCard({
+    super.key,
     required this.index,
     required this.episode,
     required this.anime,
+    required this.isWatched,
     required this.onPlay,
   });
 
@@ -486,15 +592,47 @@ class _EpisodeCard extends StatefulWidget {
 class _EpisodeCardState extends State<_EpisodeCard> {
   bool _isFocused = false;
 
+  // B6: a fonte fabrica "Episódio N"; repetir como texto trunca feio
+  // ("Epis…"). Quando o título é genérico, mostra só o badge "EP N".
+  Widget _buildTitle() {
+    final t = widget.episode.title;
+    final generic = t == null ||
+        t.isEmpty ||
+        RegExp(r'^epis[oó]dio\s+\d+$', caseSensitive: false).hasMatch(t);
+    if (generic) {
+      return Text(
+        'EP ${widget.episode.number}',
+        style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          color: ThemeConstants.white,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    return Text(
+      t!,
+      style: const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w500,
+        color: ThemeConstants.white,
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Focus(
+      // B5: foco inicial pousa no primeiro episódio (sempre visível no grid
+      // da TV) em vez de em nó fora do viewport/header colapsado.
+      autofocus: widget.index == 0,
       onFocusChange: (focused) {
         setState(() => _isFocused = focused);
-        debugPrint('[EpCard] focus anime=${widget.anime.name} idx=${widget.index} ep=${widget.episode.number} focused=$focused');
       },
       onKeyEvent: (node, event) {
-        debugPrint('[EpCard] key anime=${widget.anime.name} idx=${widget.index} ep=${widget.episode.number} logical=${event.logicalKey} physical=${event.physicalKey} time=${event.timeStamp}');
         // ponytail: FireTV remote envia Select logo seguido de ArrowRight (~7ms).
         // InkWell.onTap perde a race c/ a trava de foco do ArrowRight. Helper
         // FocusKeyHandler intercepta Select/Enter/Space e chama onPlay direto.
@@ -507,11 +645,13 @@ class _EpisodeCardState extends State<_EpisodeCard> {
           child: InkWell(
             onTap: widget.onPlay,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: SettingsService.instance.animDuration,
               decoration: BoxDecoration(
                 color: _isFocused
                     ? ThemeConstants.primary.withValues(alpha: 0.15)
-                    : ThemeConstants.surface,
+                    : (widget.isWatched
+                        ? ThemeConstants.watched
+                        : ThemeConstants.surface),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: _isFocused
@@ -519,7 +659,7 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                       : ThemeConstants.surfaceLight,
                   width: _isFocused ? 2 : 1,
                 ),
-                boxShadow: _isFocused
+                boxShadow: (_isFocused && SettingsService.instance.shadowsEnabled)
                     ? [
                         BoxShadow(
                           color: ThemeConstants.primary.withValues(alpha: 0.3),
@@ -530,43 +670,37 @@ class _EpisodeCardState extends State<_EpisodeCard> {
               ),
               child: Row(
                 children: [
-                  Container(
-                    width: 72,
-                    height: double.infinity,
-                    decoration: BoxDecoration(
-                      color: _isFocused
-                          ? ThemeConstants.primaryDark
-                          : ThemeConstants.surfaceLight,
-                      borderRadius: const BorderRadius.horizontal(
-                        left: Radius.circular(7),
+                  // B6: sem thumbnail → ícone de play (placeholder visual) em
+                  // vez de fundo escuro mudo; "EP N" vira o label principal.
+                  Builder(builder: (context) {
+                    final hasThumb = widget.episode.thumbnail != null &&
+                        widget.episode.thumbnail!.isNotEmpty;
+                    return Container(
+                      width: 72,
+                      height: double.infinity,
+                      decoration: BoxDecoration(
+                        color: _isFocused
+                            ? ThemeConstants.primaryDark
+                            : ThemeConstants.surfaceLight,
+                        borderRadius: BorderRadius.circular(7),
+                        image: hasThumb
+                            ? DecorationImage(
+                                image: NetworkImage(widget.episode.thumbnail!),
+                                fit: BoxFit.cover,
+                              )
+                            : null,
                       ),
-                    ),
-                    child: Center(
-                      child: Text(
-                        'EP ${widget.episode.number}',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: _isFocused
-                              ? Colors.white
-                              : ThemeConstants.white,
-                        ),
-                      ),
-                    ),
-                  ),
+                      child: hasThumb
+                          ? null
+                          : const Center(
+                              child: Icon(Icons.play_arrow,
+                                  color: ThemeConstants.textSecondary,
+                                  size: 28),
+                            ),
+                    );
+                  }),
                   const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      widget.episode.title ?? 'Episódio ${widget.episode.number}',
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        color: ThemeConstants.white,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+                  Expanded(child: _buildTitle()),
                   Padding(
                     padding: const EdgeInsets.all(8),
                     child: Icon(
@@ -643,6 +777,35 @@ class _QualityDialogState extends State<_QualityDialog> {
         );
       }
 
+      // AniList doesn't provide video streams
+      if (effectiveSource == AnimeSource.anilist) {
+        if (!mounted) return;
+        setState(() {
+          _error = 'Este episódio não está disponível para streaming diretamente do AniList. '
+                    'As informações de episódio (título, descrição, thumbnail) são exibidas, '
+                    'mas a reprodução exige AnimeFire.';
+          _loading = false;
+        });
+        return;
+      }
+
+      // If AnimeFire fails and we have a fallback source
+      if (sources.isEmpty && effectiveSource != AnimeSource.anilist && mounted) {
+        debugPrint('[QualityDialog] No sources from primary source, checking for fallback...');
+        // Try to fall back to another source
+        if (effectiveSource == AnimeSource.animeFire) {
+          // AnimeFire is primary, try other sources if available
+          if (widget.episode.owner != null && widget.episode.owner!.source != AnimeSource.animeFire) {
+            debugPrint('[QualityDialog] Falling back to ${widget.episode.owner!.source}');
+            sources = await _repo.getVideoSources(
+              widget.episode,
+              widget.episode.owner!.source,
+              anime: widget.episode.owner ?? widget.anime,
+            );
+          }
+        }
+      }
+
       if (!mounted) return;
       debugPrint('[QualityDialog] loadSources done count=${sources.length}');
       setState(() {
@@ -653,7 +816,14 @@ class _QualityDialogState extends State<_QualityDialog> {
       if (!mounted) return;
       debugPrint('[QualityDialog] Load sources error: $e');
       setState(() {
-        _error = 'Fonte indisponível. Tente novamente ou escolha outra fonte.';
+        // Show appropriate message for AniList episodes
+        final effectiveSource = widget.episode.source ?? widget.anime.source;
+        if (effectiveSource == AnimeSource.anilist) {
+          _error = 'Este episódio não está disponível para streaming. '
+                    'Use a fonte AnimeFire para reprodução.';
+        } else {
+          _error = 'Fonte indisponível. Tente novamente ou escolha outra fonte.';
+        }
         _loading = false;
       });
     }
@@ -664,12 +834,36 @@ class _QualityDialogState extends State<_QualityDialog> {
     switch (src) {
       case AnimeSource.animeFire:
         return 'AnimeFire';
+      case AnimeSource.anilist:
+        return 'AniList';
       case AnimeSource.goyabu:
         return 'Goyabu';
       case AnimeSource.superFlix:
         return 'SuperFlix';
       case AnimeSource.allAnime:
         return 'AllAnime';
+      case AnimeSource.betterAnime:
+        return 'BetterAnime';
+      case AnimeSource.animesRoll:
+        return 'AnimesROLL';
+      case AnimeSource.anikyuu:
+        return 'Anikyuu';
+      case AnimeSource.anitube:
+        return 'Anitube';
+      case AnimeSource.dattebayo:
+        return 'Dattebayo';
+      case AnimeSource.animesDigital:
+        return 'AnimesDigital';
+      case AnimeSource.dooPlay:
+        return 'DooPlay';
+      case AnimeSource.animePlay:
+        return 'Anime Play';
+      case AnimeSource.animePlayer:
+        return 'Anime Player';
+      case AnimeSource.animeQ:
+        return 'Anime Q';
+      default:
+        return 'Unknown';
     }
   }
 
@@ -899,7 +1093,7 @@ class _QualityItemState extends State<_QualityItem> {
           child: InkWell(
             onTap: widget.onTap,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: SettingsService.instance.animDuration,
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
               decoration: BoxDecoration(
@@ -915,7 +1109,7 @@ class _QualityItemState extends State<_QualityItem> {
                       ? ThemeConstants.focusBorderWidth
                       : 1,
                 ),
-                boxShadow: _isFocused
+                boxShadow: (_isFocused && SettingsService.instance.shadowsEnabled)
                     ? [
                         BoxShadow(
                           color: ThemeConstants.primary.withValues(alpha: 0.4),
@@ -995,7 +1189,7 @@ class _DialogButtonState extends State<_DialogButton> {
           child: InkWell(
             onTap: widget.onTap,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: SettingsService.instance.animDuration,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               decoration: BoxDecoration(
                 color: widget.primary
@@ -1016,7 +1210,7 @@ class _DialogButtonState extends State<_DialogButton> {
                       ? ThemeConstants.focusBorderWidth
                       : 1,
                 ),
-                boxShadow: _isFocused
+                boxShadow: (_isFocused && SettingsService.instance.shadowsEnabled)
                     ? [
                         BoxShadow(
                           color: ThemeConstants.primary.withValues(alpha: 0.5),
@@ -1072,7 +1266,7 @@ class _FavoriteButtonState extends State<_FavoriteButton> {
             onTap: widget.onTap,
             customBorder: const CircleBorder(),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: SettingsService.instance.animDuration,
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: widget.isFavorite
@@ -1085,7 +1279,7 @@ class _FavoriteButtonState extends State<_FavoriteButton> {
                       : Colors.transparent,
                   width: ThemeConstants.focusBorderWidth,
                 ),
-                boxShadow: _isFocused
+                boxShadow: (_isFocused && SettingsService.instance.shadowsEnabled)
                     ? [
                         BoxShadow(
                           color: ThemeConstants.primary.withValues(alpha: 0.5),
@@ -1132,7 +1326,7 @@ class _BackButtonState extends State<_BackButton> {
             onTap: widget.onTap,
             customBorder: const CircleBorder(),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: SettingsService.instance.animDuration,
               margin: const EdgeInsets.all(8),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
@@ -1144,7 +1338,7 @@ class _BackButtonState extends State<_BackButton> {
                       : Colors.transparent,
                   width: ThemeConstants.focusBorderWidth,
                 ),
-                boxShadow: _isFocused
+                boxShadow: (_isFocused && SettingsService.instance.shadowsEnabled)
                     ? [
                         BoxShadow(
                           color: ThemeConstants.primary.withValues(alpha: 0.5),
@@ -1157,6 +1351,127 @@ class _BackButtonState extends State<_BackButton> {
                 Icons.arrow_back,
                 color: _isFocused ? ThemeConstants.primary : Colors.white,
                 size: 24,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ponytail: antes DropdownButton sem Focus → D-pod pousava invisível no seletor
+// de fontes. DropdownButton não é ativável por Select no remote (mobile-first),
+// então troquei por InkWell + showMenu. Mesmo padrão AnimatedContainer de
+// _QualityItem/_DialogButton: border + glow primary ao focar, FocusKeyHandler
+// despacha Select/Enter/Space para abrir o menu nativo.
+class _SourceSelector extends StatefulWidget {
+  final String? selectedSource;
+  final Map<String, List<Episode>> options;
+  final ValueChanged<String?> onChanged;
+
+  const _SourceSelector({
+    required this.selectedSource,
+    required this.options,
+    required this.onChanged,
+  });
+
+  @override
+  State<_SourceSelector> createState() => _SourceSelectorState();
+}
+
+class _SourceSelectorState extends State<_SourceSelector> {
+  bool _isFocused = false;
+
+  Future<void> _openMenu() async {
+    final renderBox = context.findRenderObject() as RenderBox?;
+    final offset = renderBox?.localToGlobal(Offset.zero) ?? Offset.zero;
+    final size = renderBox?.size ?? Size.zero;
+    final key = await showMenu<String>(
+      context: context,
+      color: ThemeConstants.surface,
+      initialValue: widget.selectedSource,
+      position: RelativeRect.fromLTRB(
+        offset.dx,
+        offset.dy + size.height + 4,
+        offset.dx + size.width + 200,
+        offset.dy + size.height + 4,
+      ),
+      items: widget.options.entries.map((e) {
+        return PopupMenuItem<String>(
+          value: e.key,
+          child: Text(
+            '${e.key} (${e.value.length})',
+            style: const TextStyle(
+              color: ThemeConstants.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        );
+      }).toList(),
+    );
+    if (key != null) widget.onChanged(key);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final count = widget.selectedSource == null
+        ? 0
+        : widget.options[widget.selectedSource]?.length ?? 0;
+    return Focus(
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, _openMenu),
+      child: Semantics(
+        button: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: _openMenu,
+            borderRadius: BorderRadius.circular(8),
+            child: AnimatedContainer(
+              duration: SettingsService.instance.animDuration,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: _isFocused
+                    ? ThemeConstants.primary.withValues(alpha: 0.15)
+                    : ThemeConstants.surfaceLight,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : ThemeConstants.primary.withValues(alpha: 0.4),
+                  width: _isFocused ? ThemeConstants.focusBorderWidth : 1,
+                ),
+                boxShadow: (_isFocused && SettingsService.instance.shadowsEnabled)
+                    ? [
+                        BoxShadow(
+                          color: ThemeConstants.primary.withValues(alpha: 0.4),
+                          blurRadius: ThemeConstants.focusGlowBlur,
+                        ),
+                      ]
+                    : [],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${widget.selectedSource ?? ''} ($count)',
+                    style: TextStyle(
+                      color: _isFocused
+                          ? ThemeConstants.primary
+                          : ThemeConstants.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(
+                    Icons.source,
+                    color: ThemeConstants.primary,
+                    size: 20,
+                  ),
+                ],
               ),
             ),
           ),
