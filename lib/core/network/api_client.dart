@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import '../cache/app_caches.dart';
 import '../constants/app_constants.dart';
@@ -10,6 +11,23 @@ import '../constants/app_constants.dart';
 /// same image page) without touching the network again.
 class ApiClient {
   const ApiClient();
+
+  /// Test hooks: swap in a mock [http.Client] and zero the rate-limit backoff
+  /// so 429-retry tests run fast without real network or sleeps.
+  static http.Client? clientOverride;
+  static Duration rateLimitBaseDelay = const Duration(milliseconds: 800);
+
+  Future<http.Response> _get(
+      Uri uri, Map<String, String>? headers, Duration? timeout) async {
+    final client = clientOverride ?? http.Client();
+    try {
+      return await client
+          .get(uri, headers: headers)
+          .timeout(timeout ?? AppConstants.requestTimeout);
+    } finally {
+      if (clientOverride == null) client.close();
+    }
+  }
 
   /// Executes a function with retry logic using exponential backoff.
   static Future<T> _retryWithBackoff<T>(
@@ -80,18 +98,38 @@ class ApiClient {
     }
 
     final res = await _retryWithBackoff(
-      () => http.get(uri, headers: headers).timeout(timeout ?? AppConstants.requestTimeout),
+      () => _get(uri, headers, timeout),
       maxRetries: maxRetries,
       retryOnTimeout: retryOnTimeout,
       retryOnError: true,
     );
 
+    // Fase C: HTTP 429 (rate limiting) comes back as a normal response, not an
+    // exception, so the backoff helper above can't catch it. Retry with a
+    // growing wait + jitter instead of surfacing it.
+    var response = res;
+    var wait = rateLimitBaseDelay.inMilliseconds;
+    for (var attempt = 0;
+        attempt < maxRetries && response.statusCode == 429;
+        attempt++) {
+      await Future.delayed(Duration(
+          milliseconds:
+              wait + (rateLimitBaseDelay == Duration.zero ? 0 : Random().nextInt(200))));
+      response = await _retryWithBackoff(
+        () => _get(uri, headers, timeout),
+        maxRetries: maxRetries,
+        retryOnTimeout: retryOnTimeout,
+        retryOnError: true,
+      );
+      wait *= 2;
+    }
+
     // Don't cache error responses
-    if (res.statusCode == 200) {
-      AppCaches.setWithErrorHandling(key, res.bodyBytes, res.statusCode);
+    if (response.statusCode == 200) {
+      AppCaches.setWithErrorHandling(key, response.bodyBytes, response.statusCode);
     }
     
-    return res;
+    return response;
   }
 
   Future<http.Response> post(

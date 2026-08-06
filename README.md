@@ -7,10 +7,12 @@ A new Flutter project.
 Status dos provedores de stream/episódios:
 
 - **AnimeFire** — OK. Busca, grade de episódios e vídeo por scraping HTML.
-- **AniList** — OK. Fornece metadados (não stream).
-- **Goyabu** — pendente (integração não implementada).
-- **SuperFlix** — pendente (integração não implementada).
-- **AllAnime** — indisponível (requer captcha Cloudflare/Turnstile, externo ao app).
+- **Goyabu** — OK. Busca HTML, episódios (JSON `allEpisodes` + fallback) e vídeo HLS.
+- **BetterAnime / AnimesROLL / DooPlay** — OK. Mesmo adapter DooPlay (HTML + player API).
+- **AnimePlayer** — OK. Mesma família DooPlay, domínio próprio.
+- **AniList** — metadados apenas (títulos, episódios, nota, gêneros). Não participa da busca nem da reprodução de vídeo.
+- **AllAnime** — desativado (requer captcha Cloudflare/Turnstile, externo ao app).
+- **Removidos** — SuperFlix, AnimesDigital, Anikyuu, AnimeIto, AnimePlay, AnimeQ, Anitube, Dattebayo (não implementados, sem valor real ou com leak de conexão).
 
 ## Getting Started
 

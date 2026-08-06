@@ -56,18 +56,8 @@ class AnimeRepository {
     if (collected.isEmpty) {
       final others =
           SourceRegistry.adapters.where((a) => a.source != effectiveSource);
-      final results = await Future.wait(others.map((a) async {
-        // Each fallback provider needs its own context (with the right ids).
-        Anime? ctx = effectiveAnime;
-        if (a.source == AnimeSource.superFlix) {
-          ctx = await _superFlixContext(effectiveAnime);
-        } else if (a.source == AnimeSource.allAnime) {
-          ctx = await _contextForSource(effectiveAnime, AnimeSource.allAnime);
-        } else if (a.source == AnimeSource.animeFire) {
-          ctx = await _contextForSource(effectiveAnime, AnimeSource.animeFire);
-        }
-        return tryAdapter(a, ctx);
-      }));
+      final results = await Future.wait(
+          others.map((a) => tryAdapter(a, effectiveAnime)));
       for (final r in results) {
         collected.addAll(r);
       }
@@ -75,55 +65,5 @@ class AnimeRepository {
 
     final seen = <String>{};
     return collected.where((s) => seen.add(s.url)).toList();
-  }
-
-  /// Resolves an anime context for [source] by (cached) search when the current
-  /// context doesn't already carry the identifier that provider needs.
-  Future<Anime?> _contextForSource(Anime? anime, AnimeSource source) async {
-    if (anime == null) return null;
-    if (source == AnimeSource.allAnime && anime.allAnimeId != null) return anime;
-    if (source == AnimeSource.animeFire &&
-        anime.source == AnimeSource.animeFire &&
-        anime.url.isNotEmpty) {
-      return anime;
-    }
-    try {
-      final result = await SourceRegistry.forSource(source).search(anime.name);
-      switch (result) {
-        case Success(data: final results):
-          for (final r in results) {
-            if (source == AnimeSource.allAnime && r.allAnimeId != null) return r;
-            if (source == AnimeSource.animeFire && r.url.isNotEmpty) return r;
-          }
-        case Failure():
-        case Loading():
-          break;
-      }
-    } catch (_) {}
-    return anime;
-  }
-
-  /// Returns [anime] if it already carries a SuperFlix id, otherwise performs a
-  /// (cached) SuperFlix search by name to obtain one so the SuperFlix provider
-  /// can be used as a fallback source.
-  Future<Anime?> _superFlixContext(Anime? anime) async {
-    if (anime?.superFlixTmdbId != null) return anime;
-    if (anime == null) return null;
-    try {
-      final result = await SourceRegistry.forSource(AnimeSource.superFlix)
-          .search(anime.name);
-      switch (result) {
-        case Success(data: final results):
-          for (final r in results) {
-            if (r.superFlixTmdbId != null) return r;
-          }
-        case Failure():
-        case Loading():
-          break;
-      }
-    } catch (_) {
-      // ignore – SuperFlix is only a fallback
-    }
-    return anime;
   }
 }

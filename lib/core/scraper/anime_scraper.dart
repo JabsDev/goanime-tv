@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../anilist/anilist_service.dart';
 import '../cache/app_caches.dart';
 import '../sources/source_registry.dart';
+import '../utils/text_utils.dart';
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
 import 'scraper_result.dart';
@@ -14,22 +15,23 @@ import 'scraper_result.dart';
 /// screens never re-triggers the same network work.
 class AnimeScraper {
   static Future<List<Anime>> searchAnime(String animeName) async {
-    final cacheKey = animeName.trim().toLowerCase();
+    // Fase C: strip scraped rating/age badges ("Naruto 7.93 A14") once before
+    // the fan-out so no provider gets a dirty query.
+    final query = TextUtils.cleanSearchQuery(animeName);
+    final cacheKey = query.toLowerCase();
     final cached = AppCaches.search.get<List<Anime>>(cacheKey);
     if (cached != null) return cached;
 
     try {
-      debugPrint('[AnimeScraper] Searching: $animeName');
+      debugPrint('[AnimeScraper] Searching: $query');
 
       // Per-future error isolation: one adapter's unhandled exception does not
       // kill other adapter futures via Future.wait (Pitfall 1).
-      // B11: roda só as fontes implementadas — antes a busca disparava ~12
-      // requests para adapters que retornam "not implemented"/vazios.
       final futures = SourceRegistry.adapters
           .where((a) => a.implemented)
           .map((a) async {
         try {
-          return await a.search(animeName);
+          return await a.search(query);
         } catch (e) {
           debugPrint('[AnimeScraper] Unhandled exception from ${a.source}: $e');
           return ScraperResult<List<Anime>>.failure(UnknownError(
@@ -61,14 +63,15 @@ class AnimeScraper {
         switch (a.source) {
           case AnimeSource.allAnime:
             return a.allAnimeId != null;
-          case AnimeSource.superFlix:
-            return a.superFlixTmdbId != null;
           case AnimeSource.animeFire:
           case AnimeSource.goyabu:
           case AnimeSource.betterAnime:
+          case AnimeSource.animesRoll:
+          case AnimeSource.dooPlay:
+          case AnimeSource.animePlayer:
             return a.url.isNotEmpty;
-          default:
-            return false;
+          case AnimeSource.anilist:
+            return false; // metadata provider, no stream URL
         }
       }
       allAnimes.removeWhere((a) => !hasValidId(a));
@@ -90,15 +93,12 @@ class AnimeScraper {
   }
 
   static Future<EpisodesResult> getEpisodes(Anime anime) async {
-    final cacheKey =
-        '${anime.source.name}:${anime.url}:${anime.allAnimeId ?? ''}:${anime.superFlixTmdbId ?? ''}';
+    final cacheKey = '${anime.source.name}:${anime.url}:${anime.allAnimeId ?? ''}';
     final cached = AppCaches.episodes.get<EpisodesResult>(cacheKey);
     if (cached != null) return cached;
 
     try {
       final animeFire = SourceRegistry.forSource(AnimeSource.animeFire);
-      final allAnime = SourceRegistry.forSource(AnimeSource.allAnime);
-      final superFlix = SourceRegistry.forSource(AnimeSource.superFlix);
       final goyabu = SourceRegistry.forSource(AnimeSource.goyabu);
 
       // Resolve the anime context (with provider ids) for each source, then
@@ -117,15 +117,8 @@ class AnimeScraper {
 
       // 1. Use the anime's own source when it carries the required identifier.
       Anime? afOwner;
-      Anime? aaOwner;
-      Anime? sfOwner;
       Anime? gyOwner;
-      if (anime.source == AnimeSource.allAnime && anime.allAnimeId != null) {
-        aaOwner = anime;
-      } else if (anime.source == AnimeSource.superFlix &&
-          anime.superFlixTmdbId != null) {
-        sfOwner = anime;
-      } else if (anime.source == AnimeSource.animeFire && anime.url.isNotEmpty) {
+      if (anime.source == AnimeSource.animeFire && anime.url.isNotEmpty) {
         afOwner = anime;
       } else if (anime.source == AnimeSource.goyabu && anime.url.isNotEmpty) {
         gyOwner = anime;
@@ -133,20 +126,10 @@ class AnimeScraper {
 
       // 2 & 3. Fall back to searching the other providers by name.
       afOwner ??= await _findBySource(anime.name, AnimeSource.animeFire);
-      aaOwner ??= await _findBySource(anime.name, AnimeSource.allAnime);
-      sfOwner ??= await _findBySource(anime.name, AnimeSource.superFlix);
       gyOwner ??= await _findBySource(anime.name, AnimeSource.goyabu);
 
-      // AniList metadata (anilistId != null on entry; AniListAdapter.getEpisodes
-      // uses anime.anilistId! directly, no retry needed).
-      if (anime.anilistId != null) {
-        final alAdapter = SourceRegistry.forSource(AnimeSource.anilist);
-        register('AniList', AnimeSource.anilist, anime,
-            alAdapter.getEpisodes(anime));
-      }
-
-      // Register in PT-BR priority order so the default episode list and the
-      // source dropdown prefer working PT-BR providers.
+      // Register in PT-BR priority order so the default episode list prefers
+      // working PT-BR providers.
       if (afOwner != null) {
         register('AnimeFire', AnimeSource.animeFire, afOwner,
             animeFire.getEpisodes(afOwner));
@@ -154,14 +137,6 @@ class AnimeScraper {
       if (gyOwner != null) {
         register('Goyabu', AnimeSource.goyabu, gyOwner,
             goyabu.getEpisodes(gyOwner));
-      }
-      if (sfOwner != null) {
-        register('SuperFlix', AnimeSource.superFlix, sfOwner,
-            superFlix.getEpisodes(sfOwner));
-      }
-      if (aaOwner != null) {
-        register('AllAnime', AnimeSource.allAnime, aaOwner,
-            allAnime.getEpisodes(aaOwner));
       }
 
       if (fetchers.isEmpty) return EpisodesResult([], {});
@@ -171,15 +146,15 @@ class AnimeScraper {
       // Per-future error isolation for episode fetchers
       final futures = fetchers.values.map((f) async {
         try {
-           return await f;
-         } catch (e) {
-           debugPrint('[AnimeScraper] Episode fetch error: $e');
-           return ScraperResult<EpisodesResult>.failure(UnknownError(
-             message: 'Unhandled episode fetch: $e',
-             source: AnimeSource.animeFire, // approximate; exact source from context
-             originalError: e,
-           ));
-         }
+          return await f;
+        } catch (e) {
+          debugPrint('[AnimeScraper] Episode fetch error: $e');
+          return ScraperResult<EpisodesResult>.failure(UnknownError(
+            message: 'Unhandled episode fetch: $e',
+            source: AnimeSource.animeFire,
+            originalError: e,
+          ));
+        }
       });
       final results = await Future.wait(futures);
 
@@ -196,33 +171,6 @@ class AnimeScraper {
       final grouped = <String, List<Episode>>{};
       var firstEpisodes = <Episode>[];
       String? firstName;
-
-      // Phase 2: Helper to merge episodes by number, prefer AniList metadata
-      List<Episode> mergeEpisodes(List<Episode> base, List<Episode> anilist) {
-        final merged = <Episode>[];
-        for (final ep in base) {
-          merged.add(ep);
-        }
-        for (final anilistEp in anilist) {
-          final existingEp = AnimeScraper.firstWhereOrNull(merged, (Episode ep) => ep.number == anilistEp.number);
-          if (existingEp != null) {
-            // Prefer AniList metadata for thumbnail, title, description
-            final mergedEp = Episode(
-              number: anilistEp.number,
-              url: existingEp.url, // Use AnimeFire URL for streaming
-              thumbnail: anilistEp.thumbnail ?? existingEp.thumbnail,
-              title: anilistEp.title ?? existingEp.title,
-              description: anilistEp.description ?? existingEp.description,
-              source: existingEp.source, // Prefer AnimeFire source for streaming
-              owner: existingEp.owner,
-            );
-            merged.add(mergedEp);
-          } else {
-            merged.add(anilistEp);
-          }
-        }
-        return merged.toList()..sort((a, b) => a.number.compareTo(b.number));
-      }
 
       for (var i = 0; i < results.length; i++) {
         final result = results[i];
@@ -247,23 +195,27 @@ class AnimeScraper {
         }
       }
 
-      // Phase 2: Merge grouped episodes for sources with both AnimeFire and AniList
-      if (firstName != null && firstName.contains('AniList')) {
-        // Find corresponding AnimeFire result
-        final animeFireKey = results.asMap().entries
-            .firstWhere((e) => e.value is Success && e.value is Success)
-            .key;
-        final animeFireResult = results[animeFireKey] as Success;
-        if (animeFireResult.data.episodes.isNotEmpty) {
-          // Merge the episode lists, prefer AniList metadata
-          final merged = mergeEpisodes(
-            animeFireResult.data.episodes,
-            grouped[firstName]!,
-          );
-          // Replace the firstEpisodes with the merged result
-          firstEpisodes = merged;
-          grouped.remove(firstName);
-          grouped['AnimeFire + AniList'] = merged;
+      // Fase A: AniList is metadata-only. It never participates in search or
+      // video resolution, so instead of listing it as a playable source we
+      // merge its episode metadata (ids/titles/thumbnails) ONTO the episodes of
+      // the video sources, keeping the video source as owner. Unmatched AniList
+      // episodes are dropped (they have no stream URL).
+      if (anime.anilistId != null) {
+        final anilistEps = await AniListService.getEpisodesV2(anime.anilistId!);
+        if (anilistEps.isNotEmpty) {
+          final meta = anilistEps
+              .map((e) => Episode(
+                    number: e.number,
+                    url: '',
+                    thumbnail: e.thumbnail,
+                    title: e.title,
+                    description: e.description,
+                  ))
+              .toList();
+          for (final key in grouped.keys.toList()) {
+            grouped[key] = mergeEpisodes(grouped[key]!, meta);
+          }
+          firstEpisodes = mergeEpisodes(firstEpisodes, meta);
         }
       }
 
@@ -289,24 +241,25 @@ class AnimeScraper {
   static Future<Anime?> _findBySource(String name, AnimeSource source) async {
     try {
       final adapter = SourceRegistry.forSource(source);
-      final result = await adapter.search(name);
+      final result = await adapter.search(TextUtils.cleanSearchQuery(name));
       switch (result) {
         case Success(data: final results):
           if (results.isEmpty) return null;
-           bool valid(Anime a) {
-             switch (source) {
-               case AnimeSource.allAnime:
-                 return a.allAnimeId != null;
-               case AnimeSource.superFlix:
-                 return a.superFlixTmdbId != null;
-               case AnimeSource.animeFire:
-               case AnimeSource.goyabu:
-               case AnimeSource.betterAnime:
-                 return a.url.isNotEmpty;
-               default:
-                 return false;
-             }
-           }
+          bool valid(Anime a) {
+            switch (source) {
+              case AnimeSource.allAnime:
+                return a.allAnimeId != null;
+              case AnimeSource.animeFire:
+              case AnimeSource.goyabu:
+              case AnimeSource.betterAnime:
+              case AnimeSource.animesRoll:
+              case AnimeSource.dooPlay:
+              case AnimeSource.animePlayer:
+                return a.url.isNotEmpty;
+              case AnimeSource.anilist:
+                return false;
+            }
+          }
 
           final candidates = results.where(valid).toList();
           if (candidates.isEmpty) return null;
@@ -379,12 +332,29 @@ class AnimeScraper {
     return t;
   }
 
-  /// Helper to find first element matching test, return null if not found
-  /// ponytail: one-liner fallback from dart:collection if needed
-  static Episode? firstWhereOrNull(Iterable<Episode> iterable, bool Function(Episode) test) {
-    for (final item in iterable) {
-      if (test(item)) return item;
+  /// Merges AniList metadata onto [base] episode lists by number, preferring
+  /// AniList title/thumbnail/description but keeping the video source's
+  /// [Episode.source]/[Episode.owner] (AniList has no stream). AniList-only
+  /// episodes are dropped since they carry no playable URL.
+  static List<Episode> mergeEpisodes(List<Episode> base, List<Episode> meta) {
+    final byNumber = <String, Episode>{for (final m in meta) m.number: m};
+    final merged = <Episode>[];
+    for (final ep in base) {
+      final m = byNumber[ep.number];
+      merged.add(m == null
+          ? ep
+          : Episode(
+              number: ep.number,
+              url: ep.url,
+              thumbnail: m.thumbnail ?? ep.thumbnail,
+              title: m.title ?? ep.title,
+              description: m.description ?? ep.description,
+              source: ep.source,
+              owner: ep.owner,
+            ));
     }
-    return null;
+    merged.sort((a, b) =>
+        (int.tryParse(a.number) ?? 0).compareTo(int.tryParse(b.number) ?? 0));
+    return merged;
   }
 }

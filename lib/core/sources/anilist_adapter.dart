@@ -8,39 +8,18 @@ class AniListAdapter implements AnimeSourceAdapter {
   @override
   AnimeSource get source => AnimeSource.anilist;
 
-  // B11: busca via GraphQL AniList é implementada (requer token p/ autenticar).
+  // AniList is a metadata provider (titles, episode info, score) — NOT a
+  // stream source. It must not participate in the search fan-out or the video
+  // fallback order, so `implemented` is false (excludes it from those paths).
   @override
-  bool get implemented => true;
+  bool get implemented => false;
 
   @override
   Future<ScraperResult<List<Anime>>> search(String query) async {
-    // Query AniList for media matching query
-    final token = await AniListService.getToken();
-    if (token == null) return ScraperResult.failure(EmptyResultError(
-      message: 'AniList not authenticated',
-      source: source,
-    ));
-
-    const graphqlQuery = '''
-      query (\$search: String) {
-        Media(search: \$search, type: ANIME, perPage: 10) {
-          id
-          title { romaji english }
-          coverImage { large }
-          bannerImage
-          description
-          episodes
-          status
-          averageScore
-          genres
-        }
-      }
-    ''';
-
-    // Implementation would use http.post to AniList GraphQL endpoint
-    // Return list of AniList media as EpisodesResult
+    // Metadata provider (like IMDB): never a stream source, so it returns no
+    // search hits — AniList data flows in via AniListService.enrich instead.
     return ScraperResult.failure(EmptyResultError(
-      message: 'Search not implemented in AniListAdapter',
+      message: 'AniList is a metadata provider, not a stream source',
       source: source,
     ));
   }

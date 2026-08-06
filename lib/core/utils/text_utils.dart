@@ -7,6 +7,11 @@ class TextUtils {
     return name.toLowerCase().replaceAll(' ', '-');
   }
 
+  /// Cleans a search query before it hits the sources: strips the rating/age
+  /// badge scrapers sometimes append to titles ("Naruto 7.93 A14") plus
+  /// dub/sub tags, so providers don't receive a dirty query.
+  static String cleanSearchQuery(String query) => cleanTitle(query.trim());
+
   /// Generate name variations for better search matching
   static List<String> generateNameVariations(String animeName) {
     final variations = <String>[animeName];

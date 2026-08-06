@@ -10,7 +10,6 @@ import '../../core/constants/theme_constants.dart';
 import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import '../player/player_screen.dart';
-import '../superflix/superflix_web_screen.dart';
 
 class DetailScreen extends StatefulWidget {
   final Anime anime;
@@ -496,8 +495,9 @@ if (_episodes.isEmpty)
                       const SizedBox(height: 8),
                       const Text(
                         'Não conseguimos achar episódios para este anime '
-                        'em nenhuma das fontes (AnimeFire, AniList, Goyabu, '
-                        'SuperFlix, AllAnime). Pode ser que o título não esteja '
+                        'em nenhuma das fontes (AnimeFire, Goyabu, '
+                        'BetterAnime, AnimesROLL, DooPlay, AnimePlayer). '
+                        'Pode ser que o título não esteja '
                         'indexado ou todas as fontes estejam indisponíveis no momento.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
@@ -760,50 +760,20 @@ class _QualityDialogState extends State<_QualityDialog> {
       );
       debugPrint('[QualityDialog] primary sources count=${sources.length}');
 
-      // SuperFlix player pages are gated by Cloudflare Turnstile; when HTTP
-      // extraction comes back empty, fall back to the WebView resolver which
-      // renders the page and passes the challenge.
       final effectiveSource = widget.episode.source ?? widget.anime.source;
-      final sfAnime = widget.episode.owner ?? widget.anime;
+      // If the primary source fails, try the episode's own owner source when
+      // it differs (episodes can be merged from another provider).
       if (sources.isEmpty &&
-          effectiveSource == AnimeSource.superFlix &&
-          sfAnime.superFlixTmdbId != null &&
-          mounted) {
-        debugPrint('[QualityDialog] invoking SuperFlix WebView resolver');
-        sources = await SuperFlixWebScreen.resolve(
-          context,
-          anime: sfAnime,
-          episode: widget.episode,
+          mounted &&
+          effectiveSource == AnimeSource.animeFire &&
+          widget.episode.owner != null &&
+          widget.episode.owner!.source != AnimeSource.animeFire) {
+        debugPrint('[QualityDialog] Falling back to ${widget.episode.owner!.source}');
+        sources = await _repo.getVideoSources(
+          widget.episode,
+          widget.episode.owner!.source,
+          anime: widget.episode.owner ?? widget.anime,
         );
-      }
-
-      // AniList doesn't provide video streams
-      if (effectiveSource == AnimeSource.anilist) {
-        if (!mounted) return;
-        setState(() {
-          _error = 'Este episódio não está disponível para streaming diretamente do AniList. '
-                    'As informações de episódio (título, descrição, thumbnail) são exibidas, '
-                    'mas a reprodução exige AnimeFire.';
-          _loading = false;
-        });
-        return;
-      }
-
-      // If AnimeFire fails and we have a fallback source
-      if (sources.isEmpty && effectiveSource != AnimeSource.anilist && mounted) {
-        debugPrint('[QualityDialog] No sources from primary source, checking for fallback...');
-        // Try to fall back to another source
-        if (effectiveSource == AnimeSource.animeFire) {
-          // AnimeFire is primary, try other sources if available
-          if (widget.episode.owner != null && widget.episode.owner!.source != AnimeSource.animeFire) {
-            debugPrint('[QualityDialog] Falling back to ${widget.episode.owner!.source}');
-            sources = await _repo.getVideoSources(
-              widget.episode,
-              widget.episode.owner!.source,
-              anime: widget.episode.owner ?? widget.anime,
-            );
-          }
-        }
       }
 
       if (!mounted) return;
@@ -816,14 +786,7 @@ class _QualityDialogState extends State<_QualityDialog> {
       if (!mounted) return;
       debugPrint('[QualityDialog] Load sources error: $e');
       setState(() {
-        // Show appropriate message for AniList episodes
-        final effectiveSource = widget.episode.source ?? widget.anime.source;
-        if (effectiveSource == AnimeSource.anilist) {
-          _error = 'Este episódio não está disponível para streaming. '
-                    'Use a fonte AnimeFire para reprodução.';
-        } else {
-          _error = 'Fonte indisponível. Tente novamente ou escolha outra fonte.';
-        }
+        _error = 'Fonte indisponível. Tente novamente ou escolha outra fonte.';
         _loading = false;
       });
     }
@@ -838,32 +801,16 @@ class _QualityDialogState extends State<_QualityDialog> {
         return 'AniList';
       case AnimeSource.goyabu:
         return 'Goyabu';
-      case AnimeSource.superFlix:
-        return 'SuperFlix';
       case AnimeSource.allAnime:
         return 'AllAnime';
       case AnimeSource.betterAnime:
         return 'BetterAnime';
       case AnimeSource.animesRoll:
         return 'AnimesROLL';
-      case AnimeSource.anikyuu:
-        return 'Anikyuu';
-      case AnimeSource.anitube:
-        return 'Anitube';
-      case AnimeSource.dattebayo:
-        return 'Dattebayo';
-      case AnimeSource.animesDigital:
-        return 'AnimesDigital';
       case AnimeSource.dooPlay:
         return 'DooPlay';
-      case AnimeSource.animePlay:
-        return 'Anime Play';
       case AnimeSource.animePlayer:
         return 'Anime Player';
-      case AnimeSource.animeQ:
-        return 'Anime Q';
-      default:
-        return 'Unknown';
     }
   }
 
@@ -991,7 +938,7 @@ class _QualityDialogState extends State<_QualityDialog> {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'Tentamos AnimeFire, Goyabu, SuperFlix e AllAnime '
+                      'Tentamos AnimeFire, Goyabu, BetterAnime e AnimePlayer '
                       'para o Ep ${widget.episode.number} deste anime, '
                       'mas nenhuma fonte resolveu um stream jogável agora. '
                       'Possíveis motivos: Cloudflare, fonte fora do ar ou o '

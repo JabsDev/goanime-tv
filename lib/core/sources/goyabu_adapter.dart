@@ -36,7 +36,8 @@ class GoyabuAdapter implements AnimeSourceAdapter {
 
   @override
   Future<ScraperResult<List<Anime>>> search(String query) async {
-    final url = Uri.parse('$_base/?s=${Uri.encodeQueryComponent(query)}');
+    final url = Uri.parse(
+        '$_base/?s=${Uri.encodeQueryComponent(TextUtils.cleanSearchQuery(query))}');
     try {
       http.Response res;
       try {
@@ -122,9 +123,18 @@ class GoyabuAdapter implements AnimeSourceAdapter {
       final match = RegExp(r'allEpisodes\s*=\s*(\[.*?\]);')
           .firstMatch(res.body);
       if (match == null) {
-        return ScraperResult.failure(EmptyResultError(
-          message: 'No episodes JSON found',
-          source: source,
+        // Fase C: some pages use a different embedding — fall back to parsing
+        // episode anchor links before giving up.
+        final fallback = _parseEpisodesFallback(res.body, anime);
+        if (fallback.isEmpty) {
+          return ScraperResult.failure(EmptyResultError(
+            message: 'No episodes JSON found',
+            source: source,
+          ));
+        }
+        return ScraperResult.success(EpisodesResult(
+          fallback,
+          {source.toString(): fallback},
         ));
       }
 
@@ -169,6 +179,33 @@ class GoyabuAdapter implements AnimeSourceAdapter {
         originalError: e,
       ));
     }
+  }
+
+  /// Fallback episode parser for pages that don't embed `allEpisodes`: scans
+  /// anchor links whose href/text carries an episode number (e.g. `/episodio-3`).
+  List<Episode> _parseEpisodesFallback(String body, Anime anime) {
+    final doc = html_parser.parse(body);
+    final episodes = <Episode>[];
+    final seen = <String>{};
+    final numRe =
+        RegExp(r'(?:episodio|ep-?|eps)[\-_ ]?(\d+)', caseSensitive: false);
+    for (final a in doc.querySelectorAll('a[href]')) {
+      final href = a.attributes['href'] ?? '';
+      final numMatch = numRe.firstMatch(href);
+      if (numMatch == null) continue;
+      final url = href.startsWith('http') ? href : '$_base$href';
+      if (!seen.add(url)) continue;
+      episodes.add(Episode(
+        number: numMatch.group(1)!,
+        url: url,
+        title: a.text.trim(),
+        source: source,
+        owner: anime,
+      ));
+    }
+    episodes.sort((a, b) =>
+        (int.tryParse(a.number) ?? 0).compareTo(int.tryParse(b.number) ?? 0));
+    return episodes;
   }
 
   @override

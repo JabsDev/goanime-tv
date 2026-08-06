@@ -20,12 +20,28 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
   AnimeFireAdapter({http.Client? client}) : _client = client;
 
   /// Dispatches to [http.Client.get] when a mock client is injected, otherwise
-  /// falls back to the app's global [apiClient] singleton.
+  /// falls back to the app's global [apiClient] singleton. Before the real
+  /// network call, serializes AnimeFire requests (min 250ms gap) — the site
+  /// rate-limits (HTTP 429) under bursts of concurrent requests.
   Future<http.Response> _httpGet(Uri uri, {Map<String, String>? headers}) async {
     if (_client != null) {
       return _client.get(uri, headers: headers);
     }
+    await _throttle();
     return apiClient.get(uri, headers: headers);
+  }
+
+  // ponytail: global last-request timestamp — good enough for serialization;
+  // switch to per-endpoint queues if throughput ever matters.
+  static DateTime _lastRequest = DateTime.fromMillisecondsSinceEpoch(0);
+  Future<void> _throttle() async {
+    final now = DateTime.now();
+    final since = now.difference(_lastRequest).inMilliseconds;
+    const minGap = 250;
+    if (since < minGap) {
+      await Future.delayed(Duration(milliseconds: minGap - since));
+    }
+    _lastRequest = DateTime.now();
   }
 
   static final RegExp _mp4Re =
@@ -419,15 +435,15 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
 
   Future<List<VideoSource>> _extractFromBlogger(String bloggerUrl,
       {int hop = 0}) async {
-    try {
-      // ponytail: hop ceiling on redirect recursion, no visited-set.
-      if (hop > 5) return <VideoSource>[];
-      debugPrint('[AnimeFire] Blogger: $bloggerUrl');
-      final client = HttpClient();
-      client.autoUncompress = false;
-      client.userAgent =
-          'Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36';
+    // ponytail: hop ceiling on redirect recursion, no visited-set.
+    if (hop > 5) return <VideoSource>[];
+    debugPrint('[AnimeFire] Blogger: $bloggerUrl');
+    final client = HttpClient();
+    client.autoUncompress = false;
+    client.userAgent =
+        'Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36';
 
+    try {
       final request = await client.getUrl(Uri.parse(bloggerUrl));
       request.headers.set('Referer', '${AppConstants.baseSiteUrl}/');
       request.followRedirects = false;
@@ -444,7 +460,6 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
                 location.contains('googleusercontent.com') ||
                 location.contains('redirector.googlevideo.com') ||
                 location.contains('videoplayback'))) {
-          client.close(force: true);
           return [
             VideoSource(
               url: location.startsWith('//') ? 'https:$location' : location,
@@ -457,14 +472,12 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
           ];
         }
         if (location != null) {
-          client.close(force: true);
           return _extractFromBlogger(location, hop: hop + 1);
         }
       }
 
       final bytes =
           await response.toList().timeout(AppConstants.requestTimeout);
-      client.close(force: true);
       final body =
           utf8.decode(bytes.expand((x) => x).toList(), allowMalformed: true);
 
@@ -577,6 +590,10 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
     } catch (e) {
       debugPrint('[AnimeFire] Blogger error: $e');
       return [];
+    } finally {
+      // Fase D: always release the HttpClient — previously only closed on the
+      // success branches, leaking the connection on timeout/error paths.
+      client.close(force: true);
     }
   }
 
