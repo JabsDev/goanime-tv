@@ -133,14 +133,14 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
 
   NavigationDecision _onNavigationRequest(NavigationRequest request) {
     final uri = Uri.parse(request.url);
-    // Intercepta o redirect final do pin ANTES de renderizar (token no
-    // fragment nunca fica exposto na página).
-    if (AniListService.isPinCallback(uri)) {
-      if (uri.fragment.isEmpty && !request.url.contains('#')) {
-        // Fragment não entregue: trata como falha, não navega.
-        _handleCallbackError('Não foi possível obter o token. Tente novamente.');
-      } else {
+    // Intercepta o redirect final do AniList que devolve o token ANTES de
+    // renderizar (token no fragment nunca fica exposto na página).
+    if (AniListService.isOAuthCallback(request.url)) {
+      if (request.url.contains('#') || request.url.contains('access_token')) {
         _handleCallback(request.url);
+      } else {
+        // Fragment ausente: trata como falha, não navega.
+        _handleCallbackError('Não foi possível obter o token. Tente novamente.');
       }
       return NavigationDecision.prevent;
     }

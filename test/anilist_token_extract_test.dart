@@ -55,6 +55,30 @@ void main() {
     });
   });
 
+  group('isOAuthCallback', () {
+    test('pin com token é callback', () {
+      final url = 'https://anilist.co/api/v2/oauth/pin'
+          '#access_token=$jwt&state=abc';
+      expect(AniListService.isOAuthCallback(url), isTrue);
+    });
+
+    test('qualquer redirect anilist.co com token é callback', () {
+      final url = 'https://anilist.co/api/v2/oauth/pin?'
+          'client_id=1#access_token=$jwt';
+      expect(AniListService.isOAuthCallback(url), isTrue);
+    });
+
+    test('página anilist.co sem token não é callback', () {
+      expect(AniListService.isOAuthCallback('https://anilist.co/login'),
+          isFalse);
+    });
+
+    test('host externo nunca é callback mesmo com token', () {
+      final url = 'https://evil.example.com/pin#access_token=$jwt';
+      expect(AniListService.isOAuthCallback(url), isFalse);
+    });
+  });
+
   group('isPinCallback', () {
     test('URL do pin anilist.co é reconhecida', () {
       expect(

@@ -21,12 +21,19 @@ class AniListService {
   /// Authorize URL generic use (QR/scan): Implicit Grant — no PKCE, because
   /// AniList rejects code/verifier exchanges with `401 invalid_client`. The
   /// access token comes back in the redirect URI fragment.
+  /// Authorize URL generic use (QR/scan): Implicit Grant — no PKCE, because
+  /// AniList rejects code/verifier exchanges with `401 invalid_client`. The
+  /// access token comes back in the redirect URI fragment.
+  /// ponytail: NÃO passamos `redirect_uri` — a doc do AniList exige apenas
+  /// `client_id` + `response_type=token`; passar um redirect não-registrado
+  /// faz o authorize retornar `unsupported_grant_type` (ver
+  /// https://docs.anilist.co/guide/auth/implicit). O redirect final (pin)
+  /// é interceptado no WebView.
   static String get authUrl {
     return 'https://anilist.co/api/v2/oauth/authorize'
         '?client_id=${AppConstants.anilistClientId}'
         '&response_type=token'
-        '&state=${_generateState()}'
-        '&redirect_uri=${Uri.encodeComponent(AppConstants.anilistRedirectUri)}';
+        '&state=${_generateState()}';
   }
 
   /// Extrai o `access_token` da URL canônica do pin do AniList (Implicit Grant).
@@ -57,6 +64,16 @@ class AniListService {
   /// o token. É a origem que interceptamos no WebView antes de renderizar.
   static bool isPinCallback(Uri uri) {
     return uri.host == 'anilist.co' && uri.path.startsWith('/api/v2/oauth/pin');
+  }
+
+  /// `true` para qualquer redirect do AniList que devolva o token (fragment com
+  /// `access_token`). O redirect registrado no painel pode não ser exatamente o
+  /// `/oauth/pin` — interceptor trata qualquer URL de `anilist.co` que carregue
+  /// o token, mantendo o allowlist de host (Fase 3/9).
+  static bool isOAuthCallback(String rawUrl) {
+    final uri = Uri.parse(rawUrl);
+    if (uri.host != 'anilist.co') return false;
+    return isPinCallback(uri) || extractAccessToken(rawUrl) != null;
   }
 
   static Future<bool> isLoggedIn() async {
