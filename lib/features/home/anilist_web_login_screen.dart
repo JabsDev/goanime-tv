@@ -1,28 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import '../../core/anilist/anilist_pairing_server.dart';
+import '../../core/anilist/anilist_service.dart';
 
 /// Login AniList via WebView em processo (na própria TV).
 ///
 /// Carrega a URL de autorização AniList direto (Implicit Grant:
-/// `response_type=token` — o `access_token` vem no fragment da redirect URI)
-/// e abre como ROTA FULL-SCREEN: o WebView aninhado num Dialog não recebe
-/// foco D-pad/touch na Fire TV (o frame inteiro vira um bloco só). Em rota
-/// própria — como a tela do SuperFlix — o input chega no conteúdo HTML.
+/// `response_type=token` — o `access_token` vem no fragment da redirect URI) e
+/// abre como ROTA FULL-SCREEN: o WebView aninhado num Dialog não recebe foco
+/// D-pad/touch na Fire TV (o frame inteiro vira um bloco só). Em rota própria o
+/// input chega no conteúdo HTML.
 ///
-/// O redirect cai em `/callback#access_token=...`; a página de callback do
-/// servidor loopback lê o fragment e POSTa o token para `/token`, que o salva
-/// e completa [AniListPairingServer.onLoggedIn] → esta tela fecha sozinha.
+/// Fluxo canônico (sem servidor loopback): o AniList redireciona para a página
+/// de pin `https://anilist.co/api/v2/oauth/pin#access_token=...`. O
+/// `NavigationDelegate.onNavigationRequest` intercepta essa URL ANTES de a
+/// WebView renderizá-la (o token nunca fica exposto), extrai o token do fragment,
+/// valida e completa `AniListService.saveToken` → esta tela fecha com `true`.
 ///
-/// Teste/QA: na Fire TV nem o D-pad nem o adb focam os inputs HTML (sem IME).
-/// Quando `ANILIST_TEST_EMAIL`/`ANILIST_TEST_PASS` forem passados via
-/// `--dart-define`, o login é preenchido e submetido por injeção de JS na
-/// própria página do AniList. Sem defines, nenhum dado é injetado.
+/// Nenhuma navegação para fora de `https://anilist.co` escapa sem interceptação.
+///
+/// Teste/QA: na TV nem o D-pad nem o adb focam os inputs HTML (sem IME). Quando
+/// `ANILIST_TEST_EMAIL`/`ANILIST_TEST_PASS` forem passados via `--dart-define`,
+/// o login é preenchido e submetido por injeção de JS na própria página do
+/// AniList. Sem defines, nenhum dado é injetado.
 class AnilistWebLoginScreen extends StatefulWidget {
   final String url;
-  final AniListPairingServer? pairing;
 
-  const AnilistWebLoginScreen({super.key, required this.url, this.pairing});
+  const AnilistWebLoginScreen({super.key, required this.url});
 
   @override
   State<AnilistWebLoginScreen> createState() => _AnilistWebLoginScreenState();
@@ -31,16 +34,20 @@ class AnilistWebLoginScreen extends StatefulWidget {
 class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
   late final WebViewController _controller;
   bool _filled = false;
+  bool _loading = false;
+  String? _error;
+  String _expectedState = '';
+  bool _completed = false;
 
   static const _testEmail = String.fromEnvironment('ANILIST_TEST_EMAIL');
   static const _testPass = String.fromEnvironment('ANILIST_TEST_PASS');
 
   /// Preenche os campos da página do AniList e submete por JS. O SPA do
   /// AniList monta o formulário alguns instantes após o load, então o script
-  /// faz polling: Fase A espera os inputs aparecerem (setter nativo +
-  /// eventos, já que `.value` direto não atualiza o estado do front), Fase B
-  /// espera o Turnstile do Cloudflare concluir e então clica no botão "Login".
-  /// Resultado reportado de forma assíncrona via canal [FillLog].
+  /// faz polling: Fase A espera os inputs aparecerem (setter nativo + eventos,
+  /// já que `.value` direto não atualiza o estado do front), Fase B espera o
+  /// Turnstile do Cloudflare concluir e então clica no botão "Login". Resultado
+  /// reportado de forma assíncrona via canal [FillLog].
   String get _fillJs => '''
 (function() {
   function setVal(el, v) {
@@ -96,29 +103,52 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
   @override
   void initState() {
     super.initState();
-    // Login concluído in-process → fecha esta tela; o dialog (abaixo na
-    // pilha) também fecha via próprio listener do servidor.
-    widget.pairing?.onLoggedIn.then((ok) {
-      if (ok && mounted) Navigator.of(context).pop(true);
-    });
+    // O state da sessão vem no próprio authorize URL; guardamos para validar o
+    // estado ecoado pelo AniList no callback (contra CSRF/reaplay).
+    final uri = Uri.tryParse(widget.url);
+    if (uri != null) _expectedState = uri.queryParameters['state'] ?? '';
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel('FillLog',
           onMessageReceived: (m) => debugPrint('[AnilistWeb] fill: ${m.message}'))
       ..setNavigationDelegate(NavigationDelegate(
-        onPageStarted: (url) => debugPrint('[AnilistWeb] start: $url'),
+        onNavigationRequest: _onNavigationRequest,
+        onPageStarted: _onPageStarted,
         onPageFinished: _onPageFinished,
-        onWebResourceError: (e) =>
-            debugPrint('[AnilistWeb] error: ${e.description}'),
+        onWebResourceError: (e) => debugPrint(
+            '[AnilistWeb] error: ${e.description} (code=${e.errorCode})'),
       ))
       ..loadRequest(Uri.parse(widget.url));
   }
 
+  NavigationDecision _onNavigationRequest(NavigationRequest request) {
+    final uri = Uri.parse(request.url);
+    // Intercepta o redirect final do pin ANTES de renderizar (token no
+    // fragment nunca fica exposto na página).
+    if (AniListService.isPinCallback(uri)) {
+      if (uri.fragment.isEmpty && !request.url.contains('#')) {
+        // Fragment não entregue: trata como falha, não navega.
+        _handleCallbackError('Não foi possível obter o token. Tente novamente.');
+      } else {
+        _handleCallback(request.url);
+      }
+      return NavigationDecision.prevent;
+    }
+    // Só navega dentro do AniList; qualquer outra origem é bloqueada.
+    if (uri.host != 'anilist.co') {
+      return NavigationDecision.prevent;
+    }
+    return NavigationDecision.navigate;
+  }
+
+  void _onPageStarted(String url) {
+    // Log redigido (Fase 9): nunca imprimir o fragment/token.
+    debugPrint('[AnilistWeb] start: ${_redact(url)}');
+  }
+
   Future<void> _onPageFinished(String url) async {
-    debugPrint('[AnilistWeb] finished: $url');
-    if (_filled) return;
-    // Detect either the authorize URL OR the login page after redirect.
-    // The authorize URL returns HTTP 302 to the login page; we check both.
+    debugPrint('[AnilistWeb] finished: ${_redact(url)}');
+    if (_completed || _filled) return;
     final bool isAuthorizeOrLoginPage = url.startsWith('https://anilist.co/') && (
       url.contains('/api/v2/oauth/authorize') ||
       url.contains('/login') ||
@@ -133,15 +163,103 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
     await _controller.runJavaScript(_fillJs);
   }
 
+  Future<void> _handleCallback(String rawUrl) async {
+    if (_completed) return;
+    final token = AniListService.extractAccessToken(rawUrl);
+    if (token == null || !AniListService.isJwtToken(token)) {
+      _handleCallbackError('Token inválido ou incompleto. Tente novamente.');
+      return;
+    }
+    final state = _stateFrom(rawUrl);
+    if (_expectedState.isNotEmpty && state != _expectedState) {
+      _handleCallbackError('Sessão expirada. Repita o login.');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final ok = await AniListService.saveToken(token);
+    if (!mounted) return;
+    if (ok) {
+      _completed = true;
+      Navigator.of(context).pop(true);
+    } else {
+      setState(() {
+        _loading = false;
+        _error = 'Token inválido ou expirado. Tente novamente.';
+      });
+    }
+  }
+
+  String? _stateFrom(String rawUrl) {
+    final params = Uri.splitQueryString(rawUrl);
+    return params['state'];
+  }
+
+  void _handleCallbackError(String message) {
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _error = message;
+    });
+  }
+
+  /// Redige query+fragment de uma URL para log (nunca expor o token).
+  String _redact(String url) {
+    final i = url.indexOf('?');
+    if (i < 0) return url;
+    return url.substring(0, i) + '…';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.background,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
         title: const Text('Entrar com AniList'),
         backgroundColor: Theme.of(context).colorScheme.surface,
       ),
-      body: WebViewWidget(controller: _controller),
+      body: Stack(
+        children: [
+          WebViewWidget(controller: _controller),
+          if (_error != null)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade900,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          if (_loading)
+            Positioned.fill(
+              child: ColoredBox(
+                color: Colors.black54,
+                child: const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 12),
+                      Text('Autorizando...',
+                          style: TextStyle(color: Colors.white, fontSize: 16)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

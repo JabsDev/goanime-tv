@@ -29,6 +29,36 @@ class AniListService {
         '&redirect_uri=${Uri.encodeComponent(AppConstants.anilistRedirectUri)}';
   }
 
+  /// Extrai o `access_token` da URL canônica do pin do AniList (Implicit Grant).
+  /// O token vem no fragment (`#...access_token=...`), que nunca é enviado ao
+  /// servidor. Opera sobre a string crua porque algumas builds de `webview`
+  /// colapsam o fragment dentro do path — parsear com `Uri.parse` perderia o
+  /// `#`. Retorna `null` se não houver token.
+  static String? extractAccessToken(String rawUrl) {
+    final hashIndex = rawUrl.indexOf('#');
+    if (hashIndex < 0) return null;
+    final hash = rawUrl.substring(hashIndex + 1);
+    if (hash.isEmpty) return null;
+    final params = Uri.splitQueryString(hash);
+    final token = params['access_token']?.trim();
+    if (token == null || token.isEmpty) return null;
+    return Uri.decodeComponent(token);
+  }
+
+  /// Validação pré-sintática barata: todo JWT começa com `eyJ` e tem ao menos
+  /// 3 segmentos (`header.payload.signature`). A validação forte (rede) vive em
+  /// [saveToken], que exige um Viewer real antes de persistir.
+  static bool isJwtToken(String token) {
+    if (!token.startsWith('eyJ')) return false;
+    return token.split('.').length >= 3;
+  }
+
+  /// `true` se a URL é o redirect final do pin (`/api/v2/oauth/pin`) que devolve
+  /// o token. É a origem que interceptamos no WebView antes de renderizar.
+  static bool isPinCallback(Uri uri) {
+    return uri.host == 'anilist.co' && uri.path.startsWith('/api/v2/oauth/pin');
+  }
+
   static Future<bool> isLoggedIn() async {
     return AnilistAuthService.getToken() != null;
   }

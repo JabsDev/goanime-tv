@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/anilist/anilist_service.dart';
-import '../../core/anilist/anilist_pairing_server.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../shared/widgets/cached_image.dart';
 import 'anilist_qr_scanner_screen.dart';
@@ -15,48 +14,9 @@ class AnilistLoginDialog extends StatefulWidget {
 }
 
 class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
-  AniListPairingServer? _pairing;
   bool _showScanner = false;
-  final _tokenController = TextEditingController();
   bool _saving = false;
   String? _error;
-  bool _isScannerActive = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _startPairingServer();
-  }
-
-  @override
-  void dispose() {
-    _tokenController.dispose();
-    _pairing?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _startPairingServer() async {
-    final server = AniListPairingServer();
-    final ok = await server.start();
-    if (!mounted) {
-      await server.dispose();
-      return;
-    }
-    if (ok) {
-      setState(() => _pairing = server);
-      // Backup path: server's /callback JS extracts token from fragment, POSTs
-      // to /token, server saves → onLoggedIn completes → dialog closes.
-      server.onLoggedIn.then((loggedIn) {
-        if (loggedIn && mounted) {
-          setState(() => _isScannerActive = false);
-          Navigator.pop(context, true);
-        }
-      });
-    } else {
-      // Port 8090 in use — scanner intercept still works, just no server backup.
-      debugPrint('[AnilistLoginDialog] Pairing server unavailable (port in use)');
-    }
-  }
 
   Future<void> _handleScannerToken(String token) async {
     if (_saving) return;
@@ -77,30 +37,16 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
     }
   }
 
-  Future<void> _doLogin() async {
-    final token = _tokenController.text.trim();
-    if (token.isEmpty) {
-      setState(() => _error = 'Insira o token do AniList');
-      return;
-    }
-    if (!token.startsWith('eyJ')) {
-      setState(() => _error = 'Token inválido. Deve começar com "eyJ..."');
-      return;
-    }
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    final ok = await AniListService.saveToken(token);
-    if (!mounted) return;
-    if (ok) {
-      Navigator.pop(context, true);
-    } else {
-      setState(() {
-        _saving = false;
-        _error = 'Token inválido ou expirado. Tente novamente.';
-      });
-    }
+  void _openWebLogin() {
+    Navigator.of(context)
+        .push<bool>(
+          MaterialPageRoute(
+            builder: (_) => AnilistWebLoginScreen(url: AniListService.authUrl),
+          ),
+        )
+        .then((loggedIn) {
+          if (loggedIn == true && mounted) Navigator.pop(context, true);
+        });
   }
 
   @override
@@ -155,23 +101,7 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
                   color: ThemeConstants.primary,
                   borderRadius: BorderRadius.circular(12),
                   child: InkWell(
-                    onTap: () {
-                      if (_pairing?.isRunning ?? false) {
-                        final url = _pairing!.authorizeUrl;
-                        if (url == null) return;
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => AnilistWebLoginScreen(
-                              url: url,
-                              pairing: _pairing,
-                            ),
-                          ),
-                        );
-                      } else {
-                        setState(() => _error =
-                            'Servidor de login indisponível. Use a opção "Inserir token".');
-                      }
-                    },
+                    onTap: _openWebLogin,
                     borderRadius: BorderRadius.circular(12),
                     child: const Padding(
                       padding:
@@ -266,26 +196,6 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  Semantics(
-                    button: true,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () => setState(() => _showScanner = false),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                          child: const Text(
-                            'Inserir token',
-                            style: TextStyle(
-                              color: ThemeConstants.primary,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
                 ],
               ),
               const SizedBox(height: 12),
