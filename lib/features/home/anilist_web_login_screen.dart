@@ -210,8 +210,9 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
   }
 
   String? _stateFrom(String rawUrl) {
-    final params = Uri.splitQueryString(rawUrl);
-    return params['state'];
+    final hashIndex = rawUrl.indexOf('#');
+    if (hashIndex < 0) return null;
+    return Uri.splitQueryString(rawUrl.substring(hashIndex + 1))['state'];
   }
 
   void _handleCallbackError(String message) {
