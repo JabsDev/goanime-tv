@@ -124,6 +124,7 @@ class AniListMediaDetail {
   final String? bannerImage;
   final String? description;
   final int? episodes;
+  final int? nextAiringEpisodeNumber;
   final String? status;
   final double? averageScore;
   final List<String> genres;
@@ -135,6 +136,7 @@ class AniListMediaDetail {
     this.bannerImage,
     this.description,
     this.episodes,
+    this.nextAiringEpisodeNumber,
     this.status,
     this.averageScore,
     this.genres = const [],
@@ -143,12 +145,14 @@ class AniListMediaDetail {
 
   factory AniListMediaDetail.fromJson(Map<String, dynamic> json) {
     final title = json['title'] as Map? ?? {};
+    final next = json['nextAiringEpisode'] as Map?;
     return AniListMediaDetail(
       id: json['id'] as int? ?? 0,
       englishName: title['english']?.toString(),
       bannerImage: json['bannerImage']?.toString(),
       description: json['description']?.toString(),
       episodes: json['episodes'] as int?,
+      nextAiringEpisodeNumber: next?['episode'] as int?,
       status: json['status']?.toString(),
       averageScore: (json['averageScore'] as num?)?.toDouble(),
       genres: (json['genres'] as List?)?.map((e) => e.toString()).toList() ?? [],

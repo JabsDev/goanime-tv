@@ -66,4 +66,14 @@ void main() {
         'One Piece', candidates, AnimeSource.animeFire);
     expect(best.url, '/one-piece/todos-os-episodios');
   });
+
+  group('TextUtils.treatName', () {
+    test('strips punctuation into a valid AnimeFire slug', () {
+      expect(TextUtils.treatName('Naruto: Shippuuden'), 'naruto-shippuuden');
+      expect(TextUtils.treatName('One Piece (dublado)'), 'one-piece-dublado');
+      expect(TextUtils.treatName('Hunter × Hunter'), 'hunter-hunter');
+      expect(TextUtils.treatName('One Piece'), 'one-piece');
+      expect(TextUtils.treatName('  Double   Spaces  '), 'double-spaces');
+    });
+  });
 }

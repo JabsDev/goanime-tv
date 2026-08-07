@@ -90,14 +90,26 @@ abstract class AnimeSourceAdapter {
   }
 
   /// Picks the candidate whose title best matches [query]. Prefers exact,
-  /// prefix and containment matches; shorter/closer titles win ties; movies,
-  /// OVAs and specials are penalized so the catalog title maps to the main
-  /// series. AnimeFire additionally prefers the full-series page.
+  /// prefix and containment matches; shorter/closer titles win ties; spin-offs
+  /// (films, movies, OVAs, specials) are penalized so the catalog title maps to
+  /// the main series. AnimeFire only grants its full-series-page bonus when the
+  /// candidate's title matches the query exactly, so a spin-off sharing the
+  /// "todos-os-episodios" slug can never ride that bonus to beat the series.
   static Anime bestMatch(
       String query, List<Anime> candidates, AnimeSource source) {
     final q = normalize(query);
+    const urlSideTokens = [
+      'film-',
+      'movie-',
+      '-ova',
+      'special',
+      'gaiden',
+      'episode-of',
+    ];
+    const nameSideTokens = ['film', 'movie', 'ova', 'special', 'gaiden', 'recap'];
     int score(Anime a) {
       final t = normalize(a.name);
+      final u = a.url.toLowerCase();
       var s = 0;
       if (t == q) {
         s += 100;
@@ -112,13 +124,26 @@ abstract class AnimeSourceAdapter {
       }
       final diff = (t.length - q.length).abs();
       s -= diff ~/ 8;
-      if (source == AnimeSource.animeFire &&
+      // AnimeFire "full-series" page bonus — only for an exact title match, so
+      // spin-offs/films sharing the slug never receive it for a wrong query.
+      if (t == q &&
+          source == AnimeSource.animeFire &&
           a.url.contains('todos-os-episodios')) {
         s += 15;
       }
-      const sideTokens = ['film', 'movie', 'ova', 'special', 'gaiden', 'recap'];
-      for (final tok in sideTokens) {
+      for (final tok in nameSideTokens) {
         if (t.contains(tok) && !q.contains(tok)) s -= 25;
+      }
+      // Spin-off/extra content detected by slug/url markers (titles like
+      // "One Piece: Episode of..." or "Movie N" slip past the name tokens
+      // because the site serves them under ambiguous names).
+      if (urlSideTokens.any(u.contains)) {
+        s -= 25;
+      }
+      // Among exact-title ties, prefer the non-dubbed page: the site serves the
+      // same series as both "...-dublado-todos-os-episodios" and the plain one.
+      if (u.contains('dublado') || u.contains('legendado')) {
+        s -= 5;
       }
       return s;
     }

@@ -3,8 +3,15 @@ class TextUtils {
   const TextUtils._();
 
   /// Converts a search query into the slug format used by some sources.
+  /// Punctuation is stripped so "Naruto: Shippuuden" becomes
+  /// "naruto-shippuuden" instead of an invalid "naruto:-shippuuden" slug.
   static String treatName(String name) {
-    return name.toLowerCase().replaceAll(' ', '-');
+    final cleaned = name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return cleaned.replaceAll(' ', '-');
   }
 
   /// Cleans a search query before it hits the sources: strips the rating/age

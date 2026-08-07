@@ -457,6 +457,9 @@ class AniListService {
     anime.bannerImage = media.bannerImage;
     anime.description = media.description;
     anime.episodes = media.episodes;
+    if (anime.episodes == null && media.nextAiringEpisodeNumber != null) {
+      anime.episodes = media.nextAiringEpisodeNumber! - 1;
+    }
     anime.status = media.status;
     anime.averageScore = media.averageScore;
     anime.genres = media.genres;
@@ -480,6 +483,7 @@ class AniListService {
             status
             averageScore
             genres
+            nextAiringEpisode { episode timeUntilAiring }
           }
         }
       ''';
