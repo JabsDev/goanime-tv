@@ -6,7 +6,7 @@ import 'anime_source_adapter.dart';
 // encryption fields removed - currently disabled
 
 /// AllAnime provider: EN source with captcha protection (currently disabled)
-class AllAnimeAdapter implements AnimeSourceAdapter {
+class AllAnimeAdapter extends AnimeSourceAdapter {
   // Encryption fields removed - currently disabled
   // final enc.Key _key;
   // final Uint8List _iv;
@@ -30,7 +30,7 @@ class AllAnimeAdapter implements AnimeSourceAdapter {
   }
 
   @override
-  Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime) async {
+  Future<ScraperResult<List<Episode>>> getEpisodes(Anime anime) async {
     return ScraperResult.failure(
       EmptyResultError(
         message: 'AllAnime requires captcha verification',

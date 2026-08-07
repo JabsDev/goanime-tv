@@ -13,7 +13,7 @@ import 'anime_source_adapter.dart';
 
 /// Goyabu provider (PT-BR): HTML scraping for search and episode listing,
 /// video via the `layersData` HLS proxy URL embedded in the episode page.
-class GoyabuAdapter implements AnimeSourceAdapter {
+class GoyabuAdapter extends AnimeSourceAdapter {
   final http.Client? _client;
 
   GoyabuAdapter({http.Client? client}) : _client = client;
@@ -99,7 +99,7 @@ class GoyabuAdapter implements AnimeSourceAdapter {
   }
 
   @override
-  Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime) async {
+  Future<ScraperResult<List<Episode>>> getEpisodes(Anime anime) async {
     if (anime.url.isEmpty) {
       return ScraperResult.failure(EmptyResultError(
         message: 'No anime URL provided',
@@ -107,7 +107,8 @@ class GoyabuAdapter implements AnimeSourceAdapter {
       ));
     }
     try {
-      final res = await _httpGet(Uri.parse(anime.url), headers: {
+      final pageUrl = anime.url.startsWith('http') ? anime.url : '$_base${anime.url}';
+      final res = await _httpGet(Uri.parse(pageUrl), headers: {
         'User-Agent': _userAgent,
         'Accept-Language': 'pt-BR,pt;q=0.9',
       });
@@ -132,10 +133,7 @@ class GoyabuAdapter implements AnimeSourceAdapter {
             source: source,
           ));
         }
-        return ScraperResult.success(EpisodesResult(
-          fallback,
-          {source.toString(): fallback},
-        ));
+        return ScraperResult.success(fallback);
       }
 
       final decoded = jsonDecode(match.group(1)!);
@@ -167,10 +165,7 @@ class GoyabuAdapter implements AnimeSourceAdapter {
           source: source,
         ));
       }
-      return ScraperResult.success(EpisodesResult(
-        episodes,
-        {source.toString(): episodes},
-      ));
+      return ScraperResult.success(episodes);
     } catch (e) {
       debugPrint('[Goyabu] getEpisodes error: $e');
       return ScraperResult.failure(UnknownError(

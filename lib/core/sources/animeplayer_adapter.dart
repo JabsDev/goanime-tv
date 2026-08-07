@@ -15,7 +15,7 @@ import 'anime_source_adapter.dart';
 /// media URL served in the page body after a redirect. We re-fetch the
 /// traffic URL with a browser UA and pull the signed `infra-*.thatwebsite...`
 /// URL out of the returned HTML.
-class AnimePlayerAdapter implements AnimeSourceAdapter {
+class AnimePlayerAdapter extends AnimeSourceAdapter {
   final http.Client? _client;
 
   AnimePlayerAdapter({http.Client? client}) : _client = client;
@@ -92,7 +92,7 @@ class AnimePlayerAdapter implements AnimeSourceAdapter {
   }
 
   @override
-  Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime) async {
+  Future<ScraperResult<List<Episode>>> getEpisodes(Anime anime) async {
     if (anime.url.isEmpty) {
       return ScraperResult.failure(EmptyResultError(
         message: 'No anime URL provided',
@@ -138,10 +138,7 @@ class AnimePlayerAdapter implements AnimeSourceAdapter {
           owner: anime,
         );
       }).toList();
-      return ScraperResult.success(EpisodesResult(
-        episodes,
-        {source.toString(): episodes},
-      ));
+      return ScraperResult.success(episodes);
     } catch (e) {
       debugPrint('[AnimePlayer] getEpisodes error: $e');
       return ScraperResult.failure(UnknownError(

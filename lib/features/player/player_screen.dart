@@ -13,8 +13,8 @@ import '../../shared/widgets/focus_key_handler.dart';
 
 class PlayerScreen extends StatefulWidget {
   final Anime anime;
-  final Episode episode;
-  final List<Episode> episodeList;
+  final AnimeSource provider;
+  final List<CatalogEpisode> episodeList;
   final int episodeIndex;
   final List<VideoSource>? initialSources;
   final int initialIndex;
@@ -22,7 +22,7 @@ class PlayerScreen extends StatefulWidget {
   const PlayerScreen({
     super.key,
     required this.anime,
-    required this.episode,
+    required this.provider,
     required this.episodeList,
     required this.episodeIndex,
     this.initialSources,
@@ -115,18 +115,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       List<VideoSource> sources;
       int startIndex = widget.initialIndex;
-      // ponytail: retry re-resolve as fontes — URL pode ter expirado/403.
-      // Antes o "Tentar novamente" só rejogava widget.initialSources mortas.
+      // ponytail: retry re-resolve as fontes do provider escolhido — a URL pode
+      // ter expirado/403. Antes o "Tentar novamente" só rejogava as mortas.
       if (widget.initialSources != null && !_forceReresolve) {
         sources = widget.initialSources!;
         debugPrint('[Player] Using ${sources.length} pre-selected sources');
       } else {
         _forceReresolve = false;
-        sources = await _repo.getVideoSources(
-          widget.episode,
-          widget.anime.source,
-          anime: widget.anime,
+        final providers = await _repo.resolveProvidersForEpisode(
+          widget.anime,
+          widget.episodeIndex + 1,
         );
+        sources = providers[widget.provider] ?? const <VideoSource>[];
       }
       if (!mounted) return;
       if (sources.isEmpty) {
@@ -400,13 +400,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _playNextEpisode() {
     _countdownTimer?.cancel();
     if (widget.episodeIndex < widget.episodeList.length - 1) {
-      final next = widget.episodeList[widget.episodeIndex + 1];
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => PlayerScreen(
             anime: widget.anime,
-            episode: next,
+            provider: widget.provider,
             episodeList: widget.episodeList,
             episodeIndex: widget.episodeIndex + 1,
           ),

@@ -17,7 +17,7 @@ import 'anime_source_adapter.dart';
 /// embed whose token is base64-decoded and reversed.
 ///
 /// The [DooPlayAdapter.source] selects the base URL (see [baseUrl]).
-class DooPlayAdapter implements AnimeSourceAdapter {
+class DooPlayAdapter extends AnimeSourceAdapter {
   final AnimeSource _source;
   final http.Client? _client;
 
@@ -110,7 +110,7 @@ class DooPlayAdapter implements AnimeSourceAdapter {
   }
 
   @override
-  Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime) async {
+  Future<ScraperResult<List<Episode>>> getEpisodes(Anime anime) async {
     if (anime.url.isEmpty) {
       return ScraperResult.failure(EmptyResultError(
         message: 'No anime URL provided',
@@ -156,10 +156,7 @@ class DooPlayAdapter implements AnimeSourceAdapter {
           owner: anime,
         );
       }).toList();
-      return ScraperResult.success(EpisodesResult(
-        episodes,
-        {source.toString(): episodes},
-      ));
+      return ScraperResult.success(episodes);
     } catch (e) {
       debugPrint('[DooPlay] getEpisodes error: $e');
       return ScraperResult.failure(UnknownError(

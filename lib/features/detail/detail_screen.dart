@@ -22,11 +22,9 @@ class DetailScreen extends StatefulWidget {
 
 class _DetailScreenState extends State<DetailScreen> with RouteAware {
   final AnimeRepository _repo = AnimeRepository();
-  List<Episode> _episodes = [];
+  List<CatalogEpisode> _episodes = [];
   bool _isLoading = true;
   bool _isFavorite = false;
-  Map<String, List<Episode>> _sourceOptions = {};
-  String? _selectedSource;
 
   @override
   void initState() {
@@ -113,41 +111,19 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
     debugPrint('[Detail] _loadEpisodes start');
     setState(() => _isLoading = true);
     try {
-      final result = await _repo.getEpisodes(widget.anime);
+      final episodes = await _repo.getCatalogEpisodes(widget.anime);
       if (!mounted) return;
-      if (result.sourceOptions.isNotEmpty) {
-        final first = result.sourceOptions.entries.first;
-        setState(() {
-          _sourceOptions = result.sourceOptions;
-          _selectedSource = first.key;
-          _episodes = first.value;
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _episodes = result.episodes;
-          _isLoading = false;
-        });
-      }
+      setState(() {
+        _episodes = episodes;
+        _isLoading = false;
+      });
 
-      // Log the result for debugging
-      debugPrint('[Detail] Loaded ${_episodes.length} episodes from ${result.sourceOptions.length} sources');
-      debugPrint('[Detail] _loadEpisodes end eps=${result.episodes.length} sources=${result.sourceOptions.length}');
+      debugPrint('[Detail] Loaded ${_episodes.length} canonical episodes');
       _reconcileWithAnilist();
     } catch (e) {
       debugPrint('[Detail] Load episodes error: $e');
       if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  void _onSourceChanged(String? key) {
-    if (key == null || key == _selectedSource) return;
-    final episodes = _sourceOptions[key];
-    if (episodes == null) return;
-    setState(() {
-      _selectedSource = key;
-      _episodes = episodes;
-    });
   }
 
   void _toggleFavorite() {
@@ -160,43 +136,20 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
     setState(() => _isFavorite = !_isFavorite);
   }
 
-  Future<void> _playEpisode(int index) async {
-    debugPrint('[Detail] Tap EP index=$index num=${_episodes[index].number} source=${_episodes[index].source} owner=${_episodes[index].owner?.source}');
-    _showQualityPicker(_episodes[index], index);
+  void _playEpisode(int index) {
+    debugPrint('[Detail] Tap EP index=$index num=${_episodes[index].number}');
+    _showEpisodeSourcePicker(index);
   }
 
-  void _showQualityPicker(Episode episode, int index) {
+  void _showEpisodeSourcePicker(int index) {
     showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (ctx) => _QualityDialog(
+      builder: (ctx) => _ProviderQualityDialog(
         anime: widget.anime,
-        episode: episode,
-        episodeList: _episodes,
+        episode: _episodes[index],
         episodeIndex: index,
-      ),
-    );
-  }
-
-  void _showEpisodeDescription(BuildContext context, Episode episode) {
-    if (episode.description == null || episode.description!.isEmpty) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(episode.title ?? 'Episódio ${episode.number}'),
-        content: SingleChildScrollView(
-          child: Text(
-            episode.description ?? '',
-            style: const TextStyle(fontSize: 14),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Fechar'),
-          ),
-        ],
+        episodeList: _episodes,
       ),
     );
   }
@@ -328,22 +281,6 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
                                 ),
                               ),
                             if (widget.anime.episodes != null) const SizedBox(width: 12),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: ThemeConstants.primary
-                                    .withValues(alpha: 0.3),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                widget.anime.sourceName,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: ThemeConstants.primary,
-                                ),
-                              ),
-                            ),
                           ],
                         ),
                       ],
@@ -458,21 +395,13 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
             ),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                const Text(
-                  'Episódios',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: ThemeConstants.white,
-                  ),
-                ),
-                if (_sourceOptions.length > 1) ...[
-                  const Spacer(),
-                  _buildSourceSelector(),
-                ],
-              ],
+            child: const Text(
+              'Episódios',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: ThemeConstants.white,
+              ),
             ),
           ),
 if (_episodes.isEmpty)
@@ -522,14 +451,6 @@ if (_episodes.isEmpty)
      );
    }
 
-  Widget _buildSourceSelector() {
-    return _SourceSelector(
-      selectedSource: _selectedSource,
-      options: _sourceOptions,
-      onChanged: _onSourceChanged,
-    );
-  }
-
   Widget _buildSliverEpisodeGrid() {
     final width = MediaQuery.sizeOf(context).width;
     // ponytail: FireTV reporta density 320 (dpr 2.0) → logical width = 960.
@@ -559,7 +480,7 @@ if (_episodes.isEmpty)
         ),
         itemCount: _episodes.length,
         itemBuilder: (context, i) => _EpisodeCard(
-          key: ValueKey('${_selectedSource}_$i'),
+          key: ValueKey(i),
           index: i,
           episode: _episodes[i],
           anime: widget.anime,
@@ -573,7 +494,7 @@ if (_episodes.isEmpty)
 
 class _EpisodeCard extends StatefulWidget {
   final int index;
-  final Episode episode;
+  final CatalogEpisode episode;
   final Anime anime;
   final bool isWatched;
   final VoidCallback onPlay;
@@ -764,97 +685,88 @@ class _EpisodeCardState extends State<_EpisodeCard> {
   }
 }
 
-class _QualityDialog extends StatefulWidget {
+// Replaces the old _QualityDialog. Instead of resolving ONE provider's
+// qualities, it resolves the episode across ALL providers on tap and shows a
+// two-level picker in a single dialog: Provider → Quality. The provider with
+// the best priority that has the episode is auto-selected (fewer taps on TV).
+//
+// ponytail: `initialSources` per provider passed straight to the player; the
+//     player keeps its own dead-source fallback across the provider's qualities.
+class _ProviderQualityDialog extends StatefulWidget {
   final Anime anime;
-  final Episode episode;
-  final List<Episode> episodeList;
+  final CatalogEpisode episode;
   final int episodeIndex;
+  final List<CatalogEpisode> episodeList;
 
-  const _QualityDialog({
+  const _ProviderQualityDialog({
     required this.anime,
     required this.episode,
-    required this.episodeList,
     required this.episodeIndex,
+    required this.episodeList,
   });
 
   @override
-  State<_QualityDialog> createState() => _QualityDialogState();
+  State<_ProviderQualityDialog> createState() => _ProviderQualityDialogState();
 }
 
-class _QualityDialogState extends State<_QualityDialog> {
+class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   final AnimeRepository _repo = AnimeRepository();
-  List<VideoSource>? _sources;
   bool _loading = true;
   String? _error;
+  Map<AnimeSource, List<VideoSource>>? _providers;
+  AnimeSource? _selectedProvider;
 
   @override
   void initState() {
     super.initState();
-    _loadSources();
+    _resolveProviders();
   }
 
-  Future<void> _loadSources() async {
-    debugPrint('[QualityDialog] loadSources start ep=${widget.episode.number} source=${widget.episode.source ?? widget.anime.source} anime=${widget.anime.name}');
+  Future<void> _resolveProviders() async {
+    debugPrint(
+        '[ProviderDialog] resolve ep ${widget.episode.number} anime=${widget.anime.name}');
     try {
-      var sources = await _repo.getVideoSources(
-        widget.episode,
-        widget.anime.source,
-        anime: widget.anime,
-      );
-      debugPrint('[QualityDialog] primary sources count=${sources.length}');
-
-      final effectiveSource = widget.episode.source ?? widget.anime.source;
-      // If the primary source fails, try the episode's own owner source when
-      // it differs (episodes can be merged from another provider).
-      if (sources.isEmpty &&
-          mounted &&
-          effectiveSource == AnimeSource.animeFire &&
-          widget.episode.owner != null &&
-          widget.episode.owner!.source != AnimeSource.animeFire) {
-        debugPrint('[QualityDialog] Falling back to ${widget.episode.owner!.source}');
-        sources = await _repo.getVideoSources(
-          widget.episode,
-          widget.episode.owner!.source,
-          anime: widget.episode.owner ?? widget.anime,
-        );
-      }
-
+      final providers =
+          await _repo.resolveProvidersForEpisode(widget.anime, widget.episode.number);
       if (!mounted) return;
-      debugPrint('[QualityDialog] loadSources done count=${sources.length}');
+      // Auto-select the highest-priority provider that has the episode.
+      final best = providers.isEmpty ? null : providers.keys.first;
+      debugPrint('[ProviderDialog] resolved ${providers.length} providers '
+          'best=$best');
       setState(() {
-        _sources = sources;
+        _providers = providers;
+        _selectedProvider = best;
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      debugPrint('[QualityDialog] Load sources error: $e');
+      debugPrint('[ProviderDialog] resolve error: $e');
       setState(() {
-        _error = 'Fonte indisponível. Tente novamente ou escolha outra fonte.';
+        _error = 'Fonte indisponível. Tente novamente.';
         _loading = false;
       });
     }
   }
 
-  String _effectiveSourceName() {
-    final src = widget.episode.source ?? widget.anime.source;
-    switch (src) {
-      case AnimeSource.animeFire:
-        return 'AnimeFire';
-      case AnimeSource.anilist:
-        return 'AniList';
-      case AnimeSource.goyabu:
-        return 'Goyabu';
-      case AnimeSource.allAnime:
-        return 'AllAnime';
-      case AnimeSource.betterAnime:
-        return 'BetterAnime';
-      case AnimeSource.animesRoll:
-        return 'AnimesROLL';
-      case AnimeSource.dooPlay:
-        return 'DooPlay';
-      case AnimeSource.animePlayer:
-        return 'Anime Player';
-    }
+  String _sourceName(AnimeSource s) => s.name;
+
+  void _navigateToPlayer(AnimeSource provider, int qualityIndex) {
+    final sources = _providers?[provider] ?? const <VideoSource>[];
+    if (sources.isEmpty) return;
+    Navigator.pop(context);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PlayerScreen(
+          anime: widget.anime,
+          provider: provider,
+          episodeIndex: widget.episodeIndex,
+          episodeList: widget.episodeList,
+          initialSources: sources,
+          initialIndex: qualityIndex,
+        ),
+      ),
+    );
   }
 
   @override
@@ -864,7 +776,7 @@ class _QualityDialogState extends State<_QualityDialog> {
       insetPadding: const EdgeInsets.all(32),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 480),
+        constraints: const BoxConstraints(maxWidth: 520),
         padding: const EdgeInsets.all(28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -887,7 +799,7 @@ class _QualityDialogState extends State<_QualityDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Selecionar Qualidade',
+                        'Reproduzir EP',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 24,
@@ -896,7 +808,7 @@ class _QualityDialogState extends State<_QualityDialog> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Ep ${widget.episode.number} · ${_effectiveSourceName()}',
+                        'Episódio ${widget.episode.number}',
                         style: const TextStyle(
                           color: ThemeConstants.textSecondary,
                           fontSize: 14,
@@ -919,7 +831,7 @@ class _QualityDialogState extends State<_QualityDialog> {
                           color: ThemeConstants.primary),
                       SizedBox(height: 16),
                       Text(
-                        'Buscando fontes de vídeo...',
+                        'Procurando fontes de vídeo...',
                         style: TextStyle(
                           color: ThemeConstants.textSecondary,
                           fontSize: 16,
@@ -934,16 +846,24 @@ class _QualityDialogState extends State<_QualityDialog> {
                 padding: const EdgeInsets.all(8),
                 child: Column(
                   children: [
-                    const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                    const Icon(Icons.error_outline,
+                        color: Colors.red, size: 48),
                     const SizedBox(height: 12),
                     const Text(
                       'Não foi possível carregar o vídeo',
-                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'O servidor pode estar temporariamente indisponível. Tente novamente ou escolha outra fonte.',
-                      style: TextStyle(color: ThemeConstants.textSecondary, fontSize: 14),
+                      'As fontes podem estar temporariamente indisponíveis. '
+                      'Tente novamente.',
+                      style: TextStyle(
+                        color: ThemeConstants.textSecondary,
+                        fontSize: 14,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 20),
@@ -954,8 +874,13 @@ class _QualityDialogState extends State<_QualityDialog> {
                           label: 'Tentar novamente',
                           primary: true,
                           onTap: () {
-                            setState(() { _error = null; _loading = true; });
-                            _loadSources();
+                            setState(() {
+                              _error = null;
+                              _loading = true;
+                              _providers = null;
+                              _selectedProvider = null;
+                            });
+                            _resolveProviders();
                           },
                         ),
                         const SizedBox(width: 12),
@@ -968,24 +893,28 @@ class _QualityDialogState extends State<_QualityDialog> {
                   ],
                 ),
               )
-            else if (_sources == null || _sources!.isEmpty)
+            else if (_providers == null || _providers!.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(8),
                 child: Column(
                   children: [
-                    const Icon(Icons.videocam_off, color: Colors.orange, size: 48),
+                    const Icon(Icons.videocam_off,
+                        color: Colors.orange, size: 48),
                     const SizedBox(height: 12),
                     const Text(
-                      'Nenhuma resolução disponível',
-                      style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                      'Nenhuma fonte disponível',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'Tentamos AnimeFire, Goyabu, BetterAnime e AnimePlayer '
-                      'para o Ep ${widget.episode.number} deste anime, '
-                      'mas nenhuma fonte resolveu um stream jogável agora. '
+                      'Nenhuma fonte (AnimeFire, Goyabu, BetterAnime, '
+                      'AnimesROLL, DooPlay, AnimePlayer) resolveu um stream '
+                      'para o Ep ${widget.episode.number} deste anime agora. '
                       'Possíveis motivos: Cloudflare, fonte fora do ar ou o '
-                      'anime ainda não foi indexado por essas fontes.',
+                      'episódio ainda não foi indexado.',
                       style: const TextStyle(
                         color: ThemeConstants.textSecondary,
                         fontSize: 14,
@@ -1001,8 +930,11 @@ class _QualityDialogState extends State<_QualityDialog> {
                           label: 'Tentar novamente',
                           primary: true,
                           onTap: () {
-                            setState(() { _loading = true; _sources = null; });
-                            _loadSources();
+                            setState(() {
+                              _loading = true;
+                              _providers = null;
+                            });
+                            _resolveProviders();
                           },
                         ),
                         const SizedBox(width: 12),
@@ -1016,46 +948,80 @@ class _QualityDialogState extends State<_QualityDialog> {
                 ),
               )
             else
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: _sources!.asMap().entries.map((e) {
-                  final idx = e.key;
-                  final src = e.value;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: _QualityItem(
-                      quality: src.quality,
-                      onTap: () => _navigateToPlayer(idx),
-                    ),
-                  );
-                }).toList(),
-              ),
+              _buildProviderSelector(),
           ],
         ),
       ),
     );
   }
 
-  void _navigateToPlayer(int qualityIndex) {
-    debugPrint('[QualityDialog] navigate idx=$qualityIndex');
-    Navigator.pop(context);
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(
-          anime: widget.anime,
-          episode: widget.episode,
-          episodeList: widget.episodeList,
-          episodeIndex: widget.episodeIndex,
-          initialSources: _sources,
-          initialIndex: qualityIndex,
+  /// Level 1 of the picker: the available providers. When a provider is
+  /// selected (default = best priority), show its qualities directly.
+  Widget _buildProviderSelector() {
+    final providers = _providers!;
+    final selected = _selectedProvider;
+
+    final providerList = providers.entries.map((e) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: _ProviderItem(
+          label: _sourceName(e.key),
+          isSelected: selected == e.key,
+          onTap: () {
+            setState(() => _selectedProvider = e.key);
+          },
         ),
-      ),
+      );
+    }).toList();
+
+    final qualityList = selected == null
+        ? const <Widget>[]
+        : providers[selected]!.asMap().entries.map((q) {
+            final idx = q.key;
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: _QualityItem(
+                quality: q.value.quality,
+                onTap: () => _navigateToPlayer(selected, idx),
+              ),
+            );
+          }).toList();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Fonte',
+          style: TextStyle(
+            color: ThemeConstants.textSecondary,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (selected == null)
+          ...providerList
+        else ...[
+          ...providerList,
+          const Divider(color: ThemeConstants.surfaceLight),
+          const Text(
+            'Qualidade',
+            style: TextStyle(
+              color: ThemeConstants.textSecondary,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...qualityList,
+        ],
+      ],
     );
   }
 }
 
-// ponytail: antes, itens do dialog eram InkWell sem Focus → D-pad andava
+// ponytail: itens do dialog eram InkWell sem Focus → D-pad andava
 // invisível. Aproveita o padrão AnimatedContainer com border/shadow primary
 // usado em FocusableCard/EpisodeCard para foco visível no controle.
 class _QualityItem extends StatefulWidget {
@@ -1139,6 +1105,101 @@ class _QualityItemState extends State<_QualityItem> {
                         : ThemeConstants.textSecondary,
                     size: 26,
                   ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ponytail: linha de provider focável no dialog — mesma mecânica de
+// _QualityItem, com check de seleção no lado direito.
+class _ProviderItem extends StatefulWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _ProviderItem({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  State<_ProviderItem> createState() => _ProviderItemState();
+}
+
+class _ProviderItemState extends State<_ProviderItem> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
+      child: Semantics(
+        button: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: SettingsService.instance.animDuration,
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+              decoration: BoxDecoration(
+                color: _isFocused
+                    ? ThemeConstants.primary.withValues(alpha: 0.15)
+                    : ThemeConstants.surfaceLight,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : ThemeConstants.surfaceLight,
+                  width: _isFocused ? ThemeConstants.focusBorderWidth : 1,
+                ),
+                boxShadow: (_isFocused && SettingsService.instance.shadowsEnabled)
+                    ? [
+                        BoxShadow(
+                          color: ThemeConstants.primary.withValues(alpha: 0.4),
+                          blurRadius: ThemeConstants.focusGlowBlur,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : [],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.source,
+                    color: _isFocused
+                        ? ThemeConstants.primary
+                        : ThemeConstants.white,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      widget.label,
+                      style: TextStyle(
+                        color: _isFocused
+                            ? ThemeConstants.primary
+                            : ThemeConstants.white,
+                        fontSize: 18,
+                        fontWeight: _isFocused
+                            ? FontWeight.bold
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  if (widget.isSelected)
+                    const Icon(
+                      Icons.check_circle,
+                      color: ThemeConstants.primary,
+                      size: 22,
+                    ),
                 ],
               ),
             ),
@@ -1341,124 +1402,6 @@ class _BackButtonState extends State<_BackButton> {
                 Icons.arrow_back,
                 color: _isFocused ? ThemeConstants.primary : Colors.white,
                 size: 24,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ponytail: antes DropdownButton sem Focus → D-pod pousava invisível no seletor
-// de fontes. DropdownButton não é ativável por Select no remote (mobile-first),
-// então troquei por InkWell + showMenu. Mesmo padrão AnimatedContainer de
-// _QualityItem/_DialogButton: border + glow primary ao focar, FocusKeyHandler
-// despacha Select/Enter/Space para abrir o menu nativo.
-class _SourceSelector extends StatefulWidget {
-  final String? selectedSource;
-  final Map<String, List<Episode>> options;
-  final ValueChanged<String?> onChanged;
-
-  const _SourceSelector({
-    required this.selectedSource,
-    required this.options,
-    required this.onChanged,
-  });
-
-  @override
-  State<_SourceSelector> createState() => _SourceSelectorState();
-}
-
-class _SourceSelectorState extends State<_SourceSelector> {
-  bool _isFocused = false;
-
-  Future<void> _openMenu() async {
-    final renderBox = context.findRenderObject() as RenderBox?;
-    final offset = renderBox?.localToGlobal(Offset.zero) ?? Offset.zero;
-    final size = renderBox?.size ?? Size.zero;
-    final key = await showMenu<String>(
-      context: context,
-      color: ThemeConstants.surface,
-      initialValue: widget.selectedSource,
-      position: RelativeRect.fromLTRB(
-        offset.dx,
-        offset.dy + size.height + 4,
-        offset.dx + size.width + 200,
-        offset.dy + size.height + 4,
-      ),
-      items: widget.options.entries.map((e) {
-        return PopupMenuItem<String>(
-          value: e.key,
-          child: Text(
-            e.key,
-            style: const TextStyle(
-              color: ThemeConstants.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        );
-      }).toList(),
-    );
-    if (key != null) widget.onChanged(key);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _isFocused = f),
-      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, _openMenu),
-      child: Semantics(
-        button: true,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: _openMenu,
-            borderRadius: BorderRadius.circular(8),
-            child: AnimatedContainer(
-              duration: SettingsService.instance.animDuration,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: _isFocused
-                    ? ThemeConstants.primary.withValues(alpha: 0.15)
-                    : ThemeConstants.surfaceLight,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _isFocused
-                      ? ThemeConstants.primary
-                      : ThemeConstants.primary.withValues(alpha: 0.4),
-                  width: _isFocused ? ThemeConstants.focusBorderWidth : 1,
-                ),
-                boxShadow: (_isFocused && SettingsService.instance.shadowsEnabled)
-                    ? [
-                        BoxShadow(
-                          color: ThemeConstants.primary.withValues(alpha: 0.4),
-                          blurRadius: ThemeConstants.focusGlowBlur,
-                        ),
-                      ]
-                    : [],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    widget.selectedSource ?? '',
-                    style: TextStyle(
-                      color: _isFocused
-                          ? ThemeConstants.primary
-                          : ThemeConstants.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Icon(
-                    Icons.source,
-                    color: ThemeConstants.primary,
-                    size: 20,
-                  ),
-                ],
               ),
             ),
           ),

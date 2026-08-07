@@ -3,15 +3,14 @@ import 'package:http/testing.dart';
 import 'package:http/http.dart' as http;
 
 import 'package:goanime_tv/core/network/api_client.dart';
-import 'package:goanime_tv/core/scraper/anime_scraper.dart';
+import 'package:goanime_tv/core/sources/anime_source_adapter.dart';
 import 'package:goanime_tv/core/sources/goyabu_adapter.dart';
 import 'package:goanime_tv/core/utils/text_utils.dart';
 import 'package:goanime_tv/data/models/anime.dart';
-import 'package:goanime_tv/data/models/episode.dart';
 import 'package:goanime_tv/core/scraper/scraper_result.dart';
 
 /// Regression tests for the source-correction plan (PLANO_ACAO_SOURCES.md):
-/// clean search queries, HTTP 429 retry, and the AniList metadata-only merge.
+/// clean search queries, HTTP 429 retry, and the adapter match contract.
 void main() {
   tearDown(() {
     ApiClient.clientOverride = null;
@@ -55,32 +54,16 @@ void main() {
     expect(calls, 3);
   });
 
-  test('mergeEpisodes keeps video-source owner and drops AniList-only eps', () {
-    final base = [
-      Episode(
-        number: '1',
-        url: 'http://animefire/ep-1',
-        source: AnimeSource.animeFire,
-        owner: Anime(name: 'X', url: 'http://animefire/x'),
-      ),
-      Episode(
-        number: '2',
-        url: 'http://animefire/ep-2',
-        source: AnimeSource.animeFire,
-        owner: Anime(name: 'X', url: 'http://animefire/x'),
-      ),
+  test('resolveAnime picks the best candidate by title match', () {
+    // Regression for the old _findBySource/bestMatch flow, now living on the
+    // adapter contract. Movies/spin-offs lose to the main series tie.
+    final candidates = [
+      Anime(name: 'One Piece Film: Red', url: '/filme-red', source: AnimeSource.animeFire),
+      Anime(name: 'One Piece', url: '/one-piece/todos-os-episodios', source: AnimeSource.animeFire),
+      Anime(name: 'One Piece', url: '/one-piece', source: AnimeSource.animeFire),
     ];
-    final meta = [
-      Episode(number: '1', url: '', title: 'Capítulo 1', thumbnail: 't1'),
-      Episode(number: '99', url: '', title: 'sem stream'),
-    ];
-    final merged = AnimeScraper.mergeEpisodes(base, meta);
-    expect(merged.length, 2, reason: 'AniList-only episode 99 must be dropped');
-    expect(merged.first.title, 'Capítulo 1');
-    expect(merged.first.thumbnail, 't1');
-    expect(merged.first.url, 'http://animefire/ep-1');
-    expect(merged.first.source, AnimeSource.animeFire);
-    expect(merged.first.owner, isNotNull);
-    expect(merged.map((e) => e.source).contains(AnimeSource.anilist), isFalse);
+    final best = AnimeSourceAdapter.bestMatch(
+        'One Piece', candidates, AnimeSource.animeFire);
+    expect(best.url, '/one-piece/todos-os-episodios');
   });
 }

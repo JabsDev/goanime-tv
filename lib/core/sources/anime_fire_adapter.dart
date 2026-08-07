@@ -14,7 +14,7 @@ import 'anime_source_adapter.dart';
 
 /// AnimeFire provider: HTML scraping for search, episode listing and video
 /// extraction (multiple qualities via `data-video-src` + Blogger fallback).
-class AnimeFireAdapter implements AnimeSourceAdapter {
+class AnimeFireAdapter extends AnimeSourceAdapter {
   final http.Client? _client;
 
   AnimeFireAdapter({http.Client? client}) : _client = client;
@@ -153,7 +153,7 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
   }
 
   @override
-  Future<ScraperResult<EpisodesResult>> getEpisodes(Anime anime) async {
+  Future<ScraperResult<List<Episode>>> getEpisodes(Anime anime) async {
     debugPrint('[AnimeFireAdapter] getEpisodes START anime=${anime.name}');
     debugPrint('[AnimeFireAdapter] anime.url=${anime.url}');
 
@@ -203,10 +203,7 @@ class AnimeFireAdapter implements AnimeSourceAdapter {
         );
       }).toList();
 
-      return ScraperResult.success(EpisodesResult(
-        episodes,
-        {source.toString(): episodes},
-      ));
+      return ScraperResult.success(episodes);
     } catch (e, stackTrace) {
       debugPrint('[AnimeFireAdapter] getEpisodes ERROR: $e\n$stackTrace');
       return ScraperResult.failure(UnknownError(

@@ -28,6 +28,19 @@ class AppCaches {
     maxSize: 400,
   );
 
+  /// Canonical catalog episode lists, keyed by anime identity (anilistId or
+  /// cleaned title). Stable — AniList metadata rarely changes.
+  static final TtlCache catalog = TtlCache(
+    defaultTtl: const Duration(hours: 24),
+    maxSize: 200,
+  );
+
+  /// Per-(anime, episode) provider resolutions. URLs expire, so the TTL is short.
+  static final TtlCache resolutions = TtlCache(
+    defaultTtl: const Duration(minutes: 30),
+    maxSize: 300,
+  );
+
   // In-memory cache for HTTP responses to prevent caching errors
   static final Map<String, List<int>> _httpCache = {};
   static final Map<String, DateTime> _httpExpiry = {};
@@ -37,6 +50,8 @@ class AppCaches {
     episodes.clear();
     enrichment.clear();
     httpResponses.clear();
+    catalog.clear();
+    resolutions.clear();
     _httpCache.clear();
     _httpExpiry.clear();
     if (kDebugMode) debugPrint('[AppCaches] Cleared all caches');

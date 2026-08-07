@@ -99,8 +99,8 @@ void main() {
     final result = await adapter.getEpisodes(
       Anime(name: 'Op', url: 'https://betteranime.io/animes/op/'),
     );
-    expect(result, isA<Success<EpisodesResult>>());
-    final eps = (result as Success<EpisodesResult>).data.episodes;
+    expect(result, isA<Success<List<Episode>>>());
+    final eps = (result as Success<List<Episode>>).data;
     expect(eps.map((e) => int.parse(e.number)).toList(), [2, 3, 10]);
     expect(eps.last.number, '10');
   });
