@@ -2,12 +2,12 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'dart:typed_data';
 import '../../data/models/anilist_models.dart';
 import 'anilist_auth_service.dart';
 import '../../data/models/anime.dart';
 import '../cache/app_caches.dart';
 import '../constants/app_constants.dart';
+import '../profile/profile_service.dart';
 import '../utils/text_utils.dart';
 
 /// Ponytail: Manages AniList API requests and authentication state.
@@ -60,28 +60,46 @@ class AniListService {
   }
 
   static Future<bool> isLoggedIn() async {
-    return AnilistAuthService.getToken() != null;
+    return (await getToken()) != null;
   }
 
+  /// Token do perfil ativo — fonte única de verdade. Nunca lê o cache global
+  /// para decisão de auth (isso era a origem do bug de token vazando entre os
+  /// perfis). O cache global só serve de espelho (ver Fase 5/9).
   static Future<String?> getToken() async {
-    return AnilistAuthService.getToken();
+    final profileToken = ProfileService.instance.currentProfile?.anilistToken;
+    if (profileToken != null && profileToken.isNotEmpty) return profileToken;
+    return null;
   }
 
+  /// Porta de entrada ÚNICA do token no app. Valida de fato via Viewer
+  /// (`_fetchUser`); só persiste se o usuário responder. A fonte de verdade é o
+  /// perfil ativo (`ProfileService`); o cache global fica como leitura rápida.
   static Future<bool> saveToken(String token) async {
-    if (!token.startsWith('eyJ')) return false;
-    final saved = await AnilistAuthService.saveToken(token);
-    if (!saved) return false;
+    if (!isJwtToken(token)) return false;
     final user = await _fetchUser(token);
-    if (user != null) {
-      await AnilistAuthService.saveUserData('user', {
-        'id': user.id,
-        'name': user.name,
-        'avatar': user.avatar,
-      });
-      return true;
+    if (user == null) return false;
+    final ps = ProfileService.instance;
+    if (ps.currentProfile != null) {
+      ps.updateCurrentProfileAnilist(
+        token: token,
+        userId: user.id,
+        userName: user.name,
+        avatar: user.avatar,
+      );
+    } else {
+      // Fresh install sem perfil: cria e ativa um perfil AniList para a fonte
+      // de verdade não ficar vazia (caso do banner da Home).
+      final profile = await ps.createAnilistProfile(token, user);
+      await ps.switchProfile(profile.id);
     }
-    await AnilistAuthService.removeToken();
-    return false;
+    await AnilistAuthService.saveToken(token);
+    await AnilistAuthService.saveUserData('user', {
+      'id': user.id,
+      'name': user.name,
+      'avatar': user.avatar,
+    });
+    return true;
   }
 
   static String _generateState() {
@@ -94,6 +112,17 @@ class AniListService {
   }
 
   static Future<AniListUser?> getUser() async {
+    // Fonte de verdade: dados do perfil ativo.
+    final profile = ProfileService.instance.currentProfile;
+    if (profile?.anilistToken != null &&
+        profile!.anilistUserId != null &&
+        profile.anilistUserName != null) {
+      return AniListUser(
+        id: profile.anilistUserId!,
+        name: profile.anilistUserName!,
+        avatar: profile.anilistAvatar,
+      );
+    }
     final data = await AnilistAuthService.getUserData('user');
     if (data == null) return null;
     try {
@@ -125,7 +154,8 @@ class AniListService {
 
   static Future<void> logout() async {
     await AnilistAuthService.removeToken();
-    await AnilistAuthService.removeUserData('user');
+    // Limpa também os dados AniList do perfil ativo (fonte de verdade).
+    ProfileService.instance.updateCurrentProfileAnilist(clear: true);
   }
 
   static Future<AniListUser?> _fetchUser(String token) async {

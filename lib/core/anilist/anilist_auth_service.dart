@@ -1,49 +1,46 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../profile/profile_store.dart';
 import '../../data/models/anilist_models.dart';
 
-/// Manages AniList authentication tokens and user data
+/// Cache de sessão do token/usuário AniList em [SharedPreferences].
+///
+/// ponytail: NÃO é mais a fonte de verdade do token. A fonte é o perfil ativo
+/// (`ProfileService`/`ProfileStore`), para o qual todas as leituras passam. Este
+/// serviço só guarda um espelho de leitura rápida (`user`/`lists_cache`) e o
+/// token global removido no logout — para não dessincronizar entre perfis.
 class AnilistAuthService {
   static final _authKey = 'anilist_auth_token';
-  static final _userDataKey = 'anilist_user_data';
+  static final _userKey = 'anilist_user_data';
+  static final _listsKey = 'anilist_lists_cache';
 
   static Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_authKey);
   }
 
+  /// Cache puro: grava o token já validado (a validação acontece em
+  /// `AniListService.saveToken` via Viewer). Sem fetch — persistência dura não
+  /// mora aqui.
   static Future<bool> saveToken(String token) async {
-    if (!token.startsWith('eyJ')) return false;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_authKey, token);
-    final user = await _fetchUser(token);
-    if (user != null) {
-      await saveUserData('user', {
-        'id': user.id,
-        'name': user.name,
-        'avatar': user.avatar,
-      });
-      return true;
-    }
-    await removeToken();
-    return false;
+    return true;
   }
 
   static Future<bool> removeToken() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_authKey);
-    await removeUserData('user');
+    await removeUserData(_userKey);
+    await prefs.remove(_listsKey);
     return true;
   }
- 
+
   static Future<Map<String, dynamic>?> getUserData(String key) async {
     final prefs = await SharedPreferences.getInstance();
-    final value = prefs.getString(key);
-    if (value == null) return null;
+    final raw = prefs.getString(_keyFor(key));
+    if (raw == null) return null;
     try {
-      return Map<String, dynamic>.from(jsonDecode(value));
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
     } catch (_) {
       return null;
     }
@@ -51,19 +48,19 @@ class AnilistAuthService {
 
   static Future<bool> saveUserData(String key, Map<String, dynamic> data) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(key, jsonEncode(data));
+    final storageKey = _keyFor(key);
+    await prefs.setString(storageKey, jsonEncode(data));
     return true;
   }
 
   static Future<bool> removeUserData(String key) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(key);
+    await prefs.remove(_keyFor(key));
     return true;
   }
 
   static Future<bool> isLoggedIn() async {
-    final token = await getToken();
-    return token != null;
+    return (await getToken()) != null;
   }
 
   static Future<AniListUser?> getUser() async {
@@ -76,23 +73,9 @@ class AnilistAuthService {
     }
   }
 
-  static Future<AniListUser?> _fetchUser(String token) async {
-    return null; // Placeholder - actual implementation would call API
-  }
-
-  static Future<bool> refreshUser() async {
-    final token = await getToken();
-    if (token == null) return false;
-    final user = await _fetchUser(token);
-    if (user != null) {
-      await saveUserData('user', {
-        'id': user.id,
-        'name': user.name,
-        'avatar': user.avatar,
-      });
-      return true;
-    }
-    await removeToken();
-    return false;
+  static String _keyFor(String key) {
+    if (key == 'user') return _userKey;
+    if (key == 'lists_cache') return _listsKey;
+    return key;
   }
 }
