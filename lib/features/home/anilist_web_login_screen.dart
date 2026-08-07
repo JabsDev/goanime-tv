@@ -115,8 +115,18 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
         onNavigationRequest: _onNavigationRequest,
         onPageStarted: _onPageStarted,
         onPageFinished: _onPageFinished,
-        onWebResourceError: (e) => debugPrint(
-            '[AnilistWeb] error: ${e.description} (code=${e.errorCode})'),
+        onWebResourceError: (e) {
+          debugPrint(
+              '[AnilistWeb] resource error: ${e.description} (code=${e.errorCode})');
+          // Fase 7: erro de rede/DNS/TLS (códigos negativos do WebView Android)
+          // com feedback de conexão; sem derrubar o fluxo — dá pra tentar de novo.
+          if (_connectionLikeError(e.errorCode) &&
+              !_loading &&
+              _error == null) {
+            _handleCallbackError(
+                'Sem conexão. Verifique sua internet e tente novamente.');
+          }
+        },
       ))
       ..loadRequest(Uri.parse(widget.url));
   }
@@ -144,6 +154,13 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
   void _onPageStarted(String url) {
     // Log redigido (Fase 9): nunca imprimir o fragment/token.
     debugPrint('[AnilistWeb] start: ${_redact(url)}');
+  }
+
+  /// Códigos de erro do WebView Android que indicam problema de conexão
+  /// (host lookup/connect/timeout/SSL), não falha de conteúdo.
+  bool _connectionLikeError(int code) {
+    const networkCodes = {-1, -2, -6, -7, -8, -11};
+    return networkCodes.contains(code);
   }
 
   Future<void> _onPageFinished(String url) async {

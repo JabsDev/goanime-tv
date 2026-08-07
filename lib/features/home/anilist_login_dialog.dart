@@ -101,6 +101,7 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
                   color: ThemeConstants.primary,
                   borderRadius: BorderRadius.circular(12),
                   child: InkWell(
+                    autofocus: true, // D-pad cai na ação principal na TV
                     onTap: _openWebLogin,
                     borderRadius: BorderRadius.circular(12),
                     child: const Padding(
