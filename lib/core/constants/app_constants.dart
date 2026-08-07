@@ -11,7 +11,10 @@ class AppConstants {
   // Antes o client_secret estava hardcoded aqui, extraível por qualquer um com
   // o APK. Implicit Grant retorna o access_token direto no redirect fragment,
   // então não há code exchange nem secret necessário.
-  static const String anilistRedirectUri = 'http://127.0.0.1:8090/callback';
+  // ponytail: Implicit Grant canônico — o redirect final é a página de pin do
+  // AniList, interceptada no WebView via NavigationDelegate (Fase 3). Nada de
+  // servidor loopback 127.0.0.1:8090.
+  static const String anilistRedirectUri = 'https://anilist.co/api/v2/oauth/pin';
   static const String anilistTokenEndpoint = 'https://anilist.co/api/v2/oauth/token';
 
   static const String userAgent =
