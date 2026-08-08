@@ -97,7 +97,13 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     final lists = await AniListService.getUserAnimeList();
     if (!mounted) return;
-    setState(() => _anilistLists = lists);
+    // ponytail: não deixa falha de rede (429/offline/Cloudflare/5xx) apagar o
+    // cache bom já pintado — senão "0 animes" volta por cima de listas boas.
+    // Só sobrescreve com [] quando a resposta foi sucesso real com zero
+    // entries (lastErrorStatus == ok), i.e. o usuário zerou a lista.
+    if (lists.isNotEmpty || AniListService.lastErrorStatus == AniListStatus.ok) {
+      setState(() => _anilistLists = lists);
+    }
   }
 
   Future<void> _loadAnimeLists() async {
