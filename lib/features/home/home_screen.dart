@@ -28,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final AnimeRepository _repo = AnimeRepository();
   List<Anime> _trending = [];
   List<Anime> _recent = [];
+  List<Anime> _tomorrow = [];
   bool _isLoading = true;
   bool _anilistLoggedIn = false;
   AniListUser? _anilistUser;
@@ -111,13 +112,19 @@ class _HomeScreenState extends State<HomeScreen> {
       final results = await Future.wait([
         AniListService.getTrending(),
         AniListService.getPopularThisSeason(),
+        AniListService.getAiringTomorrow(),
       ]);
       var trending = results[0];
       var season = results[1];
-      if (trending.isNotEmpty || season.isNotEmpty) {
+      final tomorrow = results[2];
+      if (trending.isNotEmpty || season.isNotEmpty || tomorrow.isNotEmpty) {
         final names = trending.map((a) => a.name.toLowerCase()).toSet();
         season = season.where((a) => !names.contains(a.name.toLowerCase())).toList();
-        setState(() { _trending = trending; _recent = season; });
+        setState(() {
+          _trending = trending;
+          _recent = season;
+          _tomorrow = tomorrow;
+        });
         return;
       }
     } catch (e) {
@@ -133,7 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final seen = <String>{};
       final unique = all.where((a) => seen.add(a.url.isNotEmpty ? a.url : a.name.toLowerCase())).toList();
       final mid = unique.length ~/ 2;
-      setState(() { _trending = unique.take(mid).toList(); _recent = unique.skip(mid).toList(); });
+      setState(() { _trending = unique.take(mid).toList(); _recent = unique.skip(mid).toList(); _tomorrow = []; });
     } catch (e) {
       debugPrint('[Home] Load error: $e');
     }
@@ -362,7 +369,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final watching = _anilistLists
         .expand((g) => g.entries
             .where((e) => e.status == 'CURRENT' || e.status == 'REPEATING'))
-        .toList();
+        .toList()
+      // ponytail: "Continue assistindo" ordenado por último atualizado (o que
+      // você assistiu mais recente vem primeiro). updatedAt null cai no fim.
+      ..sort((a, b) => (b.updatedAt ?? 0).compareTo(a.updatedAt ?? 0));
 
     final planning = _anilistLists
         .expand((g) => g.entries.where((e) => e.status == 'PLANNING'))
@@ -485,6 +495,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: () => openDetail(context, item),
                   ),
               buffer: 80),
+        if (_tomorrow.isNotEmpty)
+          ...section('Amanhã', _tomorrow.take(20).toList(), cardHeight,
+              (item) => FocusableCard(
+                    imageUrl: (item as Anime).imageUrl,
+                    title: item.name,
+                    width: cardWidth,
+                    height: cardHeight,
+                    onTap: () => openDetail(context, item),
+                  )),
         if (_recent.isNotEmpty)
           ...section('Populares da Temporada', _recent.take(20).toList(), cardHeight,
               (item) => FocusableCard(

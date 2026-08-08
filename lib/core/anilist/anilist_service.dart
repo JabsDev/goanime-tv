@@ -424,6 +424,7 @@ class AniListService {
       return <String, dynamic>{
         'progress': e.progress,
         'status': e.status,
+        'updatedAt': e.updatedAt,
         // ponytail: o parser AniListEntry.fromJson lê nextAiringEpisode de
         // media (schema real). Espelhar aqui no mesmo lugar, senão o cache de
         // listas perde o countdown na volta (round-trip quebra a exibição).
@@ -492,6 +493,7 @@ class AniListService {
       entries {
         progress
         status
+        updatedAt
         media {
            id
            title { romaji english native }
@@ -614,6 +616,81 @@ class AniListService {
   /// All-time popular anime (fallback / additional row).
   static Future<List<Anime>> getPopular({int perPage = 30}) {
     return _catalog({'sort': ['POPULARITY_DESC'], 'perPage': perPage});
+  }
+
+  /// Animes com próximo episódio agendado para amanhã (fuso do usuário), via
+  /// `AiringSchedule` do AniList. Filtrado `isAdult: false`, deduplicado por
+  /// anilistId (um título pode exibir vários eps no mesmo dia) e ordenado por
+  /// horário de exibição.
+  static Future<List<Anime>> getAiringTomorrow({int perPage = 30}) async {
+    final now = DateTime.now();
+    final tomorrow = DateTime(now.year, now.month, now.day).add(const Duration(days: 1));
+    final dayAfter = tomorrow.add(const Duration(days: 1));
+    final cacheKey = 'anilist_airing:${tomorrow.toIso8601String().substring(0, 10)}';
+    final cached = AppCaches.search.get<List<Anime>>(cacheKey);
+    if (cached != null) return cached;
+
+    const query = '''
+      query (\$airingAt_greater: Int, \$airingAt_lesser: Int, \$perPage: Int) {
+        Page(page: 1, perPage: \$perPage) {
+          airingSchedules(
+            airingAt_greater: \$airingAt_greater
+            airingAt_lesser: \$airingAt_lesser
+            notYetAired: true
+          ) {
+            id
+            episode
+            airingAt
+            media {
+              id
+              title { romaji english native }
+              coverImage { extraLarge large medium }
+              bannerImage
+              description
+              episodes
+              status
+              averageScore
+              genres
+            }
+          }
+        }
+      }
+    ''';
+    try {
+      final res = await _anilistPost(query, variables: {
+        'airingAt_greater': tomorrow.millisecondsSinceEpoch ~/ 1000,
+        'airingAt_lesser': dayAfter.millisecondsSinceEpoch ~/ 1000,
+        'perPage': perPage,
+      });
+      if (res.statusCode != 200) {
+        debugPrint('[AniList] Airing error ${res.statusCode}: ${res.body}');
+        _classifyFailure(TimeoutException(''), res.statusCode, res.body);
+        return [];
+      }
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+      if (json.containsKey('errors')) {
+        debugPrint('[AniList] Airing error: ${json['errors']}');
+        lastErrorStatus = AniListStatus.serverError;
+        return [];
+      }
+      lastErrorStatus = AniListStatus.ok;
+      final schedules = json['data']?['Page']?['airingSchedules'] as List? ?? [];
+      final seen = <int>{};
+      final animes = <Anime>[];
+      for (final s in schedules) {
+        final media = (s as Map)['media'] as Map<String, dynamic>?;
+        if (media == null) continue;
+        final anime = _mediaToAnime(media);
+        if (anime.anilistId == null || !seen.add(anime.anilistId!)) continue;
+        if (anime.name.isNotEmpty) animes.add(anime);
+      }
+      AppCaches.search.set<List<Anime>>(cacheKey, animes);
+      return animes;
+    } catch (e) {
+      debugPrint('[AniList] Airing fetch error: $e');
+      _classifyFailure(e, null, '');
+      return [];
+    }
   }
 
   static String _seasonFor(int month) {
