@@ -88,8 +88,15 @@ class AniListService {
       lastErrorStatus = AniListStatus.ipBlocked;
       return;
     }
-    if (statusCode == 401 || statusCode == 400) {
+    if (statusCode == 401) {
       lastErrorStatus = AniListStatus.authError;
+      return;
+    }
+    // ponytail: 400 é erro de validação da query/variável (bug de cliente),
+    // não de autenticação. Sem mapear para authError o banner não mente
+    // "Sessão expirada" quando o erro é nosso (regressão b81de7e).
+    if (statusCode == 400) {
+      lastErrorStatus = AniListStatus.serverError;
       return;
     }
     if (statusCode != null && statusCode >= 500) {
@@ -541,7 +548,10 @@ class AniListService {
       if (res.statusCode != 200) {
         debugPrint('[AniList] GraphQL error ${res.statusCode}: ${res.body}');
         _classifyFailure(TimeoutException(''), res.statusCode, res.body);
-        if (res.statusCode == 401 || res.statusCode == 400) {
+        // ponytail: só 401 (token inválido/expirado) derruba a sessão. 400 é
+        // erro de validação de query (nossa, não do usuário) — deslogar por
+        // isso apagava o token a cada boot (sintoma "desloga sozinho").
+        if (res.statusCode == 401) {
           await logout();
         }
         return null;
