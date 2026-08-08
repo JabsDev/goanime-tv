@@ -844,15 +844,19 @@ class AniListService {
     final token = await getToken();
     if (token == null) return [];
 
+    // ponytail: o schema AniList NÃO tem `episodesV2` — a query antiga dava
+    // HTTP 400 para sempre (bug silencioso: episódios ricos nunca vieram, o
+    // grid caía no range 1..N). `streamingEpisodes` é o campo real com título
+    // e thumbnail por episódio (sem número explícito; o grid numera na volta).
     const query = '''
       query (\$mediaId: Int) {
         Media(id: \$mediaId) {
           id
-          episodesV2 {
-            episodeNumber
+          streamingEpisodes {
             title
-            description
             thumbnail
+            url
+            site
           }
         }
       }
@@ -874,13 +878,22 @@ class AniListService {
       final json = jsonDecode(res.body) as Map<String, dynamic>;
       final data = json['data'] as Map<String, dynamic>?;
       final media = data?['Media'] as Map<String, dynamic>?;
-      final episodesV2 = media?['episodesV2'] as List?;
+      final streaming = media?['streamingEpisodes'] as List?;
 
-      if (episodesV2 == null) return [];
+      if (streaming == null) return [];
 
-      return episodesV2
-          .map((ep) => AniListEpisode.fromMap(ep as Map<String, dynamic>))
-          .toList();
+      // ponytail: streamingEpisodes não tem número explícito — numera pela
+      // posição (1..N) para continuar alimentando um grid numerado com título
+      // e thumbnail por episódio.
+      return List.generate(streaming.length, (i) {
+        final ep = streaming[i] as Map<String, dynamic>;
+        return AniListEpisode(
+          number: '${i + 1}',
+          title: ep['title']?.toString(),
+          description: ep['site']?.toString(),
+          thumbnail: ep['thumbnail']?.toString(),
+        );
+      });
     } catch (e, stackTrace) {
       debugPrint('[AniList] getEpisodesV2 error: $e\n$stackTrace');
       _classifyFailure(e, null, '');
