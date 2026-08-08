@@ -1,0 +1,77 @@
+
+--- animeFire: "One Piece"
+  EP1 -> 1 vid: 360p/lightspeedst.net
+  EP5 -> 1 vid: 360p/lightspeedst.net
+  EP10 -> 1 vid: 360p/lightspeedst.net
+  EP15 -> 1 vid: 360p/lightspeedst.net
+  EP20 -> 1 vid: 360p/lightspeedst.net
+
+--- animeFire: "Black Clover"
+  EP1 -> 0 vid: 
+  EP5 -> 0 vid: 
+  EP10 -> 0 vid: 
+  EP15 -> 0 vid: 
+  EP20 -> 0 vid: 
+
+--- animeFire: "Black Butler"
+  EP1 -> 0 vid: 
+  EP5 -> 0 vid: 
+  EP10 -> 0 vid: 
+  EP15 -> 0 vid: 
+  EP20 -> 0 vid: 
+
+--- animeFire: "Haibane Renmei"
+  EP1 -> 0 vid: 
+  EP5 -> 0 vid: 
+  EP10 -> 0 vid: 
+  EP15 -> 0 vid: 
+  EP20 -> 0 vid: 
+
+--- goyabu: "One Piece"
+  EP1 -> 0 vid: 
+  EP5 -> 0 vid: 
+  EP10 -> 0 vid: 
+  EP15 -> 0 vid: 
+  EP20 -> 0 vid: 
+
+--- goyabu: "Black Clover"
+  EP1 -> 0 vid: 
+  EP5 -> 0 vid: 
+  EP10 -> 0 vid: 
+  EP15 -> 0 vid: 
+  EP20 -> 0 vid: 
+
+--- goyabu: "Haibane Renmei"
+  EP1 -> 0 vid: 
+  EP5 -> 0 vid: 
+  EP10 -> 0 vid: 
+  EP15 -> 0 vid: 
+  EP20 -> 0 vid: 
+
+--- dooPlay: "One Piece"
+  EP1 -> 0 vid: 
+  EP5 -> 0 vid: 
+  EP10 -> 0 vid: 
+  EP15 -> 0 vid: 
+  EP20 -> 0 vid: 
+
+--- dooPlay: "Black Clover"
+  EP1 -> 0 vid: 
+  EP5 -> 0 vid: 
+  EP10 -> 0 vid: 
+  EP15 -> 0 vid: 
+  EP20 -> 0 vid: 
+
+--- dooPlay: "Black Butler"
+  EP1 -> 0 vid: 
+  EP5 -> 0 vid: 
+  EP10 -> 0 vid: 
+  EP15 -> 0 vid: 
+  EP20 -> 0 vid: 
+
+--- animePlayer: "One Piece: Gyojin Tou-hen"
+  EP1 -> 0 vid: 
+  EP5 -> 0 vid: 
+  EP10 -> 0 vid: 
+  EP15 -> 0 vid: 
+  EP20 -> 0 vid: 

@@ -7,6 +7,7 @@ import '../../data/repositories/anime_repository.dart';
 import '../../core/storage/local_storage.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/utils/quality_picker.dart';
 import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import '../player/player_screen.dart';
@@ -976,16 +977,30 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
 
     final qualityList = selected == null
         ? const <Widget>[]
-        : providers[selected]!.asMap().entries.map((q) {
-            final idx = q.key;
-            return Padding(
+        : <Widget>[
+            Padding(
               padding: const EdgeInsets.symmetric(vertical: 5),
               child: _QualityItem(
-                quality: q.value.quality,
-                onTap: () => _navigateToPlayer(selected, idx),
+                quality: 'Melhor qualidade',
+                // Fase 3: atalho que abre direto na melhor — evita o 2º tap
+                // quando o usuário só quer assistir.
+                onTap: () => _navigateToPlayer(
+                  selected,
+                  bestQualityIndex(providers[selected]!),
+                ),
               ),
-            );
-          }).toList();
+            ),
+            ...providers[selected]!.asMap().entries.map((q) {
+              final idx = q.key;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: _QualityItem(
+                  quality: q.value.quality,
+                  onTap: () => _navigateToPlayer(selected, idx),
+                ),
+              );
+            }),
+          ];
 
     return Column(
       mainAxisSize: MainAxisSize.min,

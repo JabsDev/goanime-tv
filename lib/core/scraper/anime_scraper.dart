@@ -23,6 +23,45 @@ class AnimeScraper {
     final cached = AppCaches.search.get<List<Anime>>(cacheKey);
     if (cached != null) return cached;
 
+    final allAnimes = await _search(query);
+
+    // Fase 1: busca com variantes de query. Fan-out vazio não é sinal de que a
+    // série não existe — só de que nenhum provedor casou com aquele título.
+    // Pede os títulos alternativos do AniList (romaji/english/native) e tenta
+    // cada um; pára na primeira variante que retornar resultados.
+    if (allAnimes.isEmpty) {
+      final variants = await AniListService.getTitleVariants(query);
+      for (final variant in variants) {
+        final extra = await _search(variant);
+        for (final a in extra) {
+          if (!allAnimes.any((e) =>
+              TextUtils.cleanTitle(e.name).toLowerCase() ==
+              TextUtils.cleanTitle(a.name).toLowerCase())) {
+            allAnimes.add(a);
+          }
+        }
+        if (allAnimes.isNotEmpty) break;
+      }
+    }
+
+    // Cache-hit no-op na maioria dos casos — `_search` já enriqueceu o lote;
+    // cobre o cenário de merge de variantes vindas de outro cache de busca.
+    await AniListService.enrichBatch(allAnimes);
+
+    // Prioritize PT-BR sources (stable sort keeps per-source order).
+    allAnimes.sort((a, b) => a.source.priority.compareTo(b.source.priority));
+
+    AppCaches.search.set(cacheKey, allAnimes);
+    return allAnimes;
+  }
+
+  /// Per-query fan-out over every implemented provider. Results are cached per
+  /// cleaned query, so variant retries (Fase 1) stay one-call-per-provider.
+  static Future<List<Anime>> _search(String query) async {
+    final cacheKey = query.toLowerCase();
+    final cached = AppCaches.search.get<List<Anime>>(cacheKey);
+    if (cached != null) return cached;
+
     try {
       debugPrint('[AnimeScraper] Searching: $query');
 
@@ -79,10 +118,8 @@ class AnimeScraper {
 
       // Enrichment is cached + deduped per cleaned title inside AniListService,
       // so the same show appearing in multiple sources is only fetched once.
-      await Future.wait(allAnimes.map((a) => AniListService.enrich(a)));
-
-      // Prioritize PT-BR sources (stable sort keeps per-source order).
-      allAnimes.sort((a, b) => a.source.priority.compareTo(b.source.priority));
+      // Batch with a pool of 6 in-flight calls (rate-limit friendly — Fase 5).
+      await AniListService.enrichBatch(allAnimes);
 
       AppCaches.search.set(cacheKey, allAnimes);
       return allAnimes;

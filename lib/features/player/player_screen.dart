@@ -9,6 +9,7 @@ import '../../data/repositories/anime_repository.dart';
 import '../../core/storage/local_storage.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/utils/quality_picker.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -137,7 +138,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
         return;
       }
       if (startIndex >= sources.length) startIndex = 0;
-      setState(() => _sources = sources);
+      // Fase 3: auto-seleciona a melhor qualidade quando o usuário não fez
+      // escolha explícita (retry/auto-next). Ordena best-first para o
+      // auto-avanço de fontes mortas caminhar da melhor para a pior. O índice
+      // explícito vindo do diálogo é remapeado para a ordem nova.
+      final chosen = sources[startIndex];
+      final ordered = sortBestFirst(sources);
+      final mapped = ordered.indexWhere((s) => identical(s, chosen));
+      startIndex = mapped >= 0 ? mapped : 0;
+      setState(() => _sources = ordered);
       await _playSource(startIndex);
     } catch (e) {
       if (!mounted) return;
@@ -176,6 +185,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
     try {
       await _player.stop();
+      // Fase 3: streams adaptativas (HLS/DASH) — mpv parte de uma bitrate
+      // conservadora; forçamos a melhor disponível. No-op para mp4 direto.
+      final native = _player.platform;
+      if (native is NativePlayer) {
+        await native.setProperty('hls-bitrate', 'highest');
+      }
       final headers = <String, String>{};
       if (src.headers.isNotEmpty) headers.addAll(src.headers);
       await _player.open(
@@ -228,6 +243,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _loadTimeout?.cancel();
         _videoReady = true;
         _showControls();
+        _prefetchNextEpisode();
         debugPrint('[Player] Video is ready, duration: ${_durationSec}s');
       }
     });
@@ -301,6 +317,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_selectedQualityIndex >= _sources.length - 1) return;
     _autoAdvancing = true;
     _playSource(_selectedQualityIndex + 1);
+  }
+
+  /// Fase 4: pré-busca do próximo episódio. Dispara assim que o vídeo fica
+  /// pronto; `resolveProvidersForEpisode` cacheia o resultado, então o auto-
+  /// next (ou o próximo tap) abre sem a fila de resolução das 4 fontes.
+  /// Fire-and-forget — nunca bloqueia o playback atual.
+  void _prefetchNextEpisode() {
+    if (widget.episodeIndex >= widget.episodeList.length - 1) return;
+    final next = widget.episodeIndex + 2; // 1-based número do próximo ep
+    _repo
+        .resolveProvidersForEpisode(widget.anime, next)
+        .then((_) {}, onError: (e) =>
+            debugPrint('[Player] Prefetch next ep $next failed: $e'));
   }
 
   void _saveProgress() {

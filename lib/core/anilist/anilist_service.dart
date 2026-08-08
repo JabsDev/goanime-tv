@@ -1,7 +1,10 @@
+import 'dart:async' show TimeoutException;
 import 'dart:convert';
+import 'dart:io' show SocketException;
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/anilist_models.dart';
 import 'anilist_auth_service.dart';
 import '../../data/models/anime.dart';
@@ -10,8 +13,178 @@ import '../constants/app_constants.dart';
 import '../profile/profile_service.dart';
 import '../utils/text_utils.dart';
 
+/// Categorized AniList connectivity status. Drives the Home banner: instead of
+/// a single generic error, the UI tells the user whether we're offline, being
+/// rate-limited, IP-blocked by Cloudflare, session-expired or facing a 5xx.
+enum AniListStatus { ok, offline, ipBlocked, rateLimited, authError, serverError }
+
 /// Ponytail: Manages AniList API requests and authentication state.
 class AniListService {
+  /// Last categorized AniList failure — a side effect of the existing calls,
+  /// not a health monitor. Reset to [AniListStatus.ok] on any success.
+  static AniListStatus lastErrorStatus = AniListStatus.ok;
+
+  /// Test hook: swaps the raw `http.post` calls (which the service makes
+  /// directly, bypassing [apiClient]) with a mock client.
+  static http.Client? httpOverride;
+
+  // ponytail: pacing global único para graphql.anilist.co — uma única fonte de
+  // verdade para que um enrich em lote (busca) não derrube o updateProgress/
+  // login com rate-limit (bug idêntico ao descrito no relatório AnimeCaos).
+  // Global; per-account/per-type queues se throughput importar.
+  static DateTime _lastGraphqlAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static Duration anilistRequestGap = const Duration(milliseconds: 800);
+
+  /// Serializes AniList requests (min gap) — mirrors the AnimeFire `_throttle`.
+  static Future<void> _gateAnilist() async {
+    final now = DateTime.now();
+    final since = now.difference(_lastGraphqlAt);
+    if (since < anilistRequestGap) {
+      await Future.delayed(anilistRequestGap - since);
+    }
+    _lastGraphqlAt = DateTime.now();
+  }
+
+  static Future<http.Response> _anilistPost(
+    String query, {
+    String? token,
+    Map<String, dynamic>? variables,
+  }) async {
+    await _gateAnilist();
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+    final body = <String, dynamic>{
+      'query': query,
+      if (variables != null) 'variables': variables,
+    };
+    final client = httpOverride;
+    if (client != null) {
+      return client.post(
+        Uri.parse(AppConstants.anilistApi),
+        headers: headers,
+        body: jsonEncode(body),
+      );
+    }
+    return http
+        .post(
+          Uri.parse(AppConstants.anilistApi),
+          headers: headers,
+          body: jsonEncode(body),
+        )
+        .timeout(AppConstants.requestTimeout);
+  }
+
+  /// Maps a failure to a categorized [AniListStatus]. `body` carries the
+  /// Cloudflare challenge signature ("1020") for IP blocks.
+  static void _classifyFailure(Object e, int? statusCode, String body) {
+    if (statusCode == 429) {
+      lastErrorStatus = AniListStatus.rateLimited;
+      return;
+    }
+    if (statusCode == 403 || body.contains('1020')) {
+      lastErrorStatus = AniListStatus.ipBlocked;
+      return;
+    }
+    if (statusCode == 401 || statusCode == 400) {
+      lastErrorStatus = AniListStatus.authError;
+      return;
+    }
+    if (statusCode != null && statusCode >= 500) {
+      lastErrorStatus = AniListStatus.serverError;
+      return;
+    }
+    if (e is TimeoutException || e is SocketException || e is http.ClientException) {
+      lastErrorStatus = AniListStatus.offline;
+      return;
+    }
+    lastErrorStatus = AniListStatus.serverError;
+  }
+
+  /// Fetches distinct AniList title variants (romaji/english/native) for a
+  /// query, used as new search queries when the original fan-out is empty.
+  /// Cached in [AppCaches.enrichment]; no new anilistId is stored.
+  static Future<List<String>> getTitleVariants(String query) async {
+    final cleaned = TextUtils.cleanTitle(query);
+    if (cleaned.isEmpty) return [];
+    final cacheKey = 'variants:$cleaned';
+    final cached = AppCaches.enrichment.get<List<String>>(cacheKey);
+    if (cached != null) return cached;
+
+    // Reuse the enrichment detail already fetched for this title when present.
+    final detail = AppCaches.enrichment.get<AniListMediaDetail>(cleaned);
+    if (detail != null) {
+      final titles = _titlesOf(detail, cleaned);
+      AppCaches.enrichment.set(cacheKey, titles);
+      return titles;
+    }
+
+    try {
+      const q = '''
+        query (\$search: String) {
+          Media(search: \$search, type: ANIME) {
+            id
+            title { romaji english native }
+          }
+        }
+      ''';
+      final res = await _anilistPost(q, variables: {'search': cleaned});
+      if (res.statusCode != 200) {
+        _classifyFailure(TimeoutException(''), res.statusCode, res.body);
+        return [];
+      }
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+      final media = json['data']?['Media'] as Map<String, dynamic>?;
+      if (media == null) return [];
+      final title = (media['title'] as Map?)?.cast<String, dynamic>() ?? {};
+      final titles = <String>{};
+      for (final k in ['romaji', 'english', 'native']) {
+        final t = title[k]?.toString();
+        if (t != null && t.isNotEmpty) titles.add(t);
+      }
+      titles.remove(cleaned);
+      lastErrorStatus = AniListStatus.ok;
+      final result = titles.toList();
+      AppCaches.enrichment.set(cacheKey, result);
+      return result;
+    } catch (e) {
+      debugPrint('[AniList] getTitleVariants error: $e');
+      _classifyFailure(e, null, '');
+      return [];
+    }
+  }
+
+  static List<String> _titlesOf(AniListMediaDetail detail, String cleaned) {
+    final titles = <String>{
+      if (detail.englishName != null && detail.englishName!.isNotEmpty)
+        detail.englishName!,
+    };
+    titles.remove(cleaned);
+    return titles.toList();
+  }
+
+  /// Runs [enrich] over [animes] with a pool of 6 in-flight GraphQL calls
+  /// (micro-semáforo, sem dependência nova). A busca que enriquece ~50 cards
+  /// não dispara mais a rajada paralela que derrubava o rate-limit.
+  static Future<void> enrichBatch(List<Anime> animes) async {
+    const pool = 6;
+    var i = 0;
+    final workers = List.generate(pool, (_) async {
+      while (i < animes.length) {
+        final anime = animes[i];
+        i++;
+        try {
+          await enrich(anime);
+        } catch (e) {
+          debugPrint('[AniList] enrich error: $e');
+        }
+      }
+    });
+    await Future.wait(workers);
+  }
+
   static String _currentState = '';
 
   static String get currentState {
@@ -356,19 +529,10 @@ class AniListService {
     Map<String, dynamic>? variables,
   }) async {
     try {
-      final body = <String, dynamic>{'query': query};
-      if (variables != null) body['variables'] = variables;
-      final res = await http.post(
-        Uri.parse(AppConstants.anilistApi),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
-      ).timeout(AppConstants.requestTimeout);
+      final res = await _anilistPost(query, token: token, variables: variables);
       if (res.statusCode != 200) {
         debugPrint('[AniList] GraphQL error ${res.statusCode}: ${res.body}');
+        _classifyFailure(TimeoutException(''), res.statusCode, res.body);
         if (res.statusCode == 401 || res.statusCode == 400) {
           await logout();
         }
@@ -377,11 +541,14 @@ class AniListService {
       final json = jsonDecode(res.body) as Map?;
       if (json == null || json['data'] == null) {
         debugPrint('[AniList] Invalid response: ${res.body}');
+        lastErrorStatus = AniListStatus.serverError;
         return null;
       }
+      lastErrorStatus = AniListStatus.ok;
       return (json['data'] as Map).cast<String, dynamic>();
     } catch (e) {
       debugPrint('[AniList] GraphQL error: $e');
+      _classifyFailure(e, null, '');
       return null;
     }
   }
@@ -442,35 +609,102 @@ class AniListService {
     final cacheKey = 'anilist_catalog:${jsonEncode(variables)}';
     final cached = AppCaches.search.get<List<Anime>>(cacheKey);
     if (cached != null) return cached;
+
+    final diskKey = 'catalog_${jsonEncode(variables)}';
     try {
-      final res = await http
-          .post(
-            Uri.parse(AppConstants.anilistApi),
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: jsonEncode({'query': _catalogQuery, 'variables': variables}),
-          )
-          .timeout(AppConstants.requestTimeout);
-      if (res.statusCode != 200) return [];
+      final res = await _anilistPost(_catalogQuery, variables: variables);
+      if (res.statusCode != 200) {
+        debugPrint('[AniList] Catalog error ${res.statusCode}: ${res.body}');
+        _classifyFailure(TimeoutException(''), res.statusCode, res.body);
+        final disk = await _readCatalogDisk(diskKey);
+        if (disk != null) return disk;
+        return [];
+      }
       final json = jsonDecode(res.body) as Map<String, dynamic>;
       if (json.containsKey('errors')) {
         debugPrint('[AniList] Catalog error: ${json['errors']}');
+        lastErrorStatus = AniListStatus.serverError;
+        final disk = await _readCatalogDisk(diskKey);
+        if (disk != null) return disk;
         return [];
       }
+      lastErrorStatus = AniListStatus.ok;
       final media = json['data']?['Page']?['media'] as List? ?? [];
       final animes = media
           .map((m) => _mediaToAnime(m as Map<String, dynamic>))
           .where((a) => a.name.isNotEmpty)
           .toList();
       AppCaches.search.set<List<Anime>>(cacheKey, animes);
+      await _writeCatalogDisk(diskKey, animes);
       return animes;
     } catch (e) {
       debugPrint('[AniList] Catalog fetch error: $e');
+      _classifyFailure(e, null, '');
+      final disk = await _readCatalogDisk(diskKey);
+      if (disk != null) return disk;
       return [];
     }
   }
+
+  /// Catalog disk cache (sem expiração) — a Home abre instantânea na primeira
+  /// carga do dia e segue servindo na falha de rede. O refresh é o próprio
+  /// fluxo normal (sempre tenta a rede primeiro; disco é fallback).
+  static Future<List<Anime>?> _readCatalogDisk(String diskKey) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(diskKey);
+      if (raw == null) return null;
+      final list = jsonDecode(raw) as List;
+      return list
+          .map((e) => _animeFromJson(e as Map<String, dynamic>))
+          .where((a) => a.name.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('[AniList] Catalog disk read error: $e');
+      return null;
+    }
+  }
+
+  static Future<void> _writeCatalogDisk(String diskKey, List<Anime> animes) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        diskKey,
+        jsonEncode(animes.map(_animeToJson).toList()),
+      );
+    } catch (e) {
+      debugPrint('[AniList] Catalog disk write error: $e');
+    }
+  }
+
+  static Map<String, dynamic> _animeToJson(Anime a) => {
+        'name': a.name,
+        'englishName': a.englishName,
+        'anilistId': a.anilistId,
+        'fallbackImageUrl': a.fallbackImageUrl,
+        'bannerImage': a.bannerImage,
+        'description': a.description,
+        'episodes': a.episodes,
+        'status': a.status,
+        'averageScore': a.averageScore,
+        'genres': a.genres,
+      };
+
+  static Anime _animeFromJson(Map<String, dynamic> m) => Anime(
+        name: m['name']?.toString() ?? '',
+        englishName: m['englishName']?.toString(),
+        url: '',
+        source: AnimeSource.animeFire,
+        anilistId: m['anilistId'] as int?,
+        fallbackImageUrl: m['fallbackImageUrl']?.toString(),
+        bannerImage: m['bannerImage']?.toString(),
+        description: m['description']?.toString(),
+        episodes: m['episodes'] as int?,
+        status: m['status']?.toString(),
+        averageScore: (m['averageScore'] as num?)?.toDouble(),
+        genres: (m['genres'] as List?)?.map((e) => e.toString()).toList() ??
+            const [],
+      );
 
   /// Converts an AniList media node into an [Anime]. The [url] is intentionally
   /// empty and the source is a placeholder: episodes are resolved by title
@@ -564,27 +798,23 @@ class AniListService {
           }
         }
       ''';
-      final res = await http
-          .post(
-            Uri.parse(AppConstants.anilistApi),
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: jsonEncode({
-              'query': query,
-              'variables': {'search': cleaned},
-            }),
-          )
-          .timeout(AppConstants.requestTimeout);
-      if (res.statusCode != 200) return null;
+      final res = await _anilistPost(query, variables: {'search': cleaned});
+      if (res.statusCode != 200) {
+        _classifyFailure(TimeoutException(''), res.statusCode, res.body);
+        return null;
+      }
       final jsonResp = jsonDecode(res.body) as Map<String, dynamic>;
-      if (jsonResp.containsKey('errors')) return null;
+      if (jsonResp.containsKey('errors')) {
+        lastErrorStatus = AniListStatus.serverError;
+        return null;
+      }
+      lastErrorStatus = AniListStatus.ok;
       final media = AniListGraphQLResponse.fromJson(jsonResp).data.media;
       AppCaches.enrichment.set<AniListMediaDetail>(cleaned, media);
       return media;
     } catch (e) {
       debugPrint('[AniList] Enrich error: $e');
+      _classifyFailure(e, null, '');
       return null;
     }
   }
@@ -611,17 +841,18 @@ class AniListService {
     ''';
 
     try {
-      final res = await http.post(
-        Uri.parse(AppConstants.anilistApi),
-        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
-        body: jsonEncode({'query': query, 'variables': {'mediaId': mediaId}}),
+      final res = await _anilistPost(
+        query,
+        variables: {'mediaId': mediaId},
       );
 
       if (res.statusCode != 200) {
         debugPrint('[AniList] getEpisodesV2 error ${res.statusCode}');
+        _classifyFailure(TimeoutException(''), res.statusCode, res.body);
         return [];
       }
 
+      lastErrorStatus = AniListStatus.ok;
       final json = jsonDecode(res.body) as Map<String, dynamic>;
       final data = json['data'] as Map<String, dynamic>?;
       final media = data?['Media'] as Map<String, dynamic>?;
@@ -634,6 +865,7 @@ class AniListService {
           .toList();
     } catch (e, stackTrace) {
       debugPrint('[AniList] getEpisodesV2 error: $e\n$stackTrace');
+      _classifyFailure(e, null, '');
       return [];
     }
   }

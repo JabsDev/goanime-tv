@@ -398,6 +398,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return ListView(
       clipBehavior: Clip.none,
       children: [
+        // Fase 6: status AniList (offline/rate-limit/Cloudflare/auth) — só
+        // aparece quando o último erro foi diferente de ok.
+        if (AniListService.lastErrorStatus != AniListStatus.ok)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(32, 16, 32, 0),
+            child: AniListStatusBanner(),
+          ),
         if (!_anilistLoggedIn)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),

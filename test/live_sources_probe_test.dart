@@ -18,7 +18,9 @@ const _animes = [
 
 void main() {
   final live = const String.fromEnvironment('LIVE') == '1';
-  test('LIVE backend probe all sources x 4 anime', () async {
+  // Manual-only probe (rede real): sobe o timeout padrão de 30s.
+  test('LIVE backend probe all sources x 4 anime',
+      timeout: const Timeout(Duration(minutes: 5)), () async {
     if (!live) return; // no-op unless LIVE=1
 
     // Android TV Flutter tests run on a headless HTTP client; allow real IO.
