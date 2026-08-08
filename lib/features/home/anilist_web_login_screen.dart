@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/anilist/anilist_service.dart';
+import '../navigation/webview_navigation_layer.dart';
 
 /// Login AniList via WebView em processo (na própria TV).
 ///
@@ -41,6 +42,28 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
 
   static const _testEmail = String.fromEnvironment('ANILIST_TEST_EMAIL');
   static const _testPass = String.fromEnvironment('ANILIST_TEST_PASS');
+
+  /// Kill-switch (Plano Fase 4): se o JS injetado falhar/charge-by da página,
+  /// desliga a camada e volta ao fluxo sem injeção.
+  bool _navEnabled = WebViewNavigationLayer.enabled;
+
+  /// Foco Flutter que captura o D-pad e traduz para comandos JS (Camada 0:
+  /// receber o fluxo Flutter → JS; nunca confiar em dispatchKeyEvent nativo).
+  final FocusNode _navFocus = FocusNode();
+
+  Future<void> _forwardKey(KeyEvent event) async {
+    final cmd = WebViewNavigationLayer.commandForKey(event);
+    if (cmd == null || !_navEnabled) return;
+    if (WebViewNavigationLayer.debug) {
+      debugPrint('[AnilistWeb] key: ${event.logicalKey}');
+    }
+    try {
+      await _controller.runJavaScript('if(window.__gatvNav) window.$cmd');
+    } catch (e) {
+      debugPrint('[AnilistWeb] nav forward failed: $e');
+      setState(() => _navEnabled = false); // kill-switch
+    }
+  }
 
   /// Preenche os campos da página do AniList e submete por JS. O SPA do
   /// AniList monta o formulário alguns instantes após o load, então o script
@@ -111,6 +134,9 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel('FillLog',
           onMessageReceived: (m) => debugPrint('[AnilistWeb] fill: ${m.message}'))
+      ..addJavaScriptChannel(WebViewNavigationLayer.channel,
+          onMessageReceived: (m) =>
+              debugPrint('[AnilistWeb] nav: ${m.message}'))
       ..setNavigationDelegate(NavigationDelegate(
         onNavigationRequest: _onNavigationRequest,
         onPageStarted: _onPageStarted,
@@ -175,6 +201,16 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
     if (!isAuthorizeOrLoginPage || url.contains('/callback')) {
       return;
     }
+    // Fase TV: injeta a camada de navegação D-pad (só com a flag ligada e sem
+    // credenciais de teste — nunca misturar injeção no fluxo de preenchimento).
+    if (_navEnabled && _testEmail.isEmpty && _testPass.isEmpty) {
+      try {
+        await _controller.runJavaScript(WebViewNavigationLayer.source);
+      } catch (e) {
+        debugPrint('[AnilistWeb] nav layer failed: $e');
+        _navEnabled = false; // kill-switch
+      }
+    }
     if (_testEmail.isEmpty || _testPass.isEmpty) return;
     _filled = true;
     await _controller.runJavaScript(_fillJs);
@@ -224,10 +260,20 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
   }
 
   /// Redige query+fragment de uma URL para log (nunca expor o token).
+  /// Recorta em `?` OU `#` — a URL do pin traz o token no fragment, e um
+  /// acesso_token não pode vazar nem para o logcat.
   String _redact(String url) {
     final i = url.indexOf('?');
-    if (i < 0) return url;
-    return url.substring(0, i) + '…';
+    final j = url.indexOf('#');
+    final cut = i < 0 ? j : (j < 0 ? i : (i < j ? i : j));
+    if (cut < 0) return url;
+    return url.substring(0, cut) + '…';
+  }
+
+  @override
+  void dispose() {
+    _navFocus.dispose();
+    super.dispose();
   }
 
   @override
@@ -240,7 +286,20 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
       ),
       body: Stack(
         children: [
-          WebViewWidget(controller: _controller),
+          Focus(
+            focusNode: _navFocus,
+            autofocus: _navEnabled,
+            // Camada 0: captura D-pad no Flutter quando o WebView não tem foco
+            // nativo e o traduz para JS. O keydown da página é o fallback.
+            onKeyEvent: (node, event) {
+              if (!_navEnabled) return KeyEventResult.ignored;
+              final cmd = WebViewNavigationLayer.commandForKey(event);
+              if (cmd == null) return KeyEventResult.ignored;
+              _forwardKey(event);
+              return KeyEventResult.handled;
+            },
+            child: WebViewWidget(controller: _controller),
+          ),
           if (_error != null)
             Positioned(
               left: 16,

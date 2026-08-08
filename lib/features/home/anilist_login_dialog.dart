@@ -3,7 +3,6 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../shared/widgets/cached_image.dart';
-import 'anilist_qr_scanner_screen.dart';
 import 'anilist_web_login_screen.dart';
 
 class AnilistLoginDialog extends StatefulWidget {
@@ -14,28 +13,7 @@ class AnilistLoginDialog extends StatefulWidget {
 }
 
 class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
-  bool _showScanner = false;
-  bool _saving = false;
   String? _error;
-
-  Future<void> _handleScannerToken(String token) async {
-    if (_saving) return;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    final ok = await AniListService.saveToken(token);
-    if (!mounted) return;
-    if (ok) {
-      Navigator.pop(context, true);
-    } else {
-      setState(() {
-        _saving = false;
-        _error = 'Token inválido ou expirado. Tente novamente.';
-        _showScanner = false;
-      });
-    }
-  }
 
   void _openWebLogin() {
     Navigator.of(context)
@@ -61,40 +39,34 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CachedImage(
-                  url: 'https://anilist.co/img/icons/icon.svg',
-                  width: 32,
-                  height: 32,
-                  fallback: const Icon(
-                    Icons.bookmark,
-                    color: Colors.white,
-                    size: 32,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'Conectar AniList',
-                    style: TextStyle(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Row(
+                children: [
+                  CachedImage(
+                    url: 'https://anilist.co/img/icons/icon.svg',
+                    width: 32,
+                    height: 32,
+                    fallback: const Icon(
+                      Icons.bookmark,
                       color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+                      size: 32,
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (_showScanner) ...[
-              QRCodeScannerScreen(
-                qrUrl: AniListService.authUrl,
-                onTokenCaptured: _handleScannerToken,
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Conectar AniList',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ] else ...[
+              const SizedBox(height: 16),
               Semantics(
                 button: true,
                 child: Material(
@@ -105,8 +77,10 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
                     onTap: _openWebLogin,
                     borderRadius: BorderRadius.circular(12),
                     child: const Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 14,
+                      ),
                       child: Text(
                         'Entrar com AniList',
                         style: TextStyle(
@@ -148,7 +122,9 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
                         // B7: em TV landscape (960x540dp) o QR 250dp + textos +
                         // botões estouravam a altura do dialog e cortavam o
                         // "Cancelar". Em telas baixas encolhe o QR para caber.
-                        size: MediaQuery.of(context).size.height < 700 ? 170 : 250,
+                        size: MediaQuery.of(context).size.height < 700
+                            ? 170
+                            : 250,
                         gapless: false,
                         backgroundColor: Colors.white,
                         errorStateBuilder: (context, error) {
@@ -166,40 +142,16 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
                         padding: const EdgeInsets.all(16),
                         child: Text(
                           _error!,
-                          style: const TextStyle(color: Colors.red, fontSize: 14),
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                   ],
                 ),
               ),
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Semantics(
-                    button: true,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () => setState(() => _showScanner = true),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                          child: const Text(
-                            'Usar Câmera',
-                            style: TextStyle(
-                              color: ThemeConstants.primary,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                ],
-              ),
-              const SizedBox(height: 12),
               Semantics(
                 button: true,
                 child: Material(
@@ -208,7 +160,9 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
                     onTap: () => Navigator.pop(context, false),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
                       child: const Text(
                         'Cancelar',
                         style: TextStyle(
@@ -221,7 +175,6 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
                 ),
               ),
             ],
-          ],
           ),
         ),
       ),
