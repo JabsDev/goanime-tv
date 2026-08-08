@@ -417,12 +417,9 @@ class AniListService {
       return <String, dynamic>{
         'progress': e.progress,
         'status': e.status,
-        'nextAiringEpisode': e.nextEpisode == null && e.timeUntilAiring == null
-            ? null
-            : {
-                'episode': e.nextEpisode,
-                'timeUntilAiring': e.timeUntilAiring,
-              },
+        // ponytail: o parser AniListEntry.fromJson lê nextAiringEpisode de
+        // media (schema real). Espelhar aqui no mesmo lugar, senão o cache de
+        // listas perde o countdown na volta (round-trip quebra a exibição).
         'media': {
           'id': e.media.id,
           'title': {
@@ -438,6 +435,11 @@ class AniListService {
           'episodes': e.media.episodes,
           'format': e.media.format,
           'status': e.media.status,
+          if (e.nextEpisode != null || e.timeUntilAiring != null)
+            'nextAiringEpisode': {
+              'episode': e.nextEpisode,
+              'timeUntilAiring': e.timeUntilAiring,
+            },
         },
       };
     }).toList();
@@ -471,6 +473,33 @@ class AniListService {
     return res != null;
   }
 
+  // ponytail: nextAiringEpisode pertence a Media.media no schema AniList, não
+  // ao entry (MediaList). Mover para cá corrige o HTTP 400 que zerou as listas
+  // (regressão b81de7e). Const exposta como única fonte: o teste de regressão
+  // (T1) e o script de contrato validam exatamente esta string.
+  @visibleForTesting
+  static const listQuery = '''query (\$userId: Int) {
+  MediaListCollection(userId: \$userId, type: ANIME) {
+    lists {
+      name
+      entries {
+        progress
+        status
+        media {
+           id
+           title { romaji english native }
+           coverImage { large extraLarge }
+           bannerImage
+           episodes
+           format
+           status
+           nextAiringEpisode { episode timeUntilAiring }
+         }
+      }
+    }
+  }
+}''';
+
   static Future<List<AniListGroup>> _fetchAnimeList(String token) async {
     final user = await getUser();
     if (user == null) {
@@ -482,28 +511,7 @@ class AniListService {
     // PLANNING para a seção "Planejados" da home. Antes, o filtro excluído
     // também não justificava watching vir vazio (CURRENT/REPEATING não eram
     // filtrados), mas expõe maior superfície de teste.
-    const query = '''query (\$userId: Int) {
-      MediaListCollection(userId: \$userId, type: ANIME) {
-        lists {
-          name
-          entries {
-            progress
-            status
-            nextAiringEpisode { episode timeUntilAiring }
-            media {
-              id
-              title { romaji english native }
-              coverImage { large extraLarge }
-              bannerImage
-              episodes
-              format
-              status
-            }
-          }
-        }
-      }
-    }''';
-    final res = await _graphQL(query, token, variables: {'userId': user.id});
+    final res = await _graphQL(listQuery, token, variables: {'userId': user.id});
     if (res == null) {
       debugPrint('[AniList] _fetchAnimeList: _graphQL returned null');
       return [];
