@@ -7,7 +7,25 @@ import '../../core/sources/anime_source_adapter.dart';
 import '../../core/sources/source_registry.dart';
 import '../../core/storage/provider_match_store.dart';
 import '../models/anime.dart';
+import '../models/anilist_models.dart';
 import '../models/episode.dart';
+
+/// Result of fanning out an episode across every provider. Beyond the
+/// providers that delivered video, it tracks why each missing provider is
+/// missing: the page matched but the extractor found nothing
+/// ([matchedUnavailable] — e.g. Blogger SPA) versus the page not being found
+/// at all ([notFound]).
+class EpisodeResolution {
+  final Map<AnimeSource, List<VideoSource>> providers;
+  final Set<AnimeSource> matchedUnavailable;
+  final Set<AnimeSource> notFound;
+
+  const EpisodeResolution({
+    required this.providers,
+    required this.matchedUnavailable,
+    required this.notFound,
+  });
+}
 
 /// Port for the UI. Owns the two orchestration flows:
 ///
@@ -28,49 +46,60 @@ class AnimeRepository {
     return AnimeScraper.searchAnime(query);
   }
 
-  /// Canonical episode list for the grid. Built from AniList: per-episode
-  /// titles/thumbs come from `episodesV2` when logged in; otherwise a plain
-  /// 1..N range from `anime.episodes`. The result carries no provider data.
+  /// Canonical episode list for the grid. Always a contiguous 1..N range; N
+  /// comes from AniList [Anime.episodes], falling back to a provider count and
+  /// finally to the highest number seen in `episodesV2`. The AniList per-episode
+  /// metadata (`v2`) never defines the grid — it only decorates titles/thumbs
+  /// by real episode number, so a partial/descending payload can't produce an
+  /// out-of-order or short grid. Cache is keyed by session state (v2 vs v1) so a
+  /// logged-out grid isn't served to a logged-in user (and vice versa).
   Future<List<CatalogEpisode>> getCatalogEpisodes(Anime anime) async {
     final identity = ProviderMatchStore.identity(anime);
-    final cached = AppCaches.catalog.get<List<CatalogEpisode>>(identity);
+    final logged = await AniListService.isLoggedIn();
+    final cacheKey = '$identity|${logged ? 'v2' : 'v1'}|gridV2';
+    final cached = AppCaches.catalog.get<List<CatalogEpisode>>(cacheKey);
     if (cached != null) return cached;
 
-    var eps = <CatalogEpisode>[];
+    var v2 = <AniListEpisode>[];
     if (anime.anilistId != null) {
-      // Logged-in AniList exposes per-episode metadata; anonymous returns []
-      // and we fall back to the plain 1..N range below.
-      final v2 = await AniListService.getEpisodesV2(anime.anilistId!);
-      eps = v2
-          .where((e) => int.tryParse(e.number) != null)
-          .map((e) => CatalogEpisode(
-                number: int.parse(e.number),
-                title: e.title,
-                thumbnail: e.thumbnail,
-                description: e.description,
-              ))
-          .toList()
-        ..sort((a, b) => a.number.compareTo(b.number));
+      v2 = await AniListService.getEpisodesV2(anime.anilistId!);
     }
 
-    if (eps.isEmpty) {
-      final total = anime.episodes ?? 0;
-      if (total > 0) {
-        eps = [for (var i = 1; i <= total; i++) CatalogEpisode(number: i)];
+    // Canonical total: AniList count → provider count → digits present in v2.
+    var total = anime.episodes ?? 0;
+    if (total <= 0) total = await _episodeCountFromProviders(anime);
+    if (total <= 0) {
+      for (final e in v2) {
+        final n = int.tryParse(e.number);
+        if (n != null && n > total) total = n;
       }
     }
-
-    // Catalog didn't report a total (e.g. AniList RELEASING series have
-    // episodes:null). Stand in as many cards as the first reachable provider
-    // serves, so the grid isn't empty for the biggest shows.
-    if (eps.isEmpty) {
-      final fromProvider = await _episodeCountFromProviders(anime);
-      if (fromProvider > 0) {
-        eps = [for (var i = 1; i <= fromProvider; i++) CatalogEpisode(number: i)];
-      }
+    if (total <= 0) {
+      AppCaches.catalog.set(cacheKey, const <CatalogEpisode>[]);
+      return const [];
     }
 
-    AppCaches.catalog.set(identity, eps);
+    // Decoration map: real number → episode card data, out-of-range and
+    // duplicate numbers dropped.
+    final byNumber = <int, AniListEpisode>{};
+    for (final e in v2) {
+      final n = int.tryParse(e.number);
+      if (n == null || n < 1 || n > total) continue;
+      if (byNumber.containsKey(n)) continue;
+      byNumber[n] = e;
+    }
+
+    final eps = [
+      for (var i = 1; i <= total; i++)
+        CatalogEpisode(
+          number: i,
+          title: byNumber[i]?.title,
+          thumbnail: byNumber[i]?.thumbnail,
+          description: byNumber[i]?.description,
+        ),
+    ];
+
+    AppCaches.catalog.set(cacheKey, eps);
     return eps;
   }
 
@@ -105,22 +134,36 @@ class AnimeRepository {
   }
 
   /// Asks every implemented provider for episode [episodeNumber] of [anime] in
-  /// parallel. Returns a map provider → playable resolutions, ordered by
-  /// priority; providers without the episode (or that failed) are absent.
+  /// parallel. Returns a resolution with provider → playable resolutions
+  /// (ordered by priority) plus the classification of providers that didn't
+  /// deliver: page matched but extractor failed (`matchedUnavailable`) vs page
+  /// not found (`notFound`).
   ///
   /// The provider's page match is persisted via [ProviderMatchStore], so only
-  /// the first tap on a show pays a search-by-name per provider.
-  Future<Map<AnimeSource, List<VideoSource>>> resolveProvidersForEpisode(
+  /// the first tap on a show pays a search-by-name per provider. A matched page
+  /// that resolves no video keeps its persisted match (the page is valid; the
+  /// extractor is what failed) — only genuinely absent pages are dropped.
+  Future<EpisodeResolution> resolveProvidersForEpisode(
     Anime anime,
     int episodeNumber,
   ) async {
     final identity = ProviderMatchStore.identity(anime);
     final cacheKey = '$identity:$episodeNumber';
+    // Only the happy-path map is cached; unavailable/notFound states are cheap
+    // to re-derive and shouldn't stick for 30 minutes.
     final cached =
         AppCaches.resolutions.get<Map<AnimeSource, List<VideoSource>>>(cacheKey);
-    if (cached != null) return cached;
+    if (cached != null) {
+      return EpisodeResolution(
+        providers: cached,
+        matchedUnavailable: const {},
+        notFound: const {},
+      );
+    }
 
     final results = <AnimeSource, List<VideoSource>>{};
+    final matchedUnavailable = <AnimeSource>{};
+    final notFound = <AnimeSource>{};
     final adapters = _adapters.where((a) => a.implemented).toList();
 
     Future<void> resolve(AnimeSourceAdapter adapter) async {
@@ -136,20 +179,25 @@ class AnimeRepository {
           // 2. First hit: locate the page (search-by-name); don't persist yet —
           //    only a page that delivers the requested episode is worth saving.
           final found = await adapter.resolveAnime(anime);
-          if (found == null || found.url.isEmpty) return;
+          if (found == null || found.url.isEmpty) {
+            notFound.add(src);
+            return;
+          }
           match = found;
           freshlyFound = true;
         }
-        if (match.url.isEmpty) return;
+        if (match.url.isEmpty) {
+          notFound.add(src);
+          return;
+        }
 
         // 3. Resolve the stream(s) of episode N on that page.
         final sources = await adapter.resolveVideo(match, episodeNumber);
         if (sources.isEmpty) {
-          // The page neither matched nor holds episode N. Drop a persisted
-          // page so the next tap re-discovers instead of replaying a dead one.
-          if (persisted != null && persisted.isNotEmpty) {
-            await ProviderMatchStore.removeMatch(identity, src);
-          }
+          // Page exists but no video resolved (Blogger SPA, or the episode just
+          // isn't indexable here). The persisted match is kept so the next tap
+          // doesn't re-pay the search.
+          matchedUnavailable.add(src);
           return;
         }
         results[src] = sources;
@@ -172,7 +220,13 @@ class AnimeRepository {
       for (final k in keys) k: results[k]!,
     };
 
-    AppCaches.resolutions.set(cacheKey, ordered);
-    return ordered;
+    if (ordered.isNotEmpty) {
+      AppCaches.resolutions.set(cacheKey, ordered);
+    }
+    return EpisodeResolution(
+      providers: ordered,
+      matchedUnavailable: matchedUnavailable,
+      notFound: notFound,
+    );
   }
 }

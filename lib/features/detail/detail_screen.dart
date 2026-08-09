@@ -715,6 +715,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   bool _loading = true;
   String? _error;
   Map<AnimeSource, List<VideoSource>>? _providers;
+  Set<AnimeSource> _matchedUnavailable = {};
   AnimeSource? _selectedProvider;
 
   @override
@@ -727,15 +728,18 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     debugPrint(
         '[ProviderDialog] resolve ep ${widget.episode.number} anime=${widget.anime.name}');
     try {
-      final providers =
-          await _repo.resolveProvidersForEpisode(widget.anime, widget.episode.number);
+      final resolution = await _repo.resolveProvidersForEpisode(
+          widget.anime, widget.episode.number);
       if (!mounted) return;
       // Auto-select the highest-priority provider that has the episode.
-      final best = providers.isEmpty ? null : providers.keys.first;
-      debugPrint('[ProviderDialog] resolved ${providers.length} providers '
-          'best=$best');
+      final best = resolution.providers.isEmpty
+          ? null
+          : resolution.providers.keys.first;
+      debugPrint('[ProviderDialog] resolved ${resolution.providers.length} '
+          'providers best=$best matchedUnavailable=${resolution.matchedUnavailable}');
       setState(() {
-        _providers = providers;
+        _providers = resolution.providers;
+        _matchedUnavailable = resolution.matchedUnavailable;
         _selectedProvider = best;
         _loading = false;
       });
@@ -895,63 +899,78 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
                 ),
               )
             else if (_providers == null || _providers!.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Column(
-                  children: [
-                    const Icon(Icons.videocam_off,
-                        color: Colors.orange, size: 48),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Nenhuma fonte disponível',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Nenhuma fonte (AnimeFire, Goyabu, BetterAnime, '
-                      'AnimesROLL, DooPlay, AnimePlayer) resolveu um stream '
-                      'para o Ep ${widget.episode.number} deste anime agora. '
-                      'Possíveis motivos: Cloudflare, fonte fora do ar ou o '
-                      'episódio ainda não foi indexado.',
-                      style: const TextStyle(
-                        color: ThemeConstants.textSecondary,
-                        fontSize: 14,
-                        height: 1.4,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _DialogButton(
-                          label: 'Tentar novamente',
-                          primary: true,
-                          onTap: () {
-                            setState(() {
-                              _loading = true;
-                              _providers = null;
-                            });
-                            _resolveProviders();
-                          },
-                        ),
-                        const SizedBox(width: 12),
-                        _DialogButton(
-                          label: 'Voltar',
-                          onTap: () => Navigator.pop(context),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              )
+              _buildEmptyProviders()
             else
               _buildProviderSelector(),
           ],
         ),
+      ),
+    );
+  }
+
+  /// No provider delivered a stream. When at least one page matched but its
+  /// extractor failed (e.g. Blogger SPA), tell the truth: the episode exists,
+  /// the video just isn't supported — instead of a generic "not found".
+  Widget _buildEmptyProviders() {
+    final unavailable = _matchedUnavailable.isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        children: [
+          const Icon(Icons.videocam_off, color: Colors.orange, size: 48),
+          const SizedBox(height: 12),
+          Text(
+            unavailable
+                ? 'Episódio indisponível nesta fonte'
+                : 'Nenhuma fonte disponível',
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            unavailable
+                ? 'O Ep ${widget.episode.number} existe na fonte, mas o vídeo '
+                    'não é suportado por ela neste momento (player de vídeo '
+                    'sem stream recuperável). Pode ser que outra fonte sirva '
+                    'o episódio, ou que ele esteja disponível em breve.'
+                : 'Nenhuma fonte (AnimeFire, Goyabu, BetterAnime, '
+                    'AnimesROLL, DooPlay, AnimePlayer) resolveu um stream '
+                    'para o Ep ${widget.episode.number} deste anime agora. '
+                    'Possíveis motivos: Cloudflare, fonte fora do ar ou o '
+                    'episódio ainda não foi indexado.',
+            style: const TextStyle(
+              color: ThemeConstants.textSecondary,
+              fontSize: 14,
+              height: 1.4,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _DialogButton(
+                label: 'Tentar novamente',
+                primary: true,
+                onTap: () {
+                  setState(() {
+                    _loading = true;
+                    _providers = null;
+                    _matchedUnavailable = {};
+                  });
+                  _resolveProviders();
+                },
+              ),
+              const SizedBox(width: 12),
+              _DialogButton(
+                label: 'Voltar',
+                onTap: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

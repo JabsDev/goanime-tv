@@ -9,6 +9,7 @@ import '../../data/models/episode.dart';
 import '../constants/app_constants.dart';
 import '../network/api_client.dart';
 import '../scraper/scraper_result.dart';
+import '../utils/episode_number.dart';
 import '../utils/text_utils.dart';
 import 'anime_source_adapter.dart';
 
@@ -194,9 +195,11 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
       }
 
       final episodes = episodeUrls.asMap().entries.map((entry) {
-        final num = entry.key + 1;
+        // Número real da URL (/animes/x/130) em vez de posição no array —
+        // defesa contra páginas fora de ordem (bug 1 na camada de provider).
+        final num = episodeNumberFromUrl(entry.value) ?? (entry.key + 1);
         return Episode(
-          number: num.toString(),
+          number: '$num',
           url: entry.value,
           title: 'Episódio $num',
           owner: anime,
@@ -242,14 +245,7 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
     Anime? anime,
   }) async {
     try {
-      final sources = await _extractFromAnimeFire(episode.url);
-      if (sources.isEmpty) {
-        return ScraperResult.failure(EmptyResultError(
-          message: 'No video sources found',
-          source: source,
-        ));
-      }
-      return ScraperResult.success(sources);
+      return _extractFromAnimeFire(episode.url);
     } catch (e) {
       debugPrint('[AnimeFire] Video sources error: $e');
       return ScraperResult.failure(UnknownError(
@@ -262,7 +258,13 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
 
   /// Extracts all available video qualities from an AnimeFire episode page.
   /// Returns one [VideoSource] per quality found (highest priority first).
-  Future<List<VideoSource>> _extractFromAnimeFire(String episodeUrl) async {
+  ///
+  /// Empty result is typed: pages that only embed the Blogger SPA player
+  /// (`/_/BloggerVideoPlayerUi` — anti-bot, no recoverable stream) fail with
+  /// [BloggerUnsupportedError] so the caller can say "episódio existe mas o
+  /// vídeo não abre" instead of a generic "não encontrado".
+  Future<ScraperResult<List<VideoSource>>> _extractFromAnimeFire(
+      String episodeUrl) async {
     try {
       debugPrint('[AnimeFire] Extracting: $episodeUrl');
       final res = await _httpGet(
@@ -272,7 +274,12 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
           'Referer': '${AppConstants.baseSiteUrl}/',
         },
       );
-      if (res.statusCode != 200) return [];
+      if (res.statusCode != 200) {
+        return ScraperResult.failure(EmptyResultError(
+          message: 'Non-200: ${res.statusCode}',
+          source: source,
+        ));
+      }
 
       final doc = html_parser.parse(res.body);
       final sources = <VideoSource>[];
@@ -295,7 +302,7 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
       final apiMatch = _videoApiRe.firstMatch(res.body);
       if (apiMatch != null) {
         final apiSources = await _resolveVideoApi(apiMatch.group(0)!);
-        if (apiSources.isNotEmpty) return apiSources;
+        if (apiSources.isNotEmpty) return ScraperResult.success(apiSources);
       }
 
       // Method 1: data-video-src attributes with data-quality labels.
@@ -305,14 +312,14 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
         final label = el.attributes['data-quality'] ?? '';
         add(src, label.isNotEmpty ? label : 'Auto');
       });
-      if (sources.isNotEmpty) return sources;
+      if (sources.isNotEmpty) return ScraperResult.success(sources);
 
       // Method 2: <video><source src>.
       final videoSrc = doc.querySelector('video source')?.attributes['src'] ??
           doc.querySelector('video')?.attributes['src'];
       if (videoSrc != null && videoSrc.isNotEmpty) {
         add(videoSrc, 'Auto');
-        return sources;
+        return ScraperResult.success(sources);
       }
 
       // Method 3: Blogger iframe.
@@ -326,7 +333,7 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
       }
       if (iframeSrc != null) {
         final blogger = await _extractFromBlogger(iframeSrc);
-        if (blogger.isNotEmpty) return blogger;
+        if (blogger.isNotEmpty) return ScraperResult.success(blogger);
       }
 
       // Method 4: generic data attributes.
@@ -340,7 +347,7 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
         final val = elem?.attributes[entry.$2];
         if (val != null && val.isNotEmpty) {
           add(val, 'Auto');
-          return sources;
+          return ScraperResult.success(sources);
         }
       }
 
@@ -349,21 +356,42 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
       final bloggerMatch = _bloggerRe.firstMatch(html);
       if (bloggerMatch != null) {
         final blogger = await _extractFromBlogger(bloggerMatch.group(0)!);
-        if (blogger.isNotEmpty) return blogger;
+        if (blogger.isNotEmpty) return ScraperResult.success(blogger);
       }
       final mp4 = _mp4Re.firstMatch(html);
       if (mp4 != null) {
         add(mp4.group(0)!, 'Auto');
-        return sources;
+        return ScraperResult.success(sources);
       }
       final m3u8 = _m3u8Re.firstMatch(html);
       if (m3u8 != null) {
         add(m3u8.group(0)!, 'Auto');
       }
-      return sources;
+      if (sources.isNotEmpty) return ScraperResult.success(sources);
+
+      // Nada extraído. Distingue o player SPA do Blogger (episódio existe,
+      // vídeo não suportado) de um episódio que realmente não está na fonte.
+      final sawBlogger = html.contains('/_/BloggerVideoPlayer') ||
+          html.contains('BloggerVideoPlayerUi') ||
+          html.contains('blogger.com/video.g') ||
+          html.contains('blogspot.com/video.g');
+      if (sawBlogger) {
+        return ScraperResult.failure(BloggerUnsupportedError(
+          message: 'Blogger SPA player (vídeo não suportado)',
+          source: source,
+        ));
+      }
+      return ScraperResult.failure(EmptyResultError(
+        message: 'No video sources found',
+        source: source,
+      ));
     } catch (e) {
       debugPrint('[AnimeFire] Extract error: $e');
-      return [];
+      return ScraperResult.failure(UnknownError(
+        message: 'Extraction error: $e',
+        source: source,
+        originalError: e,
+      ));
     }
   }
 

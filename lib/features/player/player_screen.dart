@@ -127,7 +127,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           widget.anime,
           widget.episodeIndex + 1,
         );
-        sources = providers[widget.provider] ?? const <VideoSource>[];
+        sources = providers.providers[widget.provider] ?? const <VideoSource>[];
       }
       if (!mounted) return;
       if (sources.isEmpty) {

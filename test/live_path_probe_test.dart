@@ -39,10 +39,10 @@ void main() {
         final picks = [1, 5, 10, 15, 20];
         for (final n in picks) {
           // Real flow: repo resolves the episode across every provider.
-          final providers = await repo.resolveProvidersForEpisode(anime, n);
+          final res = await repo.resolveProvidersForEpisode(anime, n);
           report.writeln(
-            '  EP$n providers=${providers.length} -> '
-            '${providers.entries.map((e) => '${e.key.name}(${e.value.length})').join(", ")}',
+            '  EP$n providers=${res.providers.length} matchedUnavailable=${res.matchedUnavailable} notFound=${res.notFound} -> '
+            '${res.providers.entries.map((e) => '${e.key.name}(${e.value.length})').join(", ")}',
           );
         }
       }

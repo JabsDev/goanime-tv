@@ -11,6 +11,7 @@ import '../../data/models/anime.dart';
 import '../cache/app_caches.dart';
 import '../constants/app_constants.dart';
 import '../profile/profile_service.dart';
+import '../utils/episode_number.dart';
 import '../utils/text_utils.dart';
 
 /// Categorized AniList connectivity status. Drives the Home banner: instead of
@@ -959,18 +960,23 @@ class AniListService {
 
       if (streaming == null) return [];
 
-      // ponytail: streamingEpisodes não tem número explícito — numera pela
-      // posição (1..N) para continuar alimentando um grid numerado com título
-      // e thumbnail por episódio.
-      return List.generate(streaming.length, (i) {
-        final ep = streaming[i] as Map<String, dynamic>;
-        return AniListEpisode(
-          number: '${i + 1}',
-          title: ep['title']?.toString(),
+      // ponytail: streamingEpisodes tem o número real no título ("Episode 130 -
+      // ...") e vem parcial/fora de ordem (One Piece: 69 itens 130→62). Nunca
+      // numerar por posição — descarta item sem número no título.
+      final episodes = <AniListEpisode>[];
+      for (final item in streaming) {
+        final ep = item as Map<String, dynamic>;
+        final title = ep['title']?.toString() ?? '';
+        final n = episodeNumberFromTitle(title);
+        if (n == null) continue;
+        episodes.add(AniListEpisode(
+          number: '$n',
+          title: title,
           description: ep['site']?.toString(),
           thumbnail: ep['thumbnail']?.toString(),
-        );
-      });
+        ));
+      }
+      return episodes;
     } catch (e, stackTrace) {
       debugPrint('[AniList] getEpisodesV2 error: $e\n$stackTrace');
       _classifyFailure(e, null, '');

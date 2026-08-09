@@ -138,7 +138,7 @@ void main() {
     final repo = AnimeRepository(adapters: [_FakeAdapter(true)]);
     final anime = Anime(name: 'One Piece', url: '', source: AnimeSource.animeFire);
     final results = await repo.resolveProvidersForEpisode(anime, 1);
-    expect(results[AnimeSource.animeFire], isNotEmpty);
+    expect(results.providers[AnimeSource.animeFire], isNotEmpty);
     final url = await ProviderMatchStore.urlFor(
       ProviderMatchStore.identity(anime),
       AnimeSource.animeFire,
@@ -146,7 +146,7 @@ void main() {
     expect(url, 'https://animefire.io/animes/one-piece-todos-os-episodios');
   });
 
-  test('persistência: página com 0 fontes não é salva e match persistido é removido',
+  test('persistência: 0 fontes → matchedUnavailable sem remover o match',
       () async {
     final anime = Anime(name: 'One Piece Stale', url: '', source: AnimeSource.animeFire);
     final identity = ProviderMatchStore.identity(anime);
@@ -159,9 +159,12 @@ void main() {
 
     final repo = AnimeRepository(adapters: [_FakeAdapter(false)]);
     final results = await repo.resolveProvidersForEpisode(anime, 1);
-    expect(results, isEmpty);
-    // The stale match was removed so the next tap re-discovers.
-    expect(await ProviderMatchStore.urlFor(identity, AnimeSource.animeFire), isNull);
+    expect(results.providers, isEmpty);
+    expect(results.matchedUnavailable, contains(AnimeSource.animeFire));
+    // P4: página casou, extração falhou → o match persistido é MANTIDO para o
+    // próximo toque não re-pagar a busca.
+    expect(await ProviderMatchStore.urlFor(identity, AnimeSource.animeFire),
+        'https://animefire.io/animes/koisuru-one-piece-todos-os-episodios');
   });
 
   test('2nd resolve reuses persisted match (no re-search) only when it delivers',
@@ -169,9 +172,9 @@ void main() {
     final repo = AnimeRepository(adapters: [_FakeAdapter(true)]);
     final anime = Anime(name: 'One Piece', url: '', source: AnimeSource.animeFire);
     final first = await repo.resolveProvidersForEpisode(anime, 1);
-    expect(first[AnimeSource.animeFire], isNotEmpty);
+    expect(first.providers[AnimeSource.animeFire], isNotEmpty);
     final second = await repo.resolveProvidersForEpisode(anime, 1);
-    expect(second[AnimeSource.animeFire], isNotEmpty);
+    expect(second.providers[AnimeSource.animeFire], isNotEmpty);
   });
 
   test('grid RELEASING: catalog without episode total falls back to provider count',

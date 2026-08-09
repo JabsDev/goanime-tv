@@ -59,8 +59,18 @@ final class CloudflareError extends ScraperError {
   });
 }
 
-final class EmptyResultError extends ScraperError {
+class EmptyResultError extends ScraperError {
   const EmptyResultError({
+    required super.message,
+    required super.source,
+  });
+}
+
+/// The episode page matched, but the video backend is a Blogger SPA player
+/// (anti-bot, no recoverable stream). Distinct from plain "not found": the
+/// episode exists on the source, it just can't deliver a video.
+class BloggerUnsupportedError extends EmptyResultError {
+  const BloggerUnsupportedError({
     required super.message,
     required super.source,
   });

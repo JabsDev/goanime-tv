@@ -1,0 +1,14 @@
+{
+  "data": {
+    "Media": {
+      "id": 999999,
+      "episodes": null,
+      "status": "FINISHED",
+      "streamingEpisodes": [
+        { "title": "Episode 5 - Segunda parte", "thumbnail": "https://img/t5.jpg" },
+        { "title": "Episode 5 - duplicata", "thumbnail": "https://img/t5d.jpg" },
+        { "title": "Episode 3 - Começo", "thumbnail": "https://img/t3.jpg" }
+      ]
+    }
+  }
+}
