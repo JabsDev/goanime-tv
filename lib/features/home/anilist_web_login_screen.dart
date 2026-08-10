@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/anilist/anilist_service.dart';
+import '../navigation/tv_keyboard.dart';
 import '../navigation/webview_navigation_layer.dart';
 
 /// Login AniList via WebView em processo (na própria TV).
@@ -47,28 +49,61 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
   /// desliga a camada e volta ao fluxo sem injeção.
   bool _navEnabled = WebViewNavigationLayer.enabled;
 
-  /// Foco Flutter que captura o D-pad e traduz para comandos JS (Camada 0:
-  /// receber o fluxo Flutter → JS; nunca confiar em dispatchKeyEvent nativo).
-  final FocusNode _navFocus = FocusNode();
+  /// Teclado overlay ativo (substitui o IME do SO, que não abre em inputs
+  /// focados por JS na Fire TV). Aberto quando o D-pad ativa um input de texto.
+  bool _kbVisible = false;
+  final GlobalKey<TvKeyboardState> _kbKey = GlobalKey<TvKeyboardState>();
 
-  Future<void> _forwardKey(KeyEvent event) async {
-    final cmd = WebViewNavigationLayer.commandForKey(event);
-    if (cmd == null || !_navEnabled) return;
+  /// Preview do campo focado (vem do JS já mascarado para senhas).
+  String _kbText = '';
+
+  void _onNavMessage(String message) {
     if (WebViewNavigationLayer.debug) {
-      debugPrint('[AnilistWeb] key: ${event.logicalKey}');
+      debugPrint('[AnilistWeb] nav: $message');
+    }
+    // Atualiza o preview do teclado com o conteúdo do campo.
+    if (message.contains('"ev":"char"')) {
+      final m = message.indexOf('"text"');
+      if (m >= 0) {
+        // pula a aspa de abertura do valor
+        final quoted = message.substring(m + 7);
+        final end = quoted.indexOf('"', 1);
+        if (end > 1) {
+          final text = quoted.substring(1, end);
+          if (text != _kbText) setState(() => _kbText = text);
+        }
+      }
+      return;
+    }
+    // "activate-input" = OK num campo de texto → abre o teclado na TV.
+    if (message.contains('"ev":"activate-input"') ||
+        message.contains('"ev":"focus"') && _kbVisible) {
+      if (!_kbVisible) setState(() { _kbVisible = true; _kbText = ''; });
+    }
+  }
+
+  void _closeKeyboard() {
+    if (_kbVisible) setState(() => _kbVisible = false);
+  }
+
+  Future<void> _forwardKey(String cmd) async {
+    if (!_navEnabled) return;
+    if (WebViewNavigationLayer.debug) {
+      debugPrint('[AnilistWeb] key: $cmd');
     }
     try {
-      await _controller.runJavaScript('if(window.__gatvNav) window.$cmd');
+      await _controller.runJavaScript('window.__gatvNav && $cmd');
     } catch (e) {
       debugPrint('[AnilistWeb] nav forward failed: $e');
       setState(() => _navEnabled = false); // kill-switch
     }
   }
 
-  /// Preenche os campos da página do AniList e submete por JS. O SPA do
+/// Preenche os campos da página do AniList e submete por JS. O SPA do
   /// AniList monta o formulário alguns instantes após o load, então o script
-  /// faz polling: Fase A espera os inputs aparecerem (setter nativo + eventos,
-  /// já que `.value` direto não atualiza o estado do front), Fase B espera o
+  /// faz polling (orçamento generoso — o Fire Stick renderiza o SPA devagar):
+  /// Fase A espera os inputs aparecerem (setter nativo + eventos, já que
+  /// `.value` direto não atualiza o estado do front), Fase B espera o
   /// Turnstile do Cloudflare concluir e então clica no botão "Login". Resultado
   /// reportado de forma assíncrona via canal [FillLog].
   String get _fillJs => '''
@@ -89,14 +124,19 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
     }
     return { email: email, pass: pass };
   }
+  // ponytail: 400 tentativas (2 min) - o SPA do AniList na TV lenta monta o
+  // form só depois que o WebView já terminou; 12 tentativas (3,6s) bastava no
+  // PC mas quebrava na Stick (campos ficavam vazios, só o Turnstile ok).
   var tries = 0;
   var iv1 = setInterval(function() {
     tries++;
     var f = findInputs();
     if (f.email && f.pass) {
       clearInterval(iv1);
-      setVal(f.email, '$_testEmail');
-      setVal(f.pass, '$_testPass');
+      // Idempotente: nunca sobrescreve valores já presentes (re-injeção em
+      // page finishes repetidos roda de novo).
+      if ((f.email.value || '') === '') setVal(f.email, '$_testEmail');
+      if ((f.pass.value || '') === '') setVal(f.pass, '$_testPass');
       var at = 0;
       var iv2 = setInterval(function() {
         at++;
@@ -115,7 +155,7 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
           FillLog.postMessage(JSON.stringify(info));
         }
       }, 500);
-    } else if (tries >= 12) {
+    } else if (tries >= 400) {
       clearInterval(iv1);
       FillLog.postMessage(JSON.stringify({ email: !!f.email, pass: !!f.pass, timeout: true }));
     }
@@ -135,8 +175,7 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
       ..addJavaScriptChannel('FillLog',
           onMessageReceived: (m) => debugPrint('[AnilistWeb] fill: ${m.message}'))
       ..addJavaScriptChannel(WebViewNavigationLayer.channel,
-          onMessageReceived: (m) =>
-              debugPrint('[AnilistWeb] nav: ${m.message}'))
+          onMessageReceived: (m) => _onNavMessage(m.message))
       ..setNavigationDelegate(NavigationDelegate(
         onNavigationRequest: _onNavigationRequest,
         onPageStarted: _onPageStarted,
@@ -270,9 +309,12 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
     return url.substring(0, cut) + '…';
   }
 
+  /// Escapa um caractere para string JS (aspas/backslash).
+  String _jsStr(String s) =>
+      "'" + s.replaceAll('\\', '\\\\').replaceAll("'", "\\'") + "'";
+
   @override
   void dispose() {
-    _navFocus.dispose();
     super.dispose();
   }
 
@@ -286,16 +328,34 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
       ),
       body: Stack(
         children: [
+          // Captura D-pad no Flutter e traduz para o JS da camada. Só
+          // setas/OK relevantes são: consumidas; o resto passa direto.
           Focus(
-            focusNode: _navFocus,
             autofocus: _navEnabled,
-            // Camada 0: captura D-pad no Flutter quando o WebView não tem foco
-            // nativo e o traduz para JS. O keydown da página é o fallback.
             onKeyEvent: (node, event) {
+              if (WebViewNavigationLayer.debug) {
+                debugPrint('[AnilistWeb] keyevent: ${event.runtimeType} '
+                    'logical=${event.logicalKey} kbVisible=$_kbVisible '
+                    'focus=${FocusManager.instance.primaryFocus?.debugLabel ?? 'none'}');
+              }
+              // Teclado aberto: setas/OK são do Flutter (navegar/digitar);
+              // BACK fecha o teclado em vez de sair da tela.
+              if (_kbVisible) {
+                if (event is KeyDownEvent &&
+                    (event.logicalKey == LogicalKeyboardKey.goBack ||
+                        event.logicalKey == LogicalKeyboardKey.escape)) {
+                  _closeKeyboard();
+                  return KeyEventResult.handled;
+                }
+                // Fire TV pode soltar o foco das teclas (focus=none); re-ancôra
+                // no scope do teclado a cada evento para não ficar mudo.
+                _kbKey.currentState?.refocus();
+                return KeyEventResult.ignored;
+              }
               if (!_navEnabled) return KeyEventResult.ignored;
               final cmd = WebViewNavigationLayer.commandForKey(event);
               if (cmd == null) return KeyEventResult.ignored;
-              _forwardKey(event);
+              _forwardKey(cmd);
               return KeyEventResult.handled;
             },
             child: WebViewWidget(controller: _controller),
@@ -333,6 +393,17 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
                     ],
                   ),
                 ),
+              ),
+            ),
+          if (_kbVisible)
+            Positioned.fill(
+              child: TvKeyboard(
+                key: _kbKey,
+                display: _kbText,
+                onChar: (ch) =>
+                    _forwardKey('__gatvNav.char(${_jsStr(ch)})'),
+                onBackspace: () => _forwardKey('__gatvNav.backspace()'),
+                onClose: _closeKeyboard,
               ),
             ),
         ],
