@@ -18,6 +18,7 @@ LIST_QUERY='query ($userId: Int) {
       entries {
         progress
         status
+        updatedAt
         media {
            id
            title { romaji english native }
