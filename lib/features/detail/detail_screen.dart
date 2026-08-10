@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/navigation/route_observer.dart';
 import '../../data/models/anime.dart';
@@ -26,6 +27,9 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
   List<CatalogEpisode> _episodes = [];
   bool _isLoading = true;
   bool _isFavorite = false;
+  // B8: UP na primeira linha do grid de episódios pousa no favorito, não na
+  // seta voltar (topo-esquerda) — o scroll "passava pelo" coração.
+  final FocusNode _favoriteFocus = FocusNode();
 
   @override
   void initState() {
@@ -55,6 +59,7 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
   @override
   void dispose() {
     routeObserver.unsubscribe(this);
+    _favoriteFocus.dispose();
     super.dispose();
   }
 
@@ -318,6 +323,7 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
             child: _FavoriteButton(
               isFavorite: _isFavorite,
               onTap: _toggleFavorite,
+              focusNode: _favoriteFocus,
             ),
           ),
         ),
@@ -486,6 +492,10 @@ if (_episodes.isEmpty)
           episode: _episodes[i],
           anime: widget.anime,
           isWatched: i <= maxWatchedIdx,
+          isFirstRow: i < crossAxisCount,
+          onUpFromFirstRow: i < crossAxisCount
+              ? () => _favoriteFocus.requestFocus()
+              : null,
           onPlay: () => _playEpisode(i),
         ),
       ),
@@ -498,6 +508,8 @@ class _EpisodeCard extends StatefulWidget {
   final CatalogEpisode episode;
   final Anime anime;
   final bool isWatched;
+  final bool isFirstRow;
+  final VoidCallback? onUpFromFirstRow;
   final VoidCallback onPlay;
 
   const _EpisodeCard({
@@ -507,6 +519,8 @@ class _EpisodeCard extends StatefulWidget {
     required this.anime,
     required this.isWatched,
     required this.onPlay,
+    this.isFirstRow = false,
+    this.onUpFromFirstRow,
   });
 
   @override
@@ -617,6 +631,17 @@ class _EpisodeCardState extends State<_EpisodeCard> {
         setState(() => _isFocused = focused);
       },
       onKeyEvent: (node, event) {
+        // B8: sair do topo do grid com UP pousa no coração (ação mais próxima
+        // da expectativa do usuário ao rolar pra cima), não na seta voltar.
+        if (widget.isFirstRow &&
+            widget.onUpFromFirstRow != null &&
+            event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.arrowUp) {
+          debugPrint(
+              '[Detail] B8 intercept UP from first-row card idx=${widget.index}');
+          widget.onUpFromFirstRow!();
+          return KeyEventResult.handled;
+        }
         // ponytail: FireTV remote envia Select logo seguido de ArrowRight (~7ms).
         // InkWell.onTap perde a race c/ a trava de foco do ArrowRight. Helper
         // FocusKeyHandler intercepta Select/Enter/Space e chama onPlay direto.
@@ -781,12 +806,18 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
       insetPadding: const EdgeInsets.all(32),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 520),
+        constraints: BoxConstraints(
+          maxWidth: 520,
+          // B9: muitos providers × qualidades estouravam a altura do dialog
+          // na TV (960x540 log.) e cortavam os itens na borda inferior.
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
         padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -903,6 +934,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
             else
               _buildProviderSelector(),
           ],
+          ),
         ),
       ),
     );
@@ -1328,8 +1360,13 @@ class _DialogButtonState extends State<_DialogButton> {
 class _FavoriteButton extends StatefulWidget {
   final bool isFavorite;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
 
-  const _FavoriteButton({required this.isFavorite, required this.onTap});
+  const _FavoriteButton({
+    required this.isFavorite,
+    required this.onTap,
+    this.focusNode,
+  });
 
   @override
   State<_FavoriteButton> createState() => _FavoriteButtonState();
@@ -1341,7 +1378,11 @@ class _FavoriteButtonState extends State<_FavoriteButton> {
   @override
   Widget build(BuildContext context) {
     return Focus(
-      onFocusChange: (f) => setState(() => _isFocused = f),
+      focusNode: widget.focusNode,
+      onFocusChange: (f) {
+        debugPrint('[Detail] FAVORITE focused=$f');
+        setState(() => _isFocused = f);
+      },
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
       child: Semantics(
         button: true,
@@ -1401,7 +1442,10 @@ class _BackButtonState extends State<_BackButton> {
   @override
   Widget build(BuildContext context) {
     return Focus(
-      onFocusChange: (f) => setState(() => _isFocused = f),
+      onFocusChange: (f) {
+        debugPrint('[Detail] BACK focused=$f');
+        setState(() => _isFocused = f);
+      },
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
       child: Semantics(
         button: true,
