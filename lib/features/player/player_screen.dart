@@ -930,7 +930,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
         backgroundColor: ThemeConstants.surface,
         title: const Text('Selecionar Qualidade',
             style: TextStyle(color: Colors.white)),
-        content: Column(
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            // B9: muitas resoluções estouravam o AlertDialog na TV (540dp).
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.7,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
           mainAxisSize: MainAxisSize.min,
           children: _sources.asMap().entries.map((e) {
             final idx = e.key;
@@ -973,8 +979,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
               ),
-            );
-          }).toList(),
+);
+            }).toList(),
+            ),
+          ),
         ),
       ),
     );
