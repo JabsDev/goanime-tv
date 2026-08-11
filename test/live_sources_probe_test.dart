@@ -12,8 +12,9 @@ import 'package:goanime_tv/core/sources/source_registry.dart';
 const _animes = [
   'One Piece',
   'Black Clover',
-  'Black Butler',
-  'Haibane Renmei',
+  'Solo Leveling',
+  'Naruto',
+  'Kimetsu no Yaiba',
 ];
 
 void main() {

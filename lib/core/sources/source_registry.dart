@@ -7,18 +7,24 @@ import '../sources/all_anime_adapter.dart';
 import '../sources/goyabu_adapter.dart';
 import '../sources/dooplay_adapter.dart';
 import '../sources/animeplayer_adapter.dart';
+import '../sources/animesonline_adapter.dart';
 
 /// Holds the available source adapters and provides lookups by [AnimeSource].
 class SourceRegistry {
   SourceRegistry._();
 
-  // Ordered by PT-BR priority (AnimeFire, Goyabu, DooPlay), then AllAnime.
+  // Ordered by PT-BR priority (AnimeFire, Goyabu, DooPlay), then AnimesOnline
+  // cluster (direct CDN mp4), then AnimePlayer, then AllAnime.
   // AniList is metadata-only and is intentionally absent: it never participates
   // in search/video fan-out or fallback.
   static final List<AnimeSourceAdapter> _adapters = [
     AnimeFireAdapter(),
     GoyabuAdapter(),
     DooPlayAdapter(source: AnimeSource.dooPlay),
+    AnimesOnlineAdapter(source: AnimeSource.animesOnlineCloud),
+    AnimesOnlineAdapter(source: AnimeSource.animesDrive),
+    AnimesOnlineAdapter(source: AnimeSource.animeQ),
+    AnimesOnlineAdapter(source: AnimeSource.animePlay),
     AnimePlayerAdapter(),
     AllAnimeAdapter(),
   ];
@@ -30,6 +36,10 @@ class SourceRegistry {
       AnimeSource.animeFire,
       AnimeSource.goyabu,
       AnimeSource.dooPlay,
+      AnimeSource.animesOnlineCloud,
+      AnimeSource.animesDrive,
+      AnimeSource.animeQ,
+      AnimeSource.animePlay,
       AnimeSource.animePlayer,
     ];
   }
@@ -42,16 +52,24 @@ class SourceRegistry {
         return 1;
       case AnimeSource.dooPlay:
         return 2;
-      case AnimeSource.animePlayer:
+      case AnimeSource.animesOnlineCloud:
         return 3;
-      case AnimeSource.allAnime:
+      case AnimeSource.animesDrive:
         return 4;
-      case AnimeSource.betterAnime:
+      case AnimeSource.animeQ:
         return 5;
-      case AnimeSource.animesRoll:
+      case AnimeSource.animePlay:
         return 6;
-      case AnimeSource.anilist:
+      case AnimeSource.animePlayer:
         return 7;
+      case AnimeSource.allAnime:
+        return 8;
+      case AnimeSource.betterAnime:
+        return 9;
+      case AnimeSource.animesRoll:
+        return 10;
+      case AnimeSource.anilist:
+        return 11;
     }
   }
 
@@ -63,7 +81,8 @@ class SourceRegistry {
              source == AnimeSource.betterAnime && a is DooPlayAdapter ||
              source == AnimeSource.animesRoll && a is DooPlayAdapter ||
              source == AnimeSource.animePlayer && a is AnimePlayerAdapter ||
-             source == AnimeSource.allAnime && a is AllAnimeAdapter,
+             source == AnimeSource.allAnime && a is AllAnimeAdapter ||
+             a is AnimesOnlineAdapter && a.source == source,
       orElse: () => _adapters.first,
     );
   }

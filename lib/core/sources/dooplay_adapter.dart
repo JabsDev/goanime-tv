@@ -9,6 +9,8 @@ import '../network/api_client.dart';
 import '../scraper/scraper_result.dart';
 import '../utils/text_utils.dart';
 import 'anime_source_adapter.dart';
+import 'cdn_resolver.dart' show probeMediaUrl;
+import 'dooplay_v2_extractor.dart' show DooPlayV2Extractor;
 
 /// DooPlay provider (PT-BR): shared WordPress theme used by several Brazilian
 /// anime sites (BetterAnime, AnimesRoll, among others). Search and episode
@@ -229,6 +231,23 @@ class DooPlayAdapter extends AnimeSourceAdapter {
 
     final embedUrl = decoded['embed_url']?.toString();
     if (embedUrl == null || embedUrl.isEmpty) return [];
+
+    // mvp-direct (P8): when the dooplayer source is a real mp4/m3u8 URL (not a
+    // base64 blogger token) it answers the range probe without touching the
+    // jwplayer SPA page; otherwise keep the legacy blogger-resolve flow.
+    final direct = DooPlayV2Extractor.mp4FromEmbed(embedUrl);
+    if (direct != null &&
+        await probeMediaUrl(Uri.parse(direct),
+                headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'}) >=
+            0) {
+      return [
+        VideoSource(
+          url: direct,
+          quality: 'Auto',
+          headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'},
+        ),
+      ];
+    }
 
     // The embed is a Blogger-jW player page whose token is base64(reversed).
     return _resolveJwplayerEmbed(embedUrl);

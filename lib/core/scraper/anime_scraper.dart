@@ -109,6 +109,10 @@ class AnimeScraper {
           case AnimeSource.animesRoll:
           case AnimeSource.dooPlay:
           case AnimeSource.animePlayer:
+          case AnimeSource.animesOnlineCloud:
+          case AnimeSource.animesDrive:
+          case AnimeSource.animeQ:
+          case AnimeSource.animePlay:
             return a.url.isNotEmpty;
           case AnimeSource.anilist:
             return false; // metadata provider, no stream URL

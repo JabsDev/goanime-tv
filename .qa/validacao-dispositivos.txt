@@ -1,0 +1,40 @@
+VALIDAÇÃO EM DISPOSITIVOS — fontes CDN (cluster animesonline.cloud)
+
+Emulador (avdmanager GoAnime_TV API 36 x86_64, 1920x1080, CI do plano)
+- Release APK (app-release.apk, 114.3MB) instalado e abriu.
+- Busca "Solo" → 70 resultado(s) encontrado(s). Grid 8 col x 2 linhas.
+- Abertura do card "Ore dake Level Up na Ken" (Solo Leveling S1).
+- Dialog "Reproduzir EP / Episódio 1" passou a listar as 4 fontes novas do
+  cluster: animesOnlineCloud, animesDrive, animeQ e animePlay (abaixo da dobra).
+- Seleção de animesOnlineCloud → qualidade "Melhor qualidade" →
+  logcat comprova a reprodução do mp4 direto da CDN:
+
+    [Player] Attempting source 0: https://mangas.cloud/Animes/Letra-S/Solo%20Leveling/01.mp4 (Auto)
+    [Player] Source 0 opened successfully
+    [Player] Playing: true
+    [Player] Duration: 1420.085s   (~23,7 min, episódio completo)
+
+- Correção aplicada no caminho (resolveAnime com englishName): antes o
+  cluster casava "solo-leveling-2-arise-from-the-shadow" (S2) para a página
+  de S1 ("Ore dake Level Up na Ken"); agora casa "solo-leveling" (S1), e o
+  log passou a mostrar Solo%20Leveling/01.mp4 (S1, correto).
+- Tela preta do player no emulador: limitação de rendering por software
+  (media_kit "Enforcing S/W rendering", EGL_BAD_ATTRIBUTE no swiftshader).
+  NÃO é falha da fonte — eventos de play/duração/ready disparam normalmente.
+
+Fire Stick (Amazon AFTSS, via adb, 1920x1080)
+- Instalação do APK release: OK.
+- App abre: home "GoAnime TV" renderizada (Em Alta, banner AniList, Buscar/Perfil).
+- Busca abre com o teclado próprio do app (com QR code para digitar pelo celular).
+- Injeção de texto funciona (input text "Solo" entrou exato). SUBMIT é o
+  bloqueio: o IME/teclado do Fire TV não responde de forma previsível a
+  ENTER/DPAD_CENTER/tap headless (auto-type da tecla focada, navegação D-pad
+  quebrada entre fileiras). Limitação de automação do ambiente, não do app.
+- Não foi possível chegar ao dialog de fontes no Fire Stick via automação;
+  a reprodução da fonte do cluster está comprovada no emulador.
+
+Testes automatizados
+- flutter test: 97 testes passando (inclui 9 novos do cluster:
+  8 offline + resolveAnime P12).
+- flutter analyze: sem erros (1 info pré-existente de depreciação em
+  anilist_qr_scanner_screen).

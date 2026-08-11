@@ -85,16 +85,17 @@ class ApiClient {
   }) async {
     final key = 'GET:${uri.toString()}:${headers?.toString() ?? ''}';
     
-    // Try cache first
+    // Try cache first. Only 200/301 bodies are ever stored (see
+    // setWithErrorHandling), so reconstruct with an explicit UTF-8 charset:
+    // without the header, `http.Response` re-encodes the body as Latin-1 and
+    // crashes on non-Latin1 characters (accents, en-dashes) in cached pages.
     final cached = AppCaches.get(key);
     if (cached != null) {
-      // Check if cache is an error response
-      final cachedBody = String.fromCharCodes(cached);
-      if (cachedBody.contains('403') || cachedBody.contains('404')) {
-        AppCaches.clear(key);
-      } else {
-        return http.Response(utf8.decode(cached), 200);
-      }
+      return http.Response(
+        utf8.decode(cached),
+        200,
+        headers: {'content-type': 'text/html; charset=utf-8'},
+      );
     }
 
     final res = await _retryWithBackoff(

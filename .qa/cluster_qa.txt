@@ -1,0 +1,20 @@
+
+===== QUERY: Kimetsu no Yaiba ([1]) =====
+  candidates: [Kimetsu no Yaiba Movie: Mugen Jou-hen, Kimetsu no Yaiba: Katanakaji no Sato-hen – Todos os Episódios, Kimetsu no Yaiba: Yuukaku-hen – Todos os Episódios, Kimetsu no Yaiba: Mugen Ressha-hen – Todos os Episódios, Kimetsu no Yaiba: Hashira Geiko-hen – Todos os Episódios, Kimetsu no Yaiba – Todos os Episódios]
+  resolved: Kimetsu no Yaiba – Todos os Episódios https://animesonline.cloud/anime/kimetsu-no-yaiba
+  episodes: 26 (1..26)
+  EP1 FAIL: No playable option: no type=mp4 option answered 206
+
+===== QUERY: Naruto ([1, 220]) =====
+  candidates: [Naruto Shippuuden, Naruto Shippuden, Naruto, Boruto: Naruto Next Generations – Todos os Episódios, Cike Wu Liuqi –, Fuufu Ijou, Koibito Miman – Todos os Episódios, Love Live! Superstar!! 3 – Todos os Episódios, Negative Positive Angler – Todos os Episódios]
+  resolved: Naruto https://animesonline.cloud/anime/naruto
+  episodes: 219 (1..220)
+  EP1 FAIL: No playable option: no type=mp4 option answered 206
+  EP220 FAIL: No playable option: no type=mp4 option answered 206
+
+===== QUERY: One Piece ([1, 100]) =====
+  candidates: [One Piece: Heroines, One Piece, One Piece: Gyojin Tou-hen – Todos os Episódios, One Piece –]
+  resolved: One Piece – https://animesonline.cloud/anime/one-piece
+  episodes: 1187 (1..1173)
+  EP1 OK -> https://mangas.cloud/Animes/Letra-O/One%20Piece%20Dublado/001.mp4 | https://mangas.cloud/Animes/Letra-O/OnePiece/01.mp4
+  EP100 OK -> https://mangas.cloud/Animes/Letra-O/One%20Piece%20Dublado/100.mp4
