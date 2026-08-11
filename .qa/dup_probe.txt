@@ -1,0 +1,285 @@
+
+========== QUERY: "one piece" ==========
+TOTAL aggregated results: 51
+DISTINCT raw titles: 26 (One Piece 3D2Y: Ace no shi wo Koete! Luffy Nakama Tono Chikai | One Piece: Episode of Luffy - Hand Island no Bouken | One Piece Film: Red | One Piece Film: Red N/A A14 | One Piece Film: Z | One Piece Film: Gold | One Piece Movie 14: Stampede | One Piece Movie 8: Episode of Alabasta - Sabaku no Oujo to Kaizoku-tachi | One Piece | One Piece: Taose! Kaizoku Ganzack | One Piece: Adventure of Nebulandia | One Piece: Episode of Nami - Koukaishi no Namida to Nakama no Kizuna | One Piece: Gyojin Tou-hen | One Piece: Episode of Sorajima | One Piece: Episode of Merry - Mou Hitori no Nakama no Monogatari | One Piece Movie 6: Omatsuri Danshaku to Himitsu no Shima | Koisuru One Piece | One Piece Movie 7: Karakuri-jou no Mecha Kyohei | One Piece Movie 9: Episode of Chopper Plus - Fuyu ni Saku, Kiseki no Sakura | One Piece Film: Strong World Episode 0 | One Piece Movie 4: Dead End no Bouken | One Piece: Heart of Gold | One Piece: Heroines | One Piece: A Série | One Piece – | One Piece: Gyojin Tou-hen – Todos os Episódios)
+  "MapEntry(One Piece 3D2Y: Ace no shi wo Koete! Luffy Nakama Tono Chikai: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece: Episode of Luffy - Hand Island no Bouken: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Film: Red: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Film: Red N/A A14: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Film: Z: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Film: Gold: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Movie 14: Stampede: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Movie 8: Episode of Alabasta - Sabaku no Oujo to Kaizoku-tachi: [Instance of 'Anime', Instance of 'Anime']).key" appears 2x -> animeFire, animeFire
+  "MapEntry(One Piece: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 9x -> animeFire, animeFire, goyabu, goyabu, dooPlay, dooPlay, animesOnlineCloud, animeQ, animePlayer
+  "MapEntry(One Piece: Taose! Kaizoku Ganzack: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece: Adventure of Nebulandia: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece: Episode of Nami - Koukaishi no Namida to Nakama no Kizuna: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece: Gyojin Tou-hen: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 4x -> animeFire, goyabu, dooPlay, animePlayer
+  "MapEntry(One Piece: Episode of Sorajima: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece: Episode of Merry - Mou Hitori no Nakama no Monogatari: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Movie 6: Omatsuri Danshaku to Himitsu no Shima: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(Koisuru One Piece: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Movie 7: Karakuri-jou no Mecha Kyohei: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Movie 9: Episode of Chopper Plus - Fuyu ni Saku, Kiseki no Sakura: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Film: Strong World Episode 0: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece Movie 4: Dead End no Bouken: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece: Heart of Gold: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(One Piece: Heroines: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 5x -> goyabu, animesOnlineCloud, animesDrive, animeQ, animePlay
+  "MapEntry(One Piece: A Série: [Instance of 'Anime', Instance of 'Anime']).key" appears 2x -> goyabu, goyabu
+  "MapEntry(One Piece –: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 6x -> animesOnlineCloud, animesDrive, animesDrive, animeQ, animePlay, animePlay
+  "MapEntry(One Piece: Gyojin Tou-hen – Todos os Episódios: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 4x -> animesOnlineCloud, animesDrive, animeQ, animePlay
+DISTINCT cleaned titles: 26 (dup over raw = 0 merged)
+  clean="MapEntry(one piece movie 8: episode of alabasta - sabaku no oujo to kaizoku-tachi: [Instance of 'Anime', Instance of 'Anime']).key" has 2 entries across animeFire
+  clean="MapEntry(one piece: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 9 entries across animeFire, goyabu, dooPlay, animesOnlineCloud, animeQ, animePlayer
+  clean="MapEntry(one piece: gyojin tou-hen: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 4 entries across animeFire, goyabu, dooPlay, animePlayer
+  clean="MapEntry(one piece: heroines: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 5 entries across goyabu, animesOnlineCloud, animesDrive, animeQ, animePlay
+  clean="MapEntry(one piece: a série: [Instance of 'Anime', Instance of 'Anime']).key" has 2 entries across goyabu
+  clean="MapEntry(one piece –: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 6 entries across animesOnlineCloud, animesDrive, animeQ, animePlay
+  clean="MapEntry(one piece: gyojin tou-hen – todos os episódios: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 4 entries across animesOnlineCloud, animesDrive, animeQ, animePlay
+anilistId coverage: 16 distinct ids
+  anilistId=21 -> One Piece [animeFire], One Piece [animeFire], One Piece [goyabu], One Piece [goyabu], One Piece [dooPlay], One Piece [dooPlay], One Piece [animesOnlineCloud], One Piece [animeQ], One Piece [animePlayer]
+  anilistId=183423 -> One Piece: Gyojin Tou-hen [animeFire], One Piece: Gyojin Tou-hen [goyabu], One Piece: Gyojin Tou-hen [dooPlay], One Piece: Gyojin Tou-hen [animePlayer]
+  anilistId=197178 -> One Piece: Heroines [goyabu], One Piece: Heroines [animesOnlineCloud], One Piece: Heroines [animesDrive], One Piece: Heroines [animeQ], One Piece: Heroines [animePlay]
+  anilistId=171630 -> One Piece – [animesOnlineCloud], One Piece – [animesDrive], One Piece – [animesDrive], One Piece – [animeQ], One Piece – [animePlay], One Piece – [animePlay]
+---- flat result list ----
+animeFire        | One Piece 3D2Y: Ace no shi wo Koete! Luffy Nakama Tono Chikai | id=null | url=https://animefire.io/animes/one-piece-3d2y-ace-no-shi-wo-koete-luffy-nakama-tono-chikai-todos-os-episodios
+animeFire        | One Piece: Episode of Luffy - Hand Island no Bouken | id=16239 | url=https://animefire.io/animes/one-piece-episode-of-luffy---hand-island-no-bouken-todos-os-episodios
+animeFire        | One Piece Film: Red                      | id=141902 | url=https://animefire.io/animes/one-piece-film-red-dublado-todos-os-episodios
+animeFire        | One Piece Film: Red N/A A14              | id=null | url=https://animefire.io/animes/one-piece-film-red-todos-os-episodios
+animeFire        | One Piece Film: Z                        | id=12859 | url=https://animefire.io/animes/one-piece-film-z-dublado-todos-os-episodios
+animeFire        | One Piece Film: Gold                     | id=21335 | url=https://animefire.io/animes/one-piece-film-gold-dublado-todos-os-episodios
+animeFire        | One Piece Movie 14: Stampede             | id=null | url=https://animefire.io/animes/one-piece-movie-14-stampede-dublado-todos-os-episodios
+animeFire        | One Piece Movie 8: Episode of Alabasta - Sabaku no Oujo to Kaizoku-tachi | id=null | url=https://animefire.io/animes/one-piece-movie-8-episode-of-alabasta---sabaku-no-oujo-to-kaizoku-tachi-dublado-todos-os-episodios
+animeFire        | One Piece                                | id=21 | url=https://animefire.io/animes/one-piece-dublado-todos-os-episodios
+animeFire        | One Piece: Taose! Kaizoku Ganzack        | id=466 | url=https://animefire.io/animes/one-piece-taose-kaizoku-ganzack-todos-os-episodios
+animeFire        | One Piece                                | id=21 | url=https://animefire.io/animes/one-piece-todos-os-episodios
+animeFire        | One Piece: Adventure of Nebulandia       | id=21485 | url=https://animefire.io/animes/one-piece-adventure-of-nebulandia-todos-os-episodios
+animeFire        | One Piece: Episode of Nami - Koukaishi no Namida to Nakama no Kizuna | id=15323 | url=https://animefire.io/animes/one-piece-episode-of-nami---koukaishi-no-namida-to-nakama-no-kizuna-todos-os-episodios
+animeFire        | One Piece: Gyojin Tou-hen                | id=183423 | url=https://animefire.io/animes/one-piece-gyojin-tou-hen-todos-os-episodios
+animeFire        | One Piece: Episode of Sorajima           | id=101918 | url=https://animefire.io/animes/one-piece-episode-of-sorajima-todos-os-episodios
+animeFire        | One Piece: Episode of Merry - Mou Hitori no Nakama no Monogatari | id=19123 | url=https://animefire.io/animes/one-piece-episode-of-merry---mou-hitori-no-nakama-no-monogatari-todos-os-episodios
+animeFire        | One Piece Movie 6: Omatsuri Danshaku to Himitsu no Shima | id=null | url=https://animefire.io/animes/one-piece-movie-6-omatsuri-danshaku-to-himitsu-no-shima-todos-os-episodios
+animeFire        | Koisuru One Piece                        | id=188668 | url=https://animefire.io/animes/koisuru-one-piece-todos-os-episodios
+animeFire        | One Piece Movie 7: Karakuri-jou no Mecha Kyohei | id=null | url=https://animefire.io/animes/one-piece-movie-7-karakuri-jou-no-mecha-kyohei-todos-os-episodios
+animeFire        | One Piece Movie 8: Episode of Alabasta - Sabaku no Oujo to Kaizoku-tachi | id=null | url=https://animefire.io/animes/one-piece-movie-8-episode-of-alabasta---sabaku-no-oujo-to-kaizoku-tachi-todos-os-episodios
+animeFire        | One Piece Movie 9: Episode of Chopper Plus - Fuyu ni Saku, Kiseki no Sakura | id=null | url=https://animefire.io/animes/one-piece-movie-9-episode-of-chopper-plus---fuyu-ni-saku-kiseki-no-sakura-todos-os-episodios
+animeFire        | One Piece Film: Strong World Episode 0   | id=8740 | url=https://animefire.io/animes/one-piece-film-strong-world-episode-0-todos-os-episodios
+animeFire        | One Piece Movie 4: Dead End no Bouken    | id=null | url=https://animefire.io/animes/one-piece-movie-4-dead-end-no-bouken-todos-os-episodios
+animeFire        | One Piece: Heart of Gold                 | id=21831 | url=https://animefire.io/animes/one-piece-heart-of-gold-todos-os-episodios
+goyabu           | One Piece: Heroines                      | id=197178 | url=https://goyabu.io/anime/one-piece-heroines
+goyabu           | One Piece: A Série                       | id=null | url=https://goyabu.io/anime/one-piece-a-serie-online
+goyabu           | One Piece: A Série                       | id=null | url=https://goyabu.io/anime/one-piece-a-serie-dublado-online
+goyabu           | One Piece: Gyojin Tou-hen                | id=183423 | url=https://goyabu.io/anime/one-piece-gyojin-tou-hen-online
+goyabu           | One Piece                                | id=21 | url=https://goyabu.io/anime/one-piece-dublado-online-hd-4
+goyabu           | One Piece                                | id=21 | url=https://goyabu.io/anime/one-piece-online-hd-3
+dooPlay          | One Piece                                | id=21 | url=https://betteranime.io/animes/one-piece-dublado-online-hd/
+dooPlay          | One Piece                                | id=21 | url=https://betteranime.io/animes/one-piece/
+dooPlay          | One Piece: Gyojin Tou-hen                | id=183423 | url=https://betteranime.io/animes/one-piece-gyojin-tou-hen/
+animesOnlineCloud | One Piece –                              | id=171630 | url=https://animesonline.cloud/anime/one-piece
+animesOnlineCloud | One Piece                                | id=21 | url=https://animesonline.cloud/anime/one-piece-dublado
+animesOnlineCloud | One Piece: Gyojin Tou-hen – Todos os Episódios | id=null | url=https://animesonline.cloud/anime/one-piece-gyojin-tou-hen-todos-os-episodios
+animesOnlineCloud | One Piece: Heroines                      | id=197178 | url=https://animesonline.cloud/anime/one-piece-heroines
+animesDrive      | One Piece: Heroines                      | id=197178 | url=https://animesdrive.online/anime/one-piece-heroines
+animesDrive      | One Piece –                              | id=171630 | url=https://animesdrive.online/anime/one-piece-dublado-todos-os-episodios
+animesDrive      | One Piece: Gyojin Tou-hen – Todos os Episódios | id=null | url=https://animesdrive.online/anime/one-piece-gyojin-tou-hen-todos-os-episodios
+animesDrive      | One Piece –                              | id=171630 | url=https://animesdrive.online/anime/one-piece
+animeQ           | One Piece: Heroines                      | id=197178 | url=https://animeq.blog/anime/one-piece-heroines
+animeQ           | One Piece                                | id=21 | url=https://animeq.blog/anime/one-piece-dublado
+animeQ           | One Piece: Gyojin Tou-hen – Todos os Episódios | id=null | url=https://animeq.blog/anime/one-piece-gyojin-tou-hen-todos-os-episodios
+animeQ           | One Piece –                              | id=171630 | url=https://animeq.blog/anime/one-piece
+animePlay        | One Piece: Heroines                      | id=197178 | url=https://animeplay.cloud/anime/one-piece-heroines
+animePlay        | One Piece –                              | id=171630 | url=https://animeplay.cloud/anime/one-piece-dublado-todos-os-episodios
+animePlay        | One Piece: Gyojin Tou-hen – Todos os Episódios | id=null | url=https://animeplay.cloud/anime/one-piece-gyojin-tou-hen-todos-os-episodios
+animePlay        | One Piece –                              | id=171630 | url=https://animeplay.cloud/anime/one-piece
+animePlayer      | One Piece: Gyojin Tou-hen                | id=183423 | url=https://animeplayer.com.br/animes/one-piece-gyojin-tou-hen/
+animePlayer      | One Piece                                | id=21 | url=https://animeplayer.com.br/animes/one-piece/
+
+========== QUERY: "naruto" ==========
+TOTAL aggregated results: 59
+DISTINCT raw titles: 21 (Boruto: Naruto the Movie | Boruto: Naruto Next Generations | Naruto SD: Rock Lee no Seishun Full-Power Ninden | Naruto | Naruto: Shippuuden | Naruto: Shippuuden Movie 4 - The Lost Tower | Naruto Movie 2: Dai Gekitotsu! Maboroshi no Chiteiiseki Dattebayo! | Naruto: Shippuuden Movie 2 - Kizuna | Naruto: Shippuuden Movie 6 - Road to Ninja | Naruto: Shippuuden Movie 3 - Hi no Ishi wo Tsugu Mono | The Last: Naruto the Movie | Naruto Shippuden | Naruto Clássico | Naruto Shippuuden | Boruto: Naruto Next Generations – Todos os Episódios | Cike Wu Liuqi – | Fuufu Ijou, Koibito Miman – Todos os Episódios | Love Live! Superstar!! 3 – Todos os Episódios | Negative Positive Angler – Todos os Episódios | Naruto Hentai | Naruto Alternativo Rsrs)
+  "MapEntry(Boruto: Naruto the Movie: [Instance of 'Anime', Instance of 'Anime']).key" appears 2x -> animeFire, animeFire
+  "MapEntry(Boruto: Naruto Next Generations: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 4x -> animeFire, animeFire, goyabu, goyabu
+  "MapEntry(Naruto SD: Rock Lee no Seishun Full-Power Ninden: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(Naruto: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 7x -> animeFire, animeFire, animesOnlineCloud, animesDrive, animeQ, animePlay, animePlayer
+  "MapEntry(Naruto: Shippuuden: [Instance of 'Anime', Instance of 'Anime']).key" appears 2x -> animeFire, animeFire
+  "MapEntry(Naruto: Shippuuden Movie 4 - The Lost Tower: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(Naruto Movie 2: Dai Gekitotsu! Maboroshi no Chiteiiseki Dattebayo!: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(Naruto: Shippuuden Movie 2 - Kizuna: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(Naruto: Shippuuden Movie 6 - Road to Ninja: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(Naruto: Shippuuden Movie 3 - Hi no Ishi wo Tsugu Mono: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(The Last: Naruto the Movie: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(Naruto Shippuden: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 9x -> goyabu, goyabu, dooPlay, dooPlay, animesOnlineCloud, animesDrive, animeQ, animePlay, animePlayer
+  "MapEntry(Naruto Clássico: [Instance of 'Anime', Instance of 'Anime']).key" appears 2x -> goyabu, goyabu
+  "MapEntry(Naruto Shippuuden: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 4x -> animesOnlineCloud, animesDrive, animeQ, animePlay
+  "MapEntry(Boruto: Naruto Next Generations – Todos os Episódios: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 4x -> animesOnlineCloud, animesDrive, animeQ, animePlay
+  "MapEntry(Cike Wu Liuqi –: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 4x -> animesOnlineCloud, animesDrive, animeQ, animePlay
+  "MapEntry(Fuufu Ijou, Koibito Miman – Todos os Episódios: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 4x -> animesOnlineCloud, animesDrive, animeQ, animePlay
+  "MapEntry(Love Live! Superstar!! 3 – Todos os Episódios: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 4x -> animesOnlineCloud, animesDrive, animeQ, animePlay
+  "MapEntry(Negative Positive Angler – Todos os Episódios: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 4x -> animesOnlineCloud, animesDrive, animeQ, animePlay
+  "MapEntry(Naruto Hentai: [Instance of 'Anime']).key" appears 1x -> animePlayer
+  "MapEntry(Naruto Alternativo Rsrs: [Instance of 'Anime']).key" appears 1x -> animePlayer
+DISTINCT cleaned titles: 21 (dup over raw = 0 merged)
+  clean="MapEntry(boruto: naruto the movie: [Instance of 'Anime', Instance of 'Anime']).key" has 2 entries across animeFire
+  clean="MapEntry(boruto: naruto next generations: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 4 entries across animeFire, goyabu
+  clean="MapEntry(naruto: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 7 entries across animeFire, animesOnlineCloud, animesDrive, animeQ, animePlay, animePlayer
+  clean="MapEntry(naruto: shippuuden: [Instance of 'Anime', Instance of 'Anime']).key" has 2 entries across animeFire
+  clean="MapEntry(naruto shippuden: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 9 entries across goyabu, dooPlay, animesOnlineCloud, animesDrive, animeQ, animePlay, animePlayer
+  clean="MapEntry(naruto clássico: [Instance of 'Anime', Instance of 'Anime']).key" has 2 entries across goyabu
+  clean="MapEntry(naruto shippuuden: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 4 entries across animesOnlineCloud, animesDrive, animeQ, animePlay
+  clean="MapEntry(boruto: naruto next generations – todos os episódios: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 4 entries across animesOnlineCloud, animesDrive, animeQ, animePlay
+  clean="MapEntry(cike wu liuqi –: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 4 entries across animesOnlineCloud, animesDrive, animeQ, animePlay
+  clean="MapEntry(fuufu ijou, koibito miman – todos os episódios: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 4 entries across animesOnlineCloud, animesDrive, animeQ, animePlay
+  clean="MapEntry(love live! superstar!! 3 – todos os episódios: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 4 entries across animesOnlineCloud, animesDrive, animeQ, animePlay
+  clean="MapEntry(negative positive angler – todos os episódios: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 4 entries across animesOnlineCloud, animesDrive, animeQ, animePlay
+anilistId coverage: 0 distinct ids
+---- flat result list ----
+animeFire        | Boruto: Naruto the Movie                 | id=null | url=https://animefire.io/animes/boruto-naruto-the-movie-dublado-todos-os-episodios
+animeFire        | Boruto: Naruto Next Generations          | id=null | url=https://animefire.io/animes/boruto-naruto-next-generations-dublado-todos-os-episodios
+animeFire        | Naruto SD: Rock Lee no Seishun Full-Power Ninden | id=null | url=https://animefire.io/animes/naruto-sd-rock-lee-no-seishun-full-power-ninden-todos-os-episodios
+animeFire        | Naruto                                   | id=null | url=https://animefire.io/animes/naruto-dublado-todos-os-episodios
+animeFire        | Naruto: Shippuuden                       | id=null | url=https://animefire.io/animes/naruto-shippuuden-todos-os-episodios
+animeFire        | Boruto: Naruto the Movie                 | id=null | url=https://animefire.io/animes/boruto-naruto-the-movie-todos-os-episodios
+animeFire        | Naruto: Shippuuden Movie 4 - The Lost Tower | id=null | url=https://animefire.io/animes/naruto-shippuuden-movie-4---the-lost-tower-todos-os-episodios
+animeFire        | Naruto Movie 2: Dai Gekitotsu! Maboroshi no Chiteiiseki Dattebayo! | id=null | url=https://animefire.io/animes/naruto-movie-2-dai-gekitotsu-maboroshi-no-chiteiiseki-dattebayo-todos-os-episodios
+animeFire        | Naruto: Shippuuden Movie 2 - Kizuna      | id=null | url=https://animefire.io/animes/naruto-shippuuden-movie-2---kizuna-todos-os-episodios
+animeFire        | Naruto: Shippuuden Movie 6 - Road to Ninja | id=null | url=https://animefire.io/animes/naruto-shippuuden-movie-6---road-to-ninja-todos-os-episodios
+animeFire        | Naruto: Shippuuden Movie 3 - Hi no Ishi wo Tsugu Mono | id=null | url=https://animefire.io/animes/naruto-shippuuden-movie-3---hi-no-ishi-wo-tsugu-mono-todos-os-episodios
+animeFire        | The Last: Naruto the Movie               | id=null | url=https://animefire.io/animes/the-last-naruto-the-movie-todos-os-episodios
+animeFire        | Naruto                                   | id=null | url=https://animefire.io/animes/naruto-todos-os-episodios
+animeFire        | Naruto: Shippuuden                       | id=null | url=https://animefire.io/animes/naruto-shippuuden-dublado-todos-os-episodios
+animeFire        | Boruto: Naruto Next Generations          | id=null | url=https://animefire.io/animes/boruto-naruto-next-generations-todos-os-episodios
+goyabu           | Boruto: Naruto Next Generations          | id=null | url=https://goyabu.io/anime/boruto-naruto-next-generations-online-hd-8
+goyabu           | Naruto Shippuden                         | id=null | url=https://goyabu.io/anime/naruto-shippuden-dublado-online-hd-8
+goyabu           | Boruto: Naruto Next Generations          | id=null | url=https://goyabu.io/anime/boruto-naruto-next-generations-dublado-online-hd-9
+goyabu           | Naruto Clássico                          | id=null | url=https://goyabu.io/anime/naruto-classico-online-hd-8
+goyabu           | Naruto Shippuden                         | id=null | url=https://goyabu.io/anime/naruto-shippuden-online-hd-8
+goyabu           | Naruto Clássico                          | id=null | url=https://goyabu.io/anime/naruto-classico-dublado-online-hd-8
+dooPlay          | Naruto Shippuden                         | id=null | url=https://betteranime.io/animes/naruto-shippuden-dublado/
+dooPlay          | Naruto Shippuden                         | id=null | url=https://betteranime.io/animes/naruto-shippuden/
+animesOnlineCloud | Naruto Shippuuden                        | id=null | url=https://animesonline.cloud/anime/naruto-shippuuden-dublado
+animesOnlineCloud | Naruto Shippuden                         | id=null | url=https://animesonline.cloud/anime/naruto-shippuden
+animesOnlineCloud | Naruto                                   | id=null | url=https://animesonline.cloud/anime/naruto
+animesOnlineCloud | Boruto: Naruto Next Generations – Todos os Episódios | id=null | url=https://animesonline.cloud/anime/boruto-naruto-next-generations
+animesOnlineCloud | Cike Wu Liuqi –                          | id=null | url=https://animesonline.cloud/anime/cike-wu-liuqi-todos-os-episodios
+animesOnlineCloud | Fuufu Ijou, Koibito Miman – Todos os Episódios | id=null | url=https://animesonline.cloud/anime/fuufu-ijou-koibito-miman-dublado-todos-os-episodios
+animesOnlineCloud | Love Live! Superstar!! 3 – Todos os Episódios | id=null | url=https://animesonline.cloud/anime/love-live-superstar-3
+animesOnlineCloud | Negative Positive Angler – Todos os Episódios | id=null | url=https://animesonline.cloud/anime/negative-positive-angler-todos-os-episodios
+animesDrive      | Naruto Shippuuden                        | id=null | url=https://animesdrive.online/anime/naruto-shippuuden-dublado
+animesDrive      | Naruto Shippuden                         | id=null | url=https://animesdrive.online/anime/naruto-shippuden
+animesDrive      | Naruto                                   | id=null | url=https://animesdrive.online/anime/naruto
+animesDrive      | Boruto: Naruto Next Generations – Todos os Episódios | id=null | url=https://animesdrive.online/anime/boruto-naruto-next-generations
+animesDrive      | Cike Wu Liuqi –                          | id=null | url=https://animesdrive.online/anime/cike-wu-liuqi-todos-os-episodios
+animesDrive      | Fuufu Ijou, Koibito Miman – Todos os Episódios | id=null | url=https://animesdrive.online/anime/fuufu-ijou-koibito-miman-dublado-todos-os-episodios
+animesDrive      | Love Live! Superstar!! 3 – Todos os Episódios | id=null | url=https://animesdrive.online/anime/love-live-superstar-3
+animesDrive      | Negative Positive Angler – Todos os Episódios | id=null | url=https://animesdrive.online/anime/negative-positive-angler-todos-os-episodios
+animeQ           | Naruto Shippuuden                        | id=null | url=https://animeq.blog/anime/naruto-shippuuden-dublado
+animeQ           | Naruto Shippuden                         | id=null | url=https://animeq.blog/anime/naruto-shippuden
+animeQ           | Naruto                                   | id=null | url=https://animeq.blog/anime/naruto
+animeQ           | Boruto: Naruto Next Generations – Todos os Episódios | id=null | url=https://animeq.blog/anime/boruto-naruto-next-generations
+animeQ           | Cike Wu Liuqi –                          | id=null | url=https://animeq.blog/anime/cike-wu-liuqi-todos-os-episodios
+animeQ           | Fuufu Ijou, Koibito Miman – Todos os Episódios | id=null | url=https://animeq.blog/anime/fuufu-ijou-koibito-miman-dublado-todos-os-episodios
+animeQ           | Love Live! Superstar!! 3 – Todos os Episódios | id=null | url=https://animeq.blog/anime/love-live-superstar-3
+animeQ           | Negative Positive Angler – Todos os Episódios | id=null | url=https://animeq.blog/anime/negative-positive-angler-todos-os-episodios
+animePlay        | Naruto Shippuuden                        | id=null | url=https://animeplay.cloud/anime/naruto-shippuuden-dublado
+animePlay        | Naruto Shippuden                         | id=null | url=https://animeplay.cloud/anime/naruto-shippuden
+animePlay        | Naruto                                   | id=null | url=https://animeplay.cloud/anime/naruto
+animePlay        | Boruto: Naruto Next Generations – Todos os Episódios | id=null | url=https://animeplay.cloud/anime/boruto-naruto-next-generations
+animePlay        | Cike Wu Liuqi –                          | id=null | url=https://animeplay.cloud/anime/cike-wu-liuqi-todos-os-episodios
+animePlay        | Fuufu Ijou, Koibito Miman – Todos os Episódios | id=null | url=https://animeplay.cloud/anime/fuufu-ijou-koibito-miman-dublado-todos-os-episodios
+animePlay        | Love Live! Superstar!! 3 – Todos os Episódios | id=null | url=https://animeplay.cloud/anime/love-live-superstar-3
+animePlay        | Negative Positive Angler – Todos os Episódios | id=null | url=https://animeplay.cloud/anime/negative-positive-angler-todos-os-episodios
+animePlayer      | Naruto Hentai                            | id=null | url=https://animeplayer.com.br/animes/naruto-hentai/
+animePlayer      | Naruto Alternativo Rsrs                  | id=null | url=https://animeplayer.com.br/animes/naruto-alternativo/
+animePlayer      | Naruto                                   | id=null | url=https://animeplayer.com.br/animes/naruto/
+animePlayer      | Naruto Shippuden                         | id=null | url=https://animeplayer.com.br/animes/naruto-shippuden/
+
+========== QUERY: "black clover" ==========
+TOTAL aggregated results: 24
+DISTINCT raw titles: 6 (Black Clover: Mahou Tei no Ken | Black Clover: Mahou Tei no Ken N/A A14 | Black Clover | Mugyutto! Black Clover | Black Clover: A Espada do Rei Mago | Black Clover – Todos os Episódios)
+  "MapEntry(Black Clover: Mahou Tei no Ken: [Instance of 'Anime', Instance of 'Anime']).key" appears 2x -> animeFire, goyabu
+  "MapEntry(Black Clover: Mahou Tei no Ken N/A A14: [Instance of 'Anime']).key" appears 1x -> animeFire
+  "MapEntry(Black Clover: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 15x -> animeFire, animeFire, goyabu, goyabu, dooPlay, dooPlay, animesOnlineCloud, animesOnlineCloud, animesDrive, animesDrive, animeQ, animeQ, animePlay, animePlay, animePlayer
+  "MapEntry(Mugyutto! Black Clover: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 3x -> animeFire, goyabu, animePlayer
+  "MapEntry(Black Clover: A Espada do Rei Mago: [Instance of 'Anime']).key" appears 1x -> goyabu
+  "MapEntry(Black Clover – Todos os Episódios: [Instance of 'Anime', Instance of 'Anime']).key" appears 2x -> animesDrive, animePlay
+DISTINCT cleaned titles: 6 (dup over raw = 0 merged)
+  clean="MapEntry(black clover: mahou tei no ken: [Instance of 'Anime', Instance of 'Anime']).key" has 2 entries across animeFire, goyabu
+  clean="MapEntry(black clover: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 15 entries across animeFire, goyabu, dooPlay, animesOnlineCloud, animesDrive, animeQ, animePlay, animePlayer
+  clean="MapEntry(mugyutto! black clover: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 3 entries across animeFire, goyabu, animePlayer
+  clean="MapEntry(black clover – todos os episódios: [Instance of 'Anime', Instance of 'Anime']).key" has 2 entries across animesDrive, animePlay
+anilistId coverage: 0 distinct ids
+---- flat result list ----
+animeFire        | Black Clover: Mahou Tei no Ken           | id=null | url=https://animefire.io/animes/black-clover-mahou-tei-no-ken-dublado-todos-os-episodios
+animeFire        | Black Clover: Mahou Tei no Ken N/A A14   | id=null | url=https://animefire.io/animes/black-clover-mahou-tei-no-ken-todos-os-episodios
+animeFire        | Black Clover                             | id=null | url=https://animefire.io/animes/black-clover-dublado-todos-os-episodios
+animeFire        | Mugyutto! Black Clover                   | id=null | url=https://animefire.io/animes/mugyutto-black-clover-todos-os-episodios
+animeFire        | Black Clover                             | id=null | url=https://animefire.io/animes/black-clover-todos-os-episodios
+goyabu           | Black Clover                             | id=null | url=https://goyabu.io/anime/black-clover-dublado-online
+goyabu           | Black Clover: A Espada do Rei Mago       | id=null | url=https://goyabu.io/anime/black-clover-a-espada-do-rei-mago-dublado
+goyabu           | Black Clover: Mahou Tei no Ken           | id=null | url=https://goyabu.io/anime/black-clover-mahou-tei-no-ken
+goyabu           | Black Clover                             | id=null | url=https://goyabu.io/anime/black-clover
+goyabu           | Mugyutto! Black Clover                   | id=null | url=https://goyabu.io/anime/mugyutto-black-clover
+dooPlay          | Black Clover                             | id=null | url=https://betteranime.io/animes/black-clover-dublado-online/
+dooPlay          | Black Clover                             | id=null | url=https://betteranime.io/animes/black-clover/
+animesOnlineCloud | Black Clover                             | id=null | url=https://animesonline.cloud/anime/black-clover-dublado
+animesOnlineCloud | Black Clover                             | id=null | url=https://animesonline.cloud/anime/black-clover
+animesDrive      | Black Clover                             | id=null | url=https://animesdrive.online/anime/black-clover-dublado
+animesDrive      | Black Clover                             | id=null | url=https://animesdrive.online/anime/black-clover
+animesDrive      | Black Clover – Todos os Episódios        | id=null | url=https://animesdrive.online/anime/black-clover-todos-os-episodios
+animeQ           | Black Clover                             | id=null | url=https://animeq.blog/anime/black-clover-dublado
+animeQ           | Black Clover                             | id=null | url=https://animeq.blog/anime/black-clover
+animePlay        | Black Clover                             | id=null | url=https://animeplay.cloud/anime/black-clover-dublado
+animePlay        | Black Clover                             | id=null | url=https://animeplay.cloud/anime/black-clover
+animePlay        | Black Clover – Todos os Episódios        | id=null | url=https://animeplay.cloud/anime/black-clover-todos-os-episodios
+animePlayer      | Mugyutto! Black Clover                   | id=null | url=https://animeplayer.com.br/animes/mugyutto-black-clover/
+animePlayer      | Black Clover                             | id=null | url=https://animeplayer.com.br/animes/black-clover/
+
+========== QUERY: "solo leveling" ==========
+TOTAL aggregated results: 30
+DISTINCT raw titles: 7 (Ore dake Level Up na Ken Season 2: Arise from the Shadow | Ore dake Level Up na Ken | Solo Leveling 2 | Solo Leveling Segundo Despertar | Solo Leveling | Solo Leveling 2 Arise from the Shadow | Solo Leveling Hentai)
+  "MapEntry(Ore dake Level Up na Ken Season 2: Arise from the Shadow: [Instance of 'Anime', Instance of 'Anime']).key" appears 2x -> animeFire, animeFire
+  "MapEntry(Ore dake Level Up na Ken: [Instance of 'Anime', Instance of 'Anime']).key" appears 2x -> animeFire, animeFire
+  "MapEntry(Solo Leveling 2: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 3x -> goyabu, goyabu, goyabu
+  "MapEntry(Solo Leveling Segundo Despertar: [Instance of 'Anime', Instance of 'Anime']).key" appears 2x -> goyabu, goyabu
+  "MapEntry(Solo Leveling: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 12x -> goyabu, dooPlay, animesOnlineCloud, animesOnlineCloud, animesDrive, animesDrive, animeQ, animeQ, animePlay, animePlay, animePlayer, animePlayer
+  "MapEntry(Solo Leveling 2 Arise from the Shadow: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" appears 8x -> animesOnlineCloud, animesOnlineCloud, animesDrive, animesDrive, animeQ, animeQ, animePlay, animePlay
+  "MapEntry(Solo Leveling Hentai: [Instance of 'Anime']).key" appears 1x -> animePlayer
+DISTINCT cleaned titles: 7 (dup over raw = 0 merged)
+  clean="MapEntry(ore dake level up na ken season 2: arise from the shadow: [Instance of 'Anime', Instance of 'Anime']).key" has 2 entries across animeFire
+  clean="MapEntry(ore dake level up na ken: [Instance of 'Anime', Instance of 'Anime']).key" has 2 entries across animeFire
+  clean="MapEntry(solo leveling 2: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 3 entries across goyabu
+  clean="MapEntry(solo leveling segundo despertar: [Instance of 'Anime', Instance of 'Anime']).key" has 2 entries across goyabu
+  clean="MapEntry(solo leveling: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 12 entries across goyabu, dooPlay, animesOnlineCloud, animesDrive, animeQ, animePlay, animePlayer
+  clean="MapEntry(solo leveling 2 arise from the shadow: [Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime', Instance of 'Anime']).key" has 8 entries across animesOnlineCloud, animesDrive, animeQ, animePlay
+anilistId coverage: 0 distinct ids
+---- flat result list ----
+animeFire        | Ore dake Level Up na Ken Season 2: Arise from the Shadow | id=null | url=https://animefire.io/animes/ore-dake-level-up-na-ken-season-2-arise-from-the-shadow-dublado-todos-os-episodios
+animeFire        | Ore dake Level Up na Ken Season 2: Arise from the Shadow | id=null | url=https://animefire.io/animes/ore-dake-level-up-na-ken-season-2-arise-from-the-shadow-todos-os-episodios
+animeFire        | Ore dake Level Up na Ken                 | id=null | url=https://animefire.io/animes/ore-dake-level-up-na-ken-dublado-todos-os-episodios
+animeFire        | Ore dake Level Up na Ken                 | id=null | url=https://animefire.io/animes/ore-dake-level-up-na-ken-todos-os-episodios
+goyabu           | Solo Leveling 2                          | id=null | url=https://goyabu.io/anime/solo-leveling-2-dublado-online-hd-10
+goyabu           | Solo Leveling Segundo Despertar          | id=null | url=https://goyabu.io/anime/solo-leveling-segundo-despertar-legendado-online
+goyabu           | Solo Leveling Segundo Despertar          | id=null | url=https://goyabu.io/anime/solo-leveling-segundo-despertar-dublado-online-hd-2
+goyabu           | Solo Leveling 2                          | id=null | url=https://goyabu.io/anime/solo-leveling-2-online-hd-8
+goyabu           | Solo Leveling 2                          | id=null | url=https://goyabu.io/anime/solo-leveling-dublado-online-hd-11
+goyabu           | Solo Leveling                            | id=null | url=https://goyabu.io/anime/solo-leveling-online-hd-11
+dooPlay          | Solo Leveling                            | id=null | url=https://betteranime.io/animes/solo-leveling-dublado-online/
+animesOnlineCloud | Solo Leveling 2 Arise from the Shadow    | id=null | url=https://animesonline.cloud/anime/solo-leveling-2-arise-from-the-shadow-dublado
+animesOnlineCloud | Solo Leveling 2 Arise from the Shadow    | id=null | url=https://animesonline.cloud/anime/solo-leveling-2-arise-from-the-shadow
+animesOnlineCloud | Solo Leveling                            | id=null | url=https://animesonline.cloud/anime/solo-leveling-dublado
+animesOnlineCloud | Solo Leveling                            | id=null | url=https://animesonline.cloud/anime/solo-leveling
+animesDrive      | Solo Leveling 2 Arise from the Shadow    | id=null | url=https://animesdrive.online/anime/solo-leveling-2-arise-from-the-shadow-dublado
+animesDrive      | Solo Leveling 2 Arise from the Shadow    | id=null | url=https://animesdrive.online/anime/solo-leveling-2-arise-from-the-shadow
+animesDrive      | Solo Leveling                            | id=null | url=https://animesdrive.online/anime/solo-leveling-dublado
+animesDrive      | Solo Leveling                            | id=null | url=https://animesdrive.online/anime/solo-leveling
+animeQ           | Solo Leveling 2 Arise from the Shadow    | id=null | url=https://animeq.blog/anime/solo-leveling-2-arise-from-the-shadow-dublado
+animeQ           | Solo Leveling 2 Arise from the Shadow    | id=null | url=https://animeq.blog/anime/solo-leveling-2-arise-from-the-shadow
+animeQ           | Solo Leveling                            | id=null | url=https://animeq.blog/anime/solo-leveling-dublado
+animeQ           | Solo Leveling                            | id=null | url=https://animeq.blog/anime/solo-leveling
+animePlay        | Solo Leveling 2 Arise from the Shadow    | id=null | url=https://animeplay.cloud/anime/solo-leveling-2-arise-from-the-shadow-dublado
+animePlay        | Solo Leveling 2 Arise from the Shadow    | id=null | url=https://animeplay.cloud/anime/solo-leveling-2-arise-from-the-shadow
+animePlay        | Solo Leveling                            | id=null | url=https://animeplay.cloud/anime/solo-leveling-dublado
+animePlay        | Solo Leveling                            | id=null | url=https://animeplay.cloud/anime/solo-leveling
+animePlayer      | Solo Leveling Hentai                     | id=null | url=https://animeplayer.com.br/animes/solo-leveling-hentai/
+animePlayer      | Solo Leveling                            | id=null | url=https://animeplayer.com.br/animes/solo-leveling-dublado/
+animePlayer      | Solo Leveling                            | id=null | url=https://animeplayer.com.br/animes/solo-leveling/

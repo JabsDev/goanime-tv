@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../anilist/anilist_service.dart';
 import '../cache/app_caches.dart';
+import '../sources/anime_source_adapter.dart';
 import '../sources/source_registry.dart';
 import '../utils/text_utils.dart';
 import '../../data/models/anime.dart';
@@ -34,9 +35,7 @@ class AnimeScraper {
       for (final variant in variants) {
         final extra = await _search(variant);
         for (final a in extra) {
-          if (!allAnimes.any((e) =>
-              TextUtils.cleanTitle(e.name).toLowerCase() ==
-              TextUtils.cleanTitle(a.name).toLowerCase())) {
+          if (!allAnimes.any((e) => titleIdentityKey(e) == titleIdentityKey(a))) {
             allAnimes.add(a);
           }
         }
@@ -44,15 +43,117 @@ class AnimeScraper {
       }
     }
 
+    // Passada A: collapse by normalized title — dublado/legendado variants,
+    // " – Todos os Episódios", badge "N/A A14" and cross-source copies of the
+    // same show. Representative = url válida → menor source.priority → menor
+    // índice no array (C5/C8, mesma ordem do sort final).
+    final survivors = dedupeByTitle(allAnimes);
+
     // Cache-hit no-op na maioria dos casos — `_search` já enriqueceu o lote;
     // cobre o cenário de merge de variantes vindas de outro cache de busca.
-    await AniListService.enrichBatch(allAnimes);
+    await AniListService.enrichBatch(survivors);
+
+    // Passada B: merge survivors that share a resolved anilistId ("Naruto
+    // Shippuden" vs "Naruto Shippuuden"). Best-effort — id null (rate-limit)
+    // means this pass is skipped for that card (C7).
+    final deduped = mergeByAnilistId(survivors);
 
     // Prioritize PT-BR sources (stable sort keeps per-source order).
-    allAnimes.sort((a, b) => a.source.priority.compareTo(b.source.priority));
+    deduped.sort((a, b) => a.source.priority.compareTo(b.source.priority));
 
-    AppCaches.search.set(cacheKey, allAnimes);
-    return allAnimes;
+    AppCaches.search.set(cacheKey, deduped);
+    return deduped;
+  }
+
+  /// Chave de identidade por título (passada A). Função pura e offline.
+  ///
+  /// `normalize(cleanTitle(name))` dobra acentos, remove
+  /// dublado/legendado/dub/sub/"todos os episodios" e pontuação (inclui o
+  /// travessão " – "). Corrige o badge "N/A A14" que `cleanTitle` não remove
+  /// (nota alfanumérica antes de A14 — "One Piece Film: Red N/A A14"); o
+  /// sufixo normalizado vira "n a a14". Guarda C12: nunca retorna ''.
+  static String titleIdentityKey(Anime a) {
+    var t = AnimeSourceAdapter.normalize(TextUtils.cleanTitle(a.name));
+
+    // C4: strip do badge de faixa etária com nota ausente no FIM do título.
+    t = t.replaceAll(RegExp(r'\bn\s*a\s*a?\s*\d+\s*$'), '').trim();
+
+    // C12: nome só com pontuação/símbolos → chave vazia fundiria tudo.
+    if (t.isEmpty) t = a.name.trim().toLowerCase();
+    if (t.isEmpty) t = a.url;
+    return t;
+  }
+
+  /// Chave para a passada B (fusão por id AniList). Null quando o enrich
+  /// falhou (ex.: rate-limit) — o card fica só na passada A.
+  static int? anilistIdentityKey(Anime a) => a.anilistId;
+
+  static List<Anime> dedupeByTitle(List<Anime> animes) {
+    final groups = <String, List<Anime>>{};
+    for (final a in animes) {
+      groups.putIfAbsent(titleIdentityKey(a), () => []).add(a);
+      // ponytail: mapa em memória compartilhado; subir para um índice
+      // persistente por chave se o custo de resolver o grupo crescer.
+    }
+    return [for (final g in groups.values) _pickRepresentative(g)];
+  }
+
+  static List<Anime> mergeByAnilistId(List<Anime> animes) {
+    final groups = <int, List<Anime>>{};
+    for (final a in animes) {
+      final id = a.anilistId;
+      if (id != null) groups.putIfAbsent(id, () => []).add(a);
+    }
+    final result = <Anime>[];
+    final used = <Anime>{};
+    for (final a in animes) {
+      if (used.contains(a)) continue;
+      final group = a.anilistId == null ? null : groups[a.anilistId];
+      if (group == null || group.length == 1) {
+        result.add(a);
+        used.add(a);
+        continue;
+      }
+      final rep = _pickRepresentative(group);
+      for (final d in group) {
+        used.add(d);
+        if (d != rep) _propagate(rep, d);
+      }
+      result.add(rep);
+    }
+    return result;
+  }
+
+  /// Representante do grupo: url válida → menor `source.priority` (ordem de
+  /// `anime.dart`, não `SourceRegistry.getPriority`) → menor índice do array
+  /// (primeiro encontrado vence empates).
+  static Anime _pickRepresentative(List<Anime> group) {
+    var best = group.first;
+    for (final a in group.skip(1)) {
+      final bestHasUrl = best.url.isNotEmpty;
+      final aHasUrl = a.url.isNotEmpty;
+      if (!bestHasUrl && aHasUrl) {
+        best = a;
+      } else if (bestHasUrl && aHasUrl && a.source.priority < best.source.priority) {
+        best = a;
+      }
+    }
+    return best;
+  }
+
+  /// Propagação de metadados (C6): `??=` nunca sobrescreve valor bom com null;
+  /// `genres` trata lista vazia como "faltando". Nome exibido permanece o do
+  /// representante (favoritos/progresso são chaveados por `anime.name`).
+  static void _propagate(Anime s, Anime d) {
+    s.anilistId ??= d.anilistId;
+    s.englishName ??= d.englishName;
+    s.bannerImage ??= d.bannerImage;
+    s.description ??= d.description;
+    s.fallbackImageUrl ??= d.fallbackImageUrl;
+    s.episodes ??= d.episodes;
+    s.status ??= d.status;
+    s.averageScore ??= d.averageScore;
+    if (d.genres.isNotEmpty) s.genres = d.genres;
   }
 
   /// Per-query fan-out over every implemented provider. Results are cached per
