@@ -64,11 +64,17 @@ jobs:
           fi
 
       - name: Restaura o keystore oficial (chave DEBUG = política Fase 0-A)
-        run: |
-          mkdir -p "$HOME/.android"
-          echo "$ANDROID_DEBUG_KEYSTORE" | base64 -d > "$HOME/.android/debug.keystore"
         env:
           ANDROID_DEBUG_KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          echo "$ANDROID_DEBUG_KEYSTORE" | base64 -d > android/goanime-tv.jks
+          chmod 600 android/goanime-tv.jks
+          cat > android/key.properties <<EOF
+          storeFile=goanime-tv.jks
+          storePassword=android
+          keyAlias=androiddebugkey
+          keyPassword=android
+          EOF
 
       - name: Build APK release (mesma chave dos instalados)
         run: |
