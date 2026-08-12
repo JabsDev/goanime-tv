@@ -72,15 +72,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           TAG="${{ github.ref_name }}"
           SHA256="$(sha256sum build/app/outputs/flutter-apk/app-release.apk | cut -d' ' -f1)"
           ASSET="goanime-tv-$TAG.apk"
           cp build/app/outputs/flutter-apk/app-release.apk "$ASSET"
           CHANGELOG="$(git tag -l --format='%(contents:body)' "$TAG")"
+          printf '%s\n\n---\n\nSHA256: %s\n' "$CHANGELOG" "$SHA256" > release-notes.md
           gh release create "$TAG" "$ASSET" \
             --title "$TAG" \
-            --notes "${CHANGELOG}
-
----
-
-SHA256: $SHA256"
+            --notes-file release-notes.md
