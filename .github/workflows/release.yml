@@ -1,0 +1,86 @@
+name: Release APK
+
+# Publica uma release do GitHub com o APK assinado e o changelog.
+#
+# Convenção de tag (D2): vX.Y.Z+BUILD, BUILD estritamente crescente.
+#   ex.: v1.0.1+1000001
+#
+# Política de chave (Fase 0 - Opção A): a chave DEBUG é a oficial da linha.
+# O release build do gradle é assinado com ela. Aqui o mesmo keystore é
+# restaurado em ~/.android/debug.keystore a partir do secret, então o APK do
+# CI sai com a MESMA chave dos instalados — sem isso o auto-update recusaria
+# instalar por cima (I-1). Não troque esta política sem a migração da Fase
+# 0-B (aviso + backup), senão todos os aparelhos ficam sem atualizar.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Valida build number estritamente crescente (D2)
+        run: |
+          TAG="${{ github.ref_name }}"
+          BUILD="${TAG##*+}"
+          NAME="${TAG%%+*}"
+          case "$BUILD" in
+            *[!0-9]*|"") echo "::error::Tag sem build number (+N). Use vX.Y.Z+BUILD."; exit 1;;
+          esac
+          case "$NAME" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::Tag sem semver vX.Y.Z."; exit 1;;
+          esac
+          LAST="$(git tag -l 'v*' | grep -v "^$TAG\$" | sed -E 's/^v[0-9]+\.[0-9]+\.[0-9]+\+//' | grep -E '^[0-9]+$' | sort -n | tail -1)"
+          if [ -n "$LAST" ] && [ "$BUILD" -le "$LAST" ]; then
+            echo "::error::BUILD $BUILD não é maior que a última release ($LAST). N nunca decresce."
+            exit 1
+          fi
+          CHANGELOG="$(git tag -l --format='%(contents:body)' "$TAG")"
+          if [ -z "${CHANGELOG// }" ]; then
+            echo "::error::Tag sem mensagem (changelog) — o diálogo do app mostra este corpo."
+            exit 1
+          fi
+
+      - name: Restaura o keystore oficial (chave DEBUG = política Fase 0-A)
+        run: |
+          mkdir -p "$HOME/.android"
+          echo "$ANDROID_DEBUG_KEYSTORE" | base64 -d > "$HOME/.android/debug.keystore"
+        env:
+          ANDROID_DEBUG_KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+
+      - name: Build APK release (mesma chave dos instalados)
+        run: |
+          TAG="${{ github.ref_name }}"
+          flutter build apk --release \
+            --build-name "${TAG#v}" \
+            --build-number "${TAG##*+}"
+
+      - name: Cria release com APK + SHA256
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          SHA256="$(sha256sum build/app/outputs/flutter-apk/app-release.apk | cut -d' ' -f1)"
+          ASSET="goanime-tv-$TAG.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$ASSET"
+          CHANGELOG="$(git tag -l --format='%(contents:body)' "$TAG")"
+          gh release create "$TAG" "$ASSET" \
+            --title "$TAG" \
+            --notes "${CHANGELOG}
+
+---
+
+SHA256: $SHA256"

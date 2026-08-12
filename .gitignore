@@ -23,6 +23,15 @@ migrate_working_dir/
 # is commented out by default.
 #.vscode/
 
+# Keystores and signing secrets — never commit
+*.jks
+*.keystore
+key.properties
+android/key.properties
+.secrets/
+# Screenshots de QA geradas nos testes de emulador
+/.qa/emu/
+
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
@@ -46,3 +55,5 @@ app.*.map.json
 
 # Gradle build metadata — never commit
 /android/.gradle/
+# local.properties embute caminhos da máquina local (ex.: sdk.dir) — nunca commit
+android/local.properties

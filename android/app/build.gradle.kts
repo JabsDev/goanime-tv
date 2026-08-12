@@ -40,6 +40,11 @@ kotlin {
     }
 }
 
+dependencies {
+    // FileProvider (fallback ACTION_VIEW do updater) vem do androidx.core.
+    implementation("androidx.core:core-ktx:1.13.1")
+}
+
 flutter {
     source = "../.."
 }

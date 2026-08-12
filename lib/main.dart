@@ -3,6 +3,7 @@ import 'package:media_kit/media_kit.dart';
 import 'core/profile/profile_service.dart';
 import 'core/storage/local_storage.dart';
 import 'core/storage/settings_service.dart';
+import 'core/updater/update_service.dart';
 import 'app.dart';
 
 void main() async {
@@ -16,6 +17,7 @@ void main() async {
     await LocalStorage.init();
     await SettingsService.instance.init();
     await ProfileService.instance.init();
+    await UpdateService.instance.init();
     runApp(const GoAnimeTVApp());
   } catch (e) {
     debugPrint('[Main] Error initializing app: $e');

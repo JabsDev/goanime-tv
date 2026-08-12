@@ -27,8 +27,8 @@ class ProfileStore {
   List<Profile> get profiles => _profiles.values.toList();
   Profile? get currentProfile => _current;
 
-  Future<void> init() async {
-    final docs = await getApplicationDocumentsDirectory();
+  Future<void> init({Directory? rootOverride}) async {
+    final docs = rootOverride ?? await getApplicationDocumentsDirectory();
     _rootDir = Directory('${docs.path}/profiles');
     if (!_rootDir!.existsSync()) _rootDir!.createSync(recursive: true);
     await _loadAllProfiles();
@@ -43,13 +43,29 @@ class ProfileStore {
       if (entry is! Directory) continue;
       final f = File('${entry.path}/profile.json');
       if (!f.existsSync()) continue;
+      Profile? p;
       try {
         final json = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
-        final p = Profile.fromJson(json);
-        _profiles[p.id] = p;
+        p = Profile.fromJson(json);
       } catch (e) {
-        debugPrint('[ProfileStore] corrupt profile at ${entry.path}: $e');
+        // I-4: tenta a última versão boa (.bak) antes de abandonar o perfil.
+        final bak = File('${f.path}.bak');
+        if (bak.existsSync()) {
+          try {
+            final json =
+                jsonDecode(bak.readAsStringSync()) as Map<String, dynamic>;
+            p = Profile.fromJson(json);
+            debugPrint('[ProfileStore] perfil recuperado de .bak: ${entry.path}');
+          } catch (_) {
+            p = null;
+          }
+        }
+        if (p == null) {
+          debugPrint(
+              '[ProfileStore] perfil ilegível ${entry.path} — arquivo preservado');
+        }
       }
+      if (p != null) _profiles[p.id] = p;
     }
   }
 
@@ -82,58 +98,96 @@ class ProfileStore {
     _listsCache = _readJsonMap(File('${dir.path}/lists_cache.json'));
   }
 
+  /// I-4: leitura nunca devolve "vazio por falha de parse" de forma silenciosa.
+  /// Tenta o `.bak` (última versão boa) antes de virar `[]`/`{}`, e o arquivo
+  /// ilegível é **preservado em disco** (nunca sobrescrito por engano).
   List<Map<String, dynamic>> _readJsonList(File f) {
     if (!f.existsSync()) return [];
+    final direct = _decodeList(f);
+    if (direct != null) return direct;
+    final bak = _decodeList(File('${f.path}.bak'));
+    if (bak != null) return bak;
+    debugPrint('[ProfileStore] lista ilegível ${f.path} — preservada, vazia');
+    return [];
+  }
+
+  Map<String, Map<String, dynamic>> _readProgressMap(File f) {
+    if (!f.existsSync()) return {};
+    final direct = _decodeMap(f);
+    if (direct != null) return direct;
+    final bak = _decodeMap(File('${f.path}.bak'));
+    if (bak != null) return bak;
+    debugPrint('[ProfileStore] progresso ilegível ${f.path} — preservado, vazio');
+    return {};
+  }
+
+  Map<String, dynamic>? _readJsonMap(File f) {
+    if (!f.existsSync()) return null;
+    final direct = _decodeMap(f);
+    if (direct != null) return direct;
+    final bak = _decodeMap(File('${f.path}.bak'));
+    if (bak != null) return bak;
+    debugPrint('[ProfileStore] mapa ilegível ${f.path} — preservado, nulo');
+    return null;
+  }
+
+  List<Map<String, dynamic>>? _decodeList(File f) {
+    if (!f.existsSync()) return null;
     try {
       final raw = f.readAsStringSync();
       if (raw.isEmpty) return [];
       return (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
     } catch (e) {
       debugPrint('[ProfileStore] list read fail ${f.path}: $e');
-      return [];
+      return null;
     }
   }
 
-  Map<String, Map<String, dynamic>> _readProgressMap(File f) {
-    if (!f.existsSync()) return {};
+  Map<String, Map<String, dynamic>>? _decodeMap(File f) {
+    if (!f.existsSync()) return null;
     try {
       final raw = f.readAsStringSync();
       if (raw.isEmpty) return {};
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
-      return decoded.map((k, v) =>
-          MapEntry(k, (v as Map).cast<String, dynamic>()));
-    } catch (e) {
-      debugPrint('[ProfileStore] progress read fail ${f.path}: $e');
-      return {};
-    }
-  }
-
-  Map<String, dynamic>? _readJsonMap(File f) {
-    if (!f.existsSync()) return null;
-    try {
-      final raw = f.readAsStringSync();
-      if (raw.isEmpty) return null;
-      return (jsonDecode(raw) as Map).cast<String, dynamic>();
+      return decoded
+          .map((k, v) => MapEntry(k, (v as Map).cast<String, dynamic>()));
     } catch (e) {
       debugPrint('[ProfileStore] map read fail ${f.path}: $e');
       return null;
     }
   }
 
+  /// I-5: escrita atômica (temp+rename) com `.bak` da versão anterior.
+  /// Um kill do processo no meio nunca deixa o arquivo principal truncado.
+  Future<void> _atomicWrite(File f, String content) async {
+    _atomicWriteSync(f, content);
+  }
+
+  void _atomicWriteSync(File f, String content) {
+    final tmp = File('${f.path}.tmp');
+    tmp.writeAsStringSync(content, flush: true);
+    if (f.existsSync()) {
+      final bak = File('${f.path}.bak');
+      if (bak.existsSync()) bak.deleteSync();
+      f.renameSync(bak.path);
+    }
+    tmp.renameSync(f.path);
+  }
+
   Future<void> _writeJsonList(File f, List<Map<String, dynamic>> list) async {
-    await f.writeAsString(jsonEncode(list), flush: false);
+    await _atomicWrite(f, jsonEncode(list));
   }
 
   Future<void> _writeProgress(File f) async {
-    await f.writeAsString(jsonEncode(_progress), flush: false);
+    await _atomicWrite(f, jsonEncode(_progress));
   }
 
   Future<void> _writeJsonMap(File f, Map<String, dynamic>? map) async {
     if (map == null) {
       if (f.existsSync()) await f.delete();
-    } else {
-      await f.writeAsString(jsonEncode(map), flush: false);
+      return;
     }
+    await _atomicWrite(f, jsonEncode(map));
   }
 
   Directory _profileDir(String id) => Directory('${_rootDir!.path}/$id');
@@ -148,7 +202,8 @@ class ProfileStore {
       type: type,
       createdAt: DateTime.now(),
     );
-    File('${dir.path}/profile.json').writeAsStringSync(jsonEncode(p.toJson()));
+    _atomicWriteSync(
+        File('${dir.path}/profile.json'), jsonEncode(p.toJson()));
     _profiles[id] = p;
     return p;
   }
@@ -174,7 +229,20 @@ class ProfileStore {
 
   Future<void> _persistProfile(Profile p) async {
     final f = File('${_profileDir(p.id).path}/profile.json');
-    await f.writeAsString(jsonEncode(p.toJson()), flush: true);
+    await _atomicWrite(f, jsonEncode(p.toJson()));
+  }
+
+  /// I-6: grava tudo do perfil atual em disco, atômico, antes de instalar
+  /// uma atualização. Chamado por `UpdateService.flushData()`.
+  Future<void> flush() async {
+    if (_current == null) return;
+    final dir = _profileDir(_current!.id);
+    await _atomicWrite(
+        File('${dir.path}/profile.json'), jsonEncode(_current!.toJson()));
+    await _writeJsonList(File('${dir.path}/history.json'), _history);
+    await _writeJsonList(File('${dir.path}/favorites.json'), _favorites);
+    await _writeProgress(File('${dir.path}/progress.json'));
+    await _writeJsonMap(File('${dir.path}/lists_cache.json'), _listsCache);
   }
 
   Future<void> deleteProfile(String id) async {
@@ -308,8 +376,8 @@ class ProfileStore {
     if (listsCacheStr != null && listsCacheStr.isNotEmpty) {
       try {
         final listsJson = jsonDecode(listsCacheStr) as Map<String, dynamic>;
-        await File('${dir.path}/lists_cache.json')
-            .writeAsString(jsonEncode(listsJson));
+        await _atomicWrite(
+            File('${dir.path}/lists_cache.json'), jsonEncode(listsJson));
       } catch (e) {
         debugPrint('[ProfileStore] lists_cache migrate fail: $e');
       }
@@ -319,7 +387,8 @@ class ProfileStore {
     if (historyStr != null && historyStr.isNotEmpty) {
       try {
         final list = (jsonDecode(historyStr) as List).cast<Map<String, dynamic>>();
-        await File('${dir.path}/history.json').writeAsString(jsonEncode(list));
+        await _atomicWrite(
+            File('${dir.path}/history.json'), jsonEncode(list));
       } catch (e) {
         debugPrint('[ProfileStore] history migrate fail: $e');
       }
@@ -330,7 +399,8 @@ class ProfileStore {
       try {
         final list =
             (jsonDecode(favoritesStr) as List).cast<Map<String, dynamic>>();
-        await File('${dir.path}/favorites.json').writeAsString(jsonEncode(list));
+        await _atomicWrite(
+            File('${dir.path}/favorites.json'), jsonEncode(list));
       } catch (e) {
         debugPrint('[ProfileStore] favorites migrate fail: $e');
       }
@@ -345,7 +415,8 @@ class ProfileStore {
       } catch (_) {}
     }
     if (progressMap.isNotEmpty) {
-      await File('${dir.path}/progress.json').writeAsString(jsonEncode(progressMap));
+      await _atomicWrite(
+          File('${dir.path}/progress.json'), jsonEncode(progressMap));
     }
 
     await prefs.remove('anilist_token');

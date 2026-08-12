@@ -1,5 +1,9 @@
 enum ProfileType { local, anilist }
 
+/// Versão do esquema de dados persistidos. Qualquer mudança de formato
+/// incrementa este valor e adiciona uma migração no mesmo PR (I-4).
+const int kSchemaVersion = 1;
+
 class Profile {
   final String id;
   final String displayName;
@@ -26,6 +30,7 @@ class Profile {
   bool get hasAnilistToken => anilistToken != null && anilistToken!.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
+        'schema': kSchemaVersion,
         'id': id,
         'displayName': displayName,
         'type': type == ProfileType.anilist ? 'anilist' : 'local',

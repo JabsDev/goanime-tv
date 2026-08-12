@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
+import '../../core/updater/update_service.dart';
 import '../../shared/widgets/app_top_bar.dart';
 import '../../shared/widgets/focus_key_handler.dart';
+import '../../shared/widgets/tv_button.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -85,6 +87,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: () =>
                           SettingsService.instance.setUserPreference(false),
                     ),
+                    const SizedBox(height: 32),
+                    const Text(
+                      'Atualizações',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: ThemeConstants.white,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Verifica no GitHub por versões novas e atualiza app '
+                      'instalado por cima (sem perder seus dados).',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: ThemeConstants.textSecondary,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    _UpdateToggle(
+                      on: UpdateService.instance.checkOnLaunch,
+                      onChanged: (v) =>
+                          UpdateService.instance.setCheckOnLaunch(v),
+                    ),
+                    const SizedBox(height: 12),
+                    _CheckNowRow(),
                   ],
                 );
               },
@@ -185,6 +214,152 @@ class _ModeOption extends StatefulWidget {
 
   @override
   State<_ModeOption> createState() => _ModeOptionState();
+}
+
+class _UpdateToggle extends StatefulWidget {
+  final bool on;
+  final ValueChanged<bool> onChanged;
+
+  const _UpdateToggle({required this.on, required this.onChanged});
+
+  @override
+  State<_UpdateToggle> createState() => _UpdateToggleState();
+}
+
+class _UpdateToggleState extends State<_UpdateToggle> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) =>
+          FocusKeyHandler.handle(node, event, _toggle),
+      child: Semantics(
+        button: true,
+        toggled: widget.on,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: _toggle,
+            borderRadius: BorderRadius.circular(12),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              decoration: BoxDecoration(
+                color: ThemeConstants.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : ThemeConstants.surfaceLight,
+                  width: _isFocused ? 2 : 1.5,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    widget.on ? Icons.check_box : Icons.check_box_outline_blank,
+                    color: widget.on
+                        ? ThemeConstants.primary
+                        : ThemeConstants.textSecondary,
+                    size: 26,
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Verificar no início',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: ThemeConstants.white,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Checa no primeiro frame depois do app abrir.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: ThemeConstants.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _toggle() {
+    if (mounted) widget.onChanged(!widget.on);
+  }
+}
+
+class _CheckNowRow extends StatefulWidget {
+  @override
+  State<_CheckNowRow> createState() => _CheckNowRowState();
+}
+
+class _CheckNowRowState extends State<_CheckNowRow> {
+  bool _busy = false;
+
+  Future<void> _checkNow() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final updater = UpdateService.instance;
+    final result = await updater.check(manual: true);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (result == false) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Você está na versão mais recente.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        TVButton(
+          label: 'Verificar agora',
+          icon: Icons.refresh,
+          isPrimary: false,
+          onPressed: _checkNow,
+          width: 220,
+        ),
+        const SizedBox(width: 20),
+        _busy
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: ThemeConstants.primary,
+                ),
+              )
+            : Text(
+                'Versão instalada: ${UpdateService.instance.installedVersionLabel}',
+                style: const TextStyle(
+                  fontSize: 15,
+                  color: ThemeConstants.textMuted,
+                ),
+              ),
+      ],
+    );
+  }
 }
 
 class _ModeOptionState extends State<_ModeOption> {

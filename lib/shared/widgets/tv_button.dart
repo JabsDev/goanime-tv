@@ -71,12 +71,16 @@ class _TVButtonState extends State<TVButton> {
                     Icon(widget.icon, color: Colors.white, size: 24),
                     const SizedBox(width: 8),
                   ],
-                  Text(
-                    widget.label,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
+                  Flexible(
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
