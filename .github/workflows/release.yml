@@ -79,8 +79,10 @@ jobs:
       - name: Build APK release (mesma chave dos instalados)
         run: |
           TAG="${{ github.ref_name }}"
+          BUILD_NAME="${TAG#v}"
+          BUILD_NAME="${BUILD_NAME%%+*}"
           flutter build apk --release \
-            --build-name "${TAG#v}" \
+            --build-name "$BUILD_NAME" \
             --build-number "${TAG##*+}"
 
       - name: Cria release com APK + SHA256

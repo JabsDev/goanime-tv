@@ -59,6 +59,14 @@ void main() {
     await tmp.delete(recursive: true);
   });
 
+  test('label: versionName já com +N não duplica o build', () async {
+    UpdateService.instance
+        .debugSetInstalled(build: 1000001, version: '1.0.1+1000001');
+    expect(UpdateService.instance.installedVersionLabel, '1.0.1+1000001');
+    UpdateService.instance.debugSetInstalled(build: 1000000, version: '1.0.0');
+    expect(UpdateService.instance.installedVersionLabel, '1.0.0+1000000');
+  });
+
   test('manual: release nova → updateAvailable e retorna true', () async {
     UpdateService.clientOverride = MockClient(
         (req) async => okList(releaseJson('v1.0.1+1000001')));

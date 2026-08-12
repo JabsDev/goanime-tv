@@ -78,8 +78,10 @@ class UpdateService {
   int? _lastCheckAt;
   String? _ignoredTag;
 
-  String get installedVersionLabel =>
-      '$_installedVersion${_installedBuild > 0 ? '+$_installedBuild' : ''}';
+  String get installedVersionLabel {
+    if (_installedVersion.contains('+')) return _installedVersion;
+    return '$_installedVersion${_installedBuild > 0 ? '+$_installedBuild' : ''}';
+  }
 
   bool get checkOnLaunch => _checkOnLaunch;
 
