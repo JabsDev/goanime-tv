@@ -32,6 +32,8 @@ jobs:
           channel: stable
 
       - name: Valida build number estritamente crescente (D2)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
           BUILD="${TAG##*+}"
@@ -43,12 +45,19 @@ jobs:
             v[0-9]*.[0-9]*.[0-9]*) ;;
             *) echo "::error::Tag sem semver vX.Y.Z."; exit 1;;
           esac
-          LAST="$(git tag -l 'v*' | grep -v "^$TAG\$" | sed -E 's/^v[0-9]+\.[0-9]+\.[0-9]+\+//' | grep -E '^[0-9]+$' | sort -n | tail -1)"
+          LAST="$(git ls-remote --tags origin 'v*' | sed -E 's/.*refs\/tags\/(v[0-9]+\.[0-9]+\.[0-9]+\+[0-9]+)$/\1/' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+\+[0-9]+$' | grep -v "^$TAG\$" | sed -E 's/^v[0-9]+\.[0-9]+\.[0-9]+\+//' | sort -n | tail -1)"
           if [ -n "$LAST" ] && [ "$BUILD" -le "$LAST" ]; then
             echo "::error::BUILD $BUILD não é maior que a última release ($LAST). N nunca decresce."
             exit 1
           fi
-          CHANGELOG="$(git tag -l --format='%(contents:body)' "$TAG")"
+          # Corpo da tag lido via API (checkout não traz tags anotadas).
+          REF_TYPE="$(gh api "repos/${{ github.repository }}/git/refs/tags/$TAG" --jq .object.type)"
+          if [ "$REF_TYPE" = "tag" ]; then
+            TARGET="$(gh api "repos/${{ github.repository }}/git/refs/tags/$TAG" --jq .object.sha)"
+            CHANGELOG="$(gh api "repos/${{ github.repository }}/git/tags/$TARGET" --jq .message)"
+          else
+            CHANGELOG=""
+          fi
           if [ -z "${CHANGELOG// }" ]; then
             echo "::error::Tag sem mensagem (changelog) — o diálogo do app mostra este corpo."
             exit 1
@@ -77,7 +86,13 @@ jobs:
           SHA256="$(sha256sum build/app/outputs/flutter-apk/app-release.apk | cut -d' ' -f1)"
           ASSET="goanime-tv-$TAG.apk"
           cp build/app/outputs/flutter-apk/app-release.apk "$ASSET"
-          CHANGELOG="$(git tag -l --format='%(contents:body)' "$TAG")"
+          REF_TYPE="$(gh api "repos/${{ github.repository }}/git/refs/tags/$TAG" --jq .object.type)"
+          if [ "$REF_TYPE" = "tag" ]; then
+            TARGET="$(gh api "repos/${{ github.repository }}/git/refs/tags/$TAG" --jq .object.sha)"
+            CHANGELOG="$(gh api "repos/${{ github.repository }}/git/tags/$TARGET" --jq .message)"
+          else
+            CHANGELOG=""
+          fi
           printf '%s\n\n---\n\nSHA256: %s\n' "$CHANGELOG" "$SHA256" > release-notes.md
           gh release create "$TAG" "$ASSET" \
             --title "$TAG" \
