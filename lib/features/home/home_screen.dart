@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../data/models/anime.dart';
@@ -163,23 +164,25 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: ThemeConstants.background,
-      body: Column(
-        children: [
-          _buildTopBar(),
-          Expanded(
-            child: _isLoading
-                ? const Center(
+      body: _isLoading
+          ? Column(
+              children: [
+                _buildTopBar(),
+                const Expanded(
+                  child: Center(
                     child: CircularProgressIndicator(
                       color: ThemeConstants.primary,
                     ),
-                  )
-                : _buildContent(),
-          ),
-        ],
-      ),
+                  ),
+                ),
+              ],
+            )
+          : _buildContent(),
     );
   }
 
+  // ponytail: topbar virou o PRIMEIRO item do ListView de _buildContent, então
+  // rola junto com o conteúdo e nunca mais sobrepõe cards/sections ao scrolar.
   Widget _buildTopBar() {
     final top = MediaQuery.of(context).padding.top + 16;
     return Container(
@@ -194,41 +197,54 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: ThemeConstants.primary.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.play_circle_filled,
-                color: ThemeConstants.primary, size: 32),
-          ),
-          const SizedBox(width: 12),
-          const Text(
-            'GoAnime TV',
-            style: TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.bold,
-              color: ThemeConstants.white,
-            ),
-          ),
-          const Spacer(),
-          _FocusableNavItem(
-            icon: Icons.search,
-            label: 'Buscar',
-            autofocus: true,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SearchScreen()),
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: ThemeConstants.primary.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.play_circle_filled,
+                      color: ThemeConstants.primary, size: 32),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  'GoAnime TV',
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    color: ThemeConstants.white,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 24),
-          // ponytail: botão único de perfil — fundiu avatar AniList + nav Perfil.
-          // Dropdown cobre conectar/desconectar, atualizar, favoritos. Tudo num só.
-          _ProfileButton(
-            loggedIn: _anilistLoggedIn,
-            user: _anilistUser,
-            onTap: _showProfileMenu,
+          const _ClockWidget(),
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                _FocusableNavItem(
+                  icon: Icons.search,
+                  label: 'Buscar',
+                  autofocus: true,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SearchScreen()),
+                  ),
+                ),
+                const SizedBox(width: 24),
+                // ponytail: botão único de perfil — fundiu avatar AniList + nav Perfil.
+                // Dropdown cobre conectar/desconectar, atualizar, favoritos. Tudo num só.
+                _ProfileButton(
+                  loggedIn: _anilistLoggedIn,
+                  user: _anilistUser,
+                  onTap: _showProfileMenu,
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -414,6 +430,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return ListView(
       clipBehavior: Clip.none,
       children: [
+        _buildTopBar(),
         // Fase 6: status AniList (offline/rate-limit/Cloudflare/auth) — só
         // aparece quando o último erro foi diferente de ok.
         if (AniListService.lastErrorStatus != AniListStatus.ok)
@@ -609,6 +626,63 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ponytail: relógio central da topbar — marca as horas (HH:MM), atualizado
+// exatamente no segundo em que o minuto vira. Só pra marcar as horas mesmo.
+class _ClockWidget extends StatefulWidget {
+  const _ClockWidget();
+
+  @override
+  State<_ClockWidget> createState() => _ClockWidgetState();
+}
+
+class _ClockWidgetState extends State<_ClockWidget> {
+  Timer? _timer;
+  late DateTime _now;
+
+  @override
+  void initState() {
+    super.initState();
+    _now = DateTime.now();
+    _scheduleTick();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleTick() {
+    _timer?.cancel();
+    final now = DateTime.now();
+    final nextMinute = DateTime(now.year, now.month, now.day, now.hour, now.minute)
+        .add(const Duration(minutes: 1));
+    _timer = Timer(nextMinute.difference(now), () {
+      if (!mounted) return;
+      setState(() => _now = DateTime.now());
+      _scheduleTick();
+    });
+  }
+
+  String _timeLabel() {
+    final h = _now.hour.toString().padLeft(2, '0');
+    final m = _now.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      _timeLabel(),
+      style: const TextStyle(
+        fontSize: 20,
+        fontWeight: FontWeight.w600,
+        color: ThemeConstants.textSecondary,
+      ),
     );
   }
 }
