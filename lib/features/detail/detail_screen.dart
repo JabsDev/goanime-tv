@@ -9,6 +9,7 @@ import '../../core/storage/local_storage.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/utils/quality_picker.dart';
+import '../../core/sources/source_ping_service.dart';
 import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import '../player/player_screen.dart';
@@ -355,6 +356,7 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
       );
     }
 
+    final nextEpisodeIndex = _nextEpisodeIndex();
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
       sliver: SliverList(
@@ -400,6 +402,7 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
                 }).toList(),
               ),
             ),
+          if (nextEpisodeIndex != null) _buildContinueCard(nextEpisodeIndex),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: const Text(
@@ -458,6 +461,37 @@ if (_episodes.isEmpty)
      );
    }
 
+  /// Next episode index to continue from, derived from the same watch progress
+  /// the grid uses (contiguous `watched` prefix ∪ high-water `episode`).
+  /// Returns `null` when there's no history or the series is finished.
+  int? _nextEpisodeIndex() {
+    if (_episodes.isEmpty) return null;
+    final progress = LocalStorage.getWatchProgress(widget.anime.name);
+    if (progress == null) return null;
+    final watchedSet =
+        (progress['watched'] as List?)?.cast<int>().toSet() ?? <int>{};
+    final epIndex = (progress['episode'] as int?) ?? -1;
+    var maxWatchedIdx = -1;
+    if (watchedSet.isNotEmpty) {
+      final m = watchedSet.reduce((a, b) => a > b ? a : b);
+      if (m > maxWatchedIdx) maxWatchedIdx = m;
+    }
+    if (epIndex > maxWatchedIdx) maxWatchedIdx = epIndex;
+    final next = maxWatchedIdx + 1;
+    if (next >= _episodes.length) return null;
+    return next;
+  }
+
+  Widget _buildContinueCard(int nextIndex) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: _ContinueWatchingCard(
+        episode: _episodes[nextIndex],
+        onPlay: () => _showEpisodeSourcePicker(nextIndex),
+      ),
+    );
+  }
+
   Widget _buildSliverEpisodeGrid() {
     final width = MediaQuery.sizeOf(context).width;
     // ponytail: FireTV reporta density 320 (dpr 2.0) → logical width = 960.
@@ -493,6 +527,9 @@ if (_episodes.isEmpty)
           anime: widget.anime,
           isWatched: i <= maxWatchedIdx,
           isFirstRow: i < crossAxisCount,
+          // The continue card is the natural focus target when visible, so
+          // the first grid card only autofocuses when there's no such card.
+          autofocus: i == 0 && _nextEpisodeIndex() == null,
           onUpFromFirstRow: i < crossAxisCount
               ? () => _favoriteFocus.requestFocus()
               : null,
@@ -509,6 +546,7 @@ class _EpisodeCard extends StatefulWidget {
   final Anime anime;
   final bool isWatched;
   final bool isFirstRow;
+  final bool autofocus;
   final VoidCallback? onUpFromFirstRow;
   final VoidCallback onPlay;
 
@@ -520,6 +558,7 @@ class _EpisodeCard extends StatefulWidget {
     required this.isWatched,
     required this.onPlay,
     this.isFirstRow = false,
+    this.autofocus = false,
     this.onUpFromFirstRow,
   });
 
@@ -626,7 +665,7 @@ class _EpisodeCardState extends State<_EpisodeCard> {
     return Focus(
       // B5: foco inicial pousa no primeiro episódio (sempre visível no grid
       // da TV) em vez de em nó fora do viewport/header colapsado.
-      autofocus: widget.index == 0,
+      autofocus: widget.autofocus,
       onFocusChange: (focused) {
         setState(() => _isFocused = focused);
       },
@@ -711,6 +750,113 @@ class _EpisodeCardState extends State<_EpisodeCard> {
   }
 }
 
+/// TV-focusable card shown above the episode grid: "Continue de onde parou"
+/// with the next episode. Same focus mechanics as [_EpisodeCard].
+class _ContinueWatchingCard extends StatefulWidget {
+  final CatalogEpisode episode;
+  final VoidCallback onPlay;
+
+  const _ContinueWatchingCard({
+    required this.episode,
+    required this.onPlay,
+  });
+
+  @override
+  State<_ContinueWatchingCard> createState() => _ContinueWatchingCardState();
+}
+
+class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      autofocus: true,
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) =>
+          FocusKeyHandler.handle(node, event, widget.onPlay),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: widget.onPlay,
+          child: AnimatedContainer(
+            duration: SettingsService.instance.animDuration,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  ThemeConstants.primary.withValues(alpha: 0.22),
+                  ThemeConstants.surfaceLight.withValues(alpha: 0.9),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: _isFocused
+                    ? ThemeConstants.primary
+                    : ThemeConstants.primary.withValues(alpha: 0.35),
+                width: _isFocused ? ThemeConstants.focusBorderWidth : 1,
+              ),
+              boxShadow: (_isFocused && SettingsService.instance.shadowsEnabled)
+                  ? [
+                      BoxShadow(
+                        color: ThemeConstants.primary.withValues(alpha: 0.4),
+                        blurRadius: ThemeConstants.focusGlowBlur,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : [],
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.play_circle_fill,
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : ThemeConstants.white,
+                  size: 36,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Continuar de onde parou',
+                        style: TextStyle(
+                          color: _isFocused
+                              ? ThemeConstants.primary
+                              : ThemeConstants.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Episódio ${widget.episode.number} a seguir',
+                        style: const TextStyle(
+                          color: ThemeConstants.textSecondary,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right,
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : ThemeConstants.white,
+                  size: 30,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // Replaces the old _QualityDialog. Instead of resolving ONE provider's
 // qualities, it resolves the episode across ALL providers on tap and shows a
 // two-level picker in a single dialog: Provider → Quality. The provider with
@@ -743,6 +889,9 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   Set<AnimeSource> _matchedUnavailable = {};
   AnimeSource? _selectedProvider;
 
+  /// Latency (ms) per resolved provider. Absent = still measuring; -1 = timeout.
+  final Map<AnimeSource, int> _pings = {};
+
   @override
   void initState() {
     super.initState();
@@ -768,6 +917,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
         _selectedProvider = best;
         _loading = false;
       });
+      _probeLatency(resolution.providers.keys);
     } catch (e) {
       if (!mounted) return;
       debugPrint('[ProviderDialog] resolve error: $e');
@@ -779,6 +929,25 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   }
 
   String _sourceName(AnimeSource s) => s.name;
+
+  /// Probes latency for the resolved providers in parallel. Updates [_pings]
+  /// as each measurement lands so the label appears without blocking the picker.
+  void _probeLatency(Iterable<AnimeSource> sources) {
+    for (final source in sources) {
+      SourcePingService.instance.ping(source).then((ms) {
+        if (!mounted) return;
+        setState(() => _pings[source] = ms ?? -1);
+      });
+    }
+  }
+
+  /// Label for the provider row: `"42 ms"` when measured, `"--"` on timeout,
+  /// `null` (nothing rendered) while still measuring.
+  String? _pingLabel(AnimeSource source) {
+    final ms = _pings[source];
+    if (ms == null) return null;
+    return ms < 0 ? SourcePingService.unknownPing : '$ms ms';
+  }
 
   void _navigateToPlayer(AnimeSource provider, int qualityIndex) {
     final sources = _providers?[provider] ?? const <VideoSource>[];
@@ -1018,6 +1187,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
         padding: const EdgeInsets.symmetric(vertical: 5),
         child: _ProviderItem(
           label: _sourceName(e.key),
+          ping: _pingLabel(e.key),
           isSelected: selected == e.key,
           onTap: () {
             setState(() => _selectedProvider = e.key);
@@ -1185,6 +1355,7 @@ class _QualityItemState extends State<_QualityItem> {
 // _QualityItem, com check de seleção no lado direito.
 class _ProviderItem extends StatefulWidget {
   final String label;
+  final String? ping;
   final bool isSelected;
   final VoidCallback onTap;
 
@@ -1192,6 +1363,7 @@ class _ProviderItem extends StatefulWidget {
     required this.label,
     required this.isSelected,
     required this.onTap,
+    this.ping,
   });
 
   @override
@@ -1260,6 +1432,20 @@ class _ProviderItemState extends State<_ProviderItem> {
                       ),
                     ),
                   ),
+                  if (widget.ping != null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Text(
+                        widget.ping!,
+                        style: TextStyle(
+                          color: _isFocused
+                              ? ThemeConstants.primary
+                              : ThemeConstants.textSecondary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   if (widget.isSelected)
                     const Icon(
                       Icons.check_circle,

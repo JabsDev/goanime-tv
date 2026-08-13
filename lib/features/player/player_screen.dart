@@ -61,6 +61,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _loadTimeout;
   String? _error;
 
+  // ponytail: completed espúrio. O mpv dispara end-of-file logo após
+  // `open()` de fontes AnimeFire (lightspeedst.net mp4) mesmo com o vídeo
+  // tocando — antes o handler auto-avançava e o player DESCIA até a última
+  // qualidade (o seletor ficava "fixo em 360p"). Só trata como fonte morta
+  // quando a fonte nunca chegou a reproduzir.
+  bool _gotPlayback = false;
+
   List<VideoSource> _sources = [];
   int _selectedQualityIndex = 0;
 
@@ -146,6 +153,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final ordered = sortBestFirst(sources);
       final mapped = ordered.indexWhere((s) => identical(s, chosen));
       startIndex = mapped >= 0 ? mapped : 0;
+      debugPrint('[Player] Resolved ${widget.provider} sources: '
+          '${ordered.map((s) => '${s.quality}:${Uri.parse(s.url).host}').join(' | ')}');
       setState(() => _sources = ordered);
       await _playSource(startIndex);
     } catch (e) {
@@ -167,6 +176,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _isLoading = true;
       _error = null;
       _videoReady = false;
+      _gotPlayback = false;
       _anilistPushedForThisEp = false;
     });
     _loadTimeout?.cancel();
@@ -223,8 +233,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _durationSub?.cancel();
     _completedSub?.cancel();
     _errorSub?.cancel();
+    _player.stream.videoParams.listen((p) {
+      if (!mounted) return;
+      debugPrint('[Player] videoParams resolution: '
+          '${p.w}x${p.h} (aspect-corrected ${p.dw}x${p.dh})');
+    });
     _player.stream.playing.listen((p) {
       if (!mounted) return;
+      if (p) _gotPlayback = true;
       debugPrint('[Player] Playing: $p');
       setState(() => _isPlaying = p);
     });
@@ -253,6 +269,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // ponytail: completed com dur=0 = arquivo vazio/404 (visto em AnimeFire 720p hd/3.mp4).
       // Antes o early-return só jogava pro timeout. Auto-avança agora.
       if (!_videoReady) {
+        // completed ESPÚRIO: mpv emite EOF imediatamente após open() em fontes
+        // AnimeFire mp4 mesmo com o vídeo tocando (Playing=true já observado).
+        // Avançar nesse caso joga o player para a PRÓXIMA qualidade e, por
+        // encadeamento, termina sempre na última (menor). Só avança quando a
+        // fonte nunca chegou a reproduzir — o timeout de load é o backstop.
+        if (_gotPlayback) {
+          debugPrint('[Player] Ignoring spurious completed (source is playing)');
+          return;
+        }
         _advanceSource();
         return;
       }

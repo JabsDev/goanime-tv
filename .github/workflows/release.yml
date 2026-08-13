@@ -83,7 +83,8 @@ jobs:
           BUILD_NAME="${BUILD_NAME%%+*}"
           flutter build apk --release \
             --build-name "$BUILD_NAME" \
-            --build-number "${TAG##*+}"
+            --build-number "${TAG##*+}" \
+            --dart-define=WEBVIEW_NAV=true
 
       - name: Cria release com APK + SHA256
         env:
