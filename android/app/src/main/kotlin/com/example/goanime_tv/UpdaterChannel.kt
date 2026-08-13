@@ -1,12 +1,8 @@
 package com.example.goanime_tv
 
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
-import android.content.Context
+import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageInstaller
 import android.net.Uri
-import android.os.Build
 import android.os.StatFs
 import androidx.core.content.FileProvider
 import io.flutter.plugin.common.BinaryMessenger
@@ -16,22 +12,29 @@ import java.io.File
 
 /// Canal nativo do auto-update.
 ///
-/// - `installApk(path)` — sessão `PackageInstaller` (commit atômico, sem wipe)
-///   com resultado voltando por `installResult` via [UpdateResultReceiver].
-/// - `getFreeBytes()` — espaço livre do volume externo (pre-flight D5-b).
-/// - `openInstaller(path)` — fallback `ACTION_VIEW` com FileProvider.
+/// Instala via `ACTION_INSTALL_PACKAGE` (FileProvider + EXTRA_RETURN_RESULT),
+/// delegando a confirmação ao instalador do sistema. Este é o caminho
+/// primário de propósito: a sessão `PackageInstaller` (commit + confirmação
+/// via `STATUS_PENDING_USER_ACTION`) é quebrada em MIUI/HyperOS (Xiaomi) e
+/// Fire OS — a tela de confirmação nunca aparece e o fluxo fica preso em
+/// "Instalando...". `ACTION_INSTALL_PACKAGE` é o mesmo caminho usado por
+/// gerenciadores de arquivos/navegadores, que mostra a confirmação de forma
+/// confiável em todas as ROMs.
+///
+/// O resultado da instalação volta por `onActivityResult` da Activity e é
+/// repassado ao Dart por `installResult`. No caso de sucesso o processo é
+/// encerrado pelo sistema durante a instalação; o usuário reabre o app na
+/// versão nova.
 class UpdaterChannel(
-    private val context: Context,
+    private val activity: Activity,
     messenger: BinaryMessenger,
 ) : MethodChannel.MethodCallHandler {
 
+    private val context = activity.applicationContext
     private val channel = MethodChannel(messenger, CHANNEL_NAME)
-    private var resultReceiver: UpdateResultReceiver? = null
-    private var resultRegistered = false
 
     fun register() {
         channel.setMethodCallHandler(this)
-        ensureReceiver()
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -42,7 +45,7 @@ class UpdaterChannel(
                     result.error("bad_args", "path ausente", null)
                     return
                 }
-                installApk(File(path), result)
+                launchSystemInstaller(File(path), result)
             }
             "openInstaller" -> {
                 val path = call.argument<String>("path")
@@ -50,65 +53,60 @@ class UpdaterChannel(
                     result.error("bad_args", "path ausente", null)
                     return
                 }
-                openSystemInstaller(File(path), result)
+                launchSystemInstaller(File(path), result)
             }
             "getFreeBytes" -> result.success(freeBytes())
             else -> result.notImplemented()
         }
     }
 
-    /// Inicia a instalação. `result.success(true)` significa "commit iniciado"
-    /// — o desfecho real chega por `installResult` (o commit é assíncrono e o
-    /// SO pode pedir confirmação antes).
-    private fun installApk(file: File, result: MethodChannel.Result) {
+    /// Abre o instalador do sistema (`ACTION_INSTALL_PACKAGE`) para o APK.
+    /// `result.success(true)` significa "instalador aberto" — o desfecho real
+    /// chega por `onActivityResult` → `installResult`.
+    private fun launchSystemInstaller(file: File, result: MethodChannel.Result) {
         if (!file.exists()) {
             result.error("no_file", "APK baixado não encontrado em disco", null)
             return
         }
         try {
-            val installer = context.packageManager.packageInstaller
-            val params =
-                PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-            params.setSize(file.length())
-            val sessionId = installer.createSession(params)
-            val session = installer.openSession(sessionId)
-            try {
-                session.openWrite("goanime", 0, file.length()).use { sink ->
-                    file.inputStream().use { ins ->
-                        val buf = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var n = ins.read(buf)
-                        while (n >= 0) {
-                            sink.write(buf, 0, n)
-                            n = ins.read(buf)
-                        }
-                    }
-                }
-                session.commit(resultIntent().intentSender)
-            } finally {
-                session.close()
-            }
-            result.success(true)
-        } catch (e: Exception) {
-            channel.invokeMethod(
-                "installResult",
-                mapOf("success" to false, "message" to friendlyMessage(e)),
-            )
-            result.error("install_failed", e.message, null)
-        }
-    }
-
-    private fun openSystemInstaller(file: File, result: MethodChannel.Result) {
-        try {
             val uri = FileProvider.getUriForFile(
                 context, "${context.packageName}.fileprovider", file)
-            val intent = Intent(Intent.ACTION_VIEW)
+            val intent = Intent(Intent.ACTION_INSTALL_PACKAGE)
                 .setDataAndType(uri, "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .putExtra(Intent.EXTRA_RETURN_RESULT, true)
+            activity.startActivityForResult(intent, REQUEST_INSTALL)
             result.success(true)
         } catch (e: Exception) {
             result.error("no_activity", "Nenhum instalador disponível", null)
         }
+    }
+
+    /// Recebido da Activity (`MainActivity.onActivityResult`) quando o
+    /// instalador do sistema termina. Repassa o desfecho ao Dart.
+    fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != REQUEST_INSTALL) return
+        if (resultCode == Activity.RESULT_OK) {
+            channel.invokeMethod(
+                "installResult",
+                mapOf("success" to true, "message" to null),
+            )
+            return
+        }
+        if (resultCode == Activity.RESULT_CANCELED) {
+            channel.invokeMethod(
+                "installResult",
+                mapOf(
+                    "success" to false,
+                    "message" to "A instalação foi cancelada na tela do Android.",
+                ),
+            )
+            return
+        }
+        channel.invokeMethod(
+            "installResult",
+            mapOf("success" to false, "message" to installResultMessage(resultCode)),
+        )
     }
 
     private fun freeBytes(): Long {
@@ -121,105 +119,16 @@ class UpdaterChannel(
         }
     }
 
-    private fun resultIntent(): PendingIntent {
-        val intent =
-            Intent(context, UpdateResultReceiver::class.java)
-                .setAction(UpdateResultReceiver.ACTION_RESULT)
-        return PendingIntent.getBroadcast(
-            context,
-            1001,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
-        )
-    }
-
-    /// Registrado enquanto a Activity vive. `singleTop` + registro único em
-    /// `configureFlutterEngine` evita duplicatas (D6). O commit do
-    /// PackageInstaller costuma encerrar o processo: neste caso o receiver
-    /// morre junto e o usuário simplesmente reabre o app (nova versão).
-    private fun ensureReceiver() {
-        if (resultRegistered) return
-        resultRegistered = true
-        resultReceiver = UpdateResultReceiver { success, message ->
-            channel.invokeMethod(
-                "installResult",
-                mapOf("success" to success, "message" to message),
-            )
-        }
-        context.registerReceiver(
-            resultReceiver,
-            UpdateResultReceiver.filter(),
-            Context.RECEIVER_EXPORTED,
-        )
-    }
-
     companion object {
         const val CHANNEL_NAME = "goanime_tv/updater"
-    }
-
-    class UpdateResultReceiver(
-        private val onResult: (Boolean, String?) -> Unit,
-    ) : BroadcastReceiver() {
-
-        override fun onReceive(context: Context, intent: Intent) {
-            val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -1)
-            when (status) {
-                // Confirmação do sistema: a activity de confirmação vem em
-                // `Intent.EXTRA_INTENT` e PRECISA ser lançada pelo app. Sem isso
-                // o fluxo fica preso em "aguardando confirmação do Android"
-                // (loop na tela de instalação).
-                PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                    val confirm = if (Build.VERSION.SDK_INT >= 33) {
-                        intent.getParcelableExtra(
-                            Intent.EXTRA_INTENT, Intent::class.java)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        intent.getParcelableExtra(Intent.EXTRA_INTENT)
-                    }
-                    if (confirm != null) {
-                        try {
-                            context.startActivity(
-                                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        } catch (e: Exception) {
-                            onResult(false, "Não foi possível abrir a " +
-                                "confirmação do Android: ${e.message}")
-                        }
-                    } else {
-                        onResult(false, "Confirmação do Android indisponível.")
-                    }
-                }
-                PackageInstaller.STATUS_SUCCESS -> onResult(true, null)
-                else -> onResult(false, messageFor(status))
-            }
-        }
-
-        companion object {
-            const val ACTION_RESULT = "com.example.goanime_tv.UPDATE_RESULT"
-
-            fun filter() =
-                android.content.IntentFilter(ACTION_RESULT)
-        }
+        private const val REQUEST_INSTALL = 1102
     }
 }
 
-private fun messageFor(status: Int): String = when (status) {
-    PackageInstaller.STATUS_FAILURE_ABORTED ->
-        "A instalação foi cancelada na tela do Android."
-    PackageInstaller.STATUS_FAILURE_BLOCKED ->
-        "Instalação bloqueada. Habilite \"Fontes desconhecidas\" e tente de novo."
-    PackageInstaller.STATUS_FAILURE_CONFLICT -> "Assinatura divergente: esta versão " +
-        "não pode atualizar a instalada sem desinstalar (perderia seus dados)."
-    PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
-        "O APK é incompatível com este dispositivo."
-    PackageInstaller.STATUS_FAILURE_INVALID -> "O APK está inválido ou corrompido."
-    PackageInstaller.STATUS_FAILURE_STORAGE ->
-        "Espaço em disco insuficiente para instalar."
-    else -> "A instalação falhou com o status $status."
-}
-
-private fun friendlyMessage(e: Exception): String = when {
-    e.message?.lowercase()?.contains("sign") == true -> "Assinatura divergente: a " +
-        "versão instalada e a nova usam chaves diferentes."
-    e.message?.lowercase()?.contains("space") == true -> "Espaço em disco insuficiente."
-    else -> e.message ?: "Falha ao iniciar a instalação."
+private fun installResultMessage(resultCode: Int): String = when (resultCode) {
+    // O instalador do sistema devolve RESULT_FIRST_USER em qualquer falha; o
+    // motivo detalhado ia em `Intent.EXTRA_INSTALL_RESULT` (ocultado na API
+    // 36). Sem o extra, a mensagem é genérica — o diálogo do Dart já oferece
+    // "Abrir instalador do sistema" e "Tentar novamente" como ações.
+    else -> "A instalação falhou na tela do Android."
 }
