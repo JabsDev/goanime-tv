@@ -27,6 +27,8 @@ LIST_QUERY='query ($userId: Int) {
            episodes
            format
            status
+           isAdult
+           genres
            nextAiringEpisode { episode timeUntilAiring }
          }
       }
@@ -46,7 +48,9 @@ ENRICH_QUERY='
             episodes
             status
             averageScore
+            isAdult
             genres
+            tags { name }
             nextAiringEpisode { episode timeUntilAiring }
           }
         }

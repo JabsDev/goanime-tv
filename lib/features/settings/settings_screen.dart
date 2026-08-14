@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/updater/update_service.dart';
+import '../../core/utils/nsfw_filter.dart';
 import '../../shared/widgets/app_top_bar.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import '../../shared/widgets/tv_button.dart';
@@ -86,6 +87,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       selected: user == false,
                       onTap: () =>
                           SettingsService.instance.setUserPreference(false),
+                    ),
+                    const SizedBox(height: 32),
+                    const Text(
+                      'Filtro de conteúdo',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: ThemeConstants.white,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Esconde animes adultos e ecchi da busca, da home e das '
+                      'listas. Níveis: ecchi é mais leve que hentai. O filtro '
+                      'vem ativado por padrão.',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: ThemeConstants.textSecondary,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ValueListenableBuilder<NsfwFilterSetting>(
+                      valueListenable:
+                          SettingsService.instance.nsfwFilterListenable,
+                      builder: (context, nsfwSetting, _) {
+                        return Column(
+                          children: [
+                            _ModeOption(
+                              label: 'Filtrar (padrão)',
+                              description:
+                                  'Esconde animes hentai e ecchi',
+                              selected: nsfwSetting == NsfwFilterSetting.strict,
+                              onTap: () => SettingsService.instance
+                                  .setNsfwFilterLevel(NsfwFilterSetting.strict),
+                            ),
+                            _ModeOption(
+                              label: 'Permitir ecchi',
+                              description:
+                                  'Esconde só hentai, mostra animes ecchi',
+                              selected: nsfwSetting == NsfwFilterSetting.soft,
+                              onTap: () => SettingsService.instance
+                                  .setNsfwFilterLevel(NsfwFilterSetting.soft),
+                            ),
+                            _ModeOption(
+                              label: 'Desativado',
+                              description:
+                                  'Mostra todo o conteúdo, sem filtro',
+                              selected: nsfwSetting == NsfwFilterSetting.off,
+                              onTap: () => SettingsService.instance
+                                  .setNsfwFilterLevel(NsfwFilterSetting.off),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                     const SizedBox(height: 32),
                     const Text(

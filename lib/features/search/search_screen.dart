@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../data/models/anime.dart';
 import '../../data/repositories/anime_repository.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/storage/settings_service.dart';
+import '../../core/utils/nsfw_filter.dart';
 import '../../shared/widgets/app_top_bar.dart';
 import '../../shared/widgets/focusable_card.dart';
 import '../../shared/widgets/focus_key_handler.dart';
@@ -40,7 +42,8 @@ class _SearchScreenState extends State<SearchScreen> {
       final results = await _repo.searchAnime(q);
       if (!mounted) return;
       setState(() {
-        _results = results;
+        _results = NsfwFilter.filter(
+            results, SettingsService.instance.nsfwFilterLevel);
         _isLoading = false;
       });
     } catch (e) {

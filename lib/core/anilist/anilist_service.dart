@@ -444,6 +444,8 @@ class AniListService {
           'episodes': e.media.episodes,
           'format': e.media.format,
           'status': e.media.status,
+          'isAdult': e.media.isAdult,
+          'genres': e.media.genres,
           if (e.nextEpisode != null || e.timeUntilAiring != null)
             'nextAiringEpisode': {
               'episode': e.nextEpisode,
@@ -503,6 +505,8 @@ class AniListService {
            episodes
            format
            status
+           isAdult
+           genres
            nextAiringEpisode { episode timeUntilAiring }
          }
       }
@@ -870,6 +874,7 @@ class AniListService {
     anime.status = media.status;
     anime.averageScore = media.averageScore;
     anime.genres = media.genres;
+    anime.isAdult = media.isAdult;
     if (media.coverImage.best.isNotEmpty) {
       anime.fallbackImageUrl = media.coverImage.best;
     }
@@ -889,7 +894,9 @@ class AniListService {
             episodes
             status
             averageScore
+            isAdult
             genres
+            tags { name }
             nextAiringEpisode { episode timeUntilAiring }
           }
         }

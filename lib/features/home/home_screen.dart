@@ -4,9 +4,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../data/models/anime.dart';
 import '../../data/models/anilist_models.dart';
 import '../../data/repositories/anime_repository.dart';
+import '../../core/cache/app_caches.dart';
 import '../../core/storage/local_storage.dart';
+import '../../core/utils/text_utils.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/storage/settings_service.dart';
+import '../../core/utils/nsfw_filter.dart';
 import '../../shared/widgets/focusable_card.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/cached_image.dart';
@@ -115,9 +119,10 @@ class _HomeScreenState extends State<HomeScreen> {
         AniListService.getPopularThisSeason(),
         AniListService.getAiringTomorrow(),
       ]);
-      var trending = results[0];
-      var season = results[1];
-      final tomorrow = results[2];
+      final setting = SettingsService.instance.nsfwFilterLevel;
+      var trending = NsfwFilter.filter(results[0], setting);
+      var season = NsfwFilter.filter(results[1], setting);
+      final tomorrow = NsfwFilter.filter(results[2], setting);
       if (trending.isNotEmpty || season.isNotEmpty || tomorrow.isNotEmpty) {
         final names = trending.map((a) => a.name.toLowerCase()).toSet();
         season = season.where((a) => !names.contains(a.name.toLowerCase())).toList();
@@ -138,8 +143,10 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final results = await Future.wait(_defaultQueries.map((q) => _repo.searchAnime(q)));
       final all = results.fold<List<Anime>>([], (a, b) => a..addAll(b));
+      final setting = SettingsService.instance.nsfwFilterLevel;
+      final filtered = NsfwFilter.filter(all, setting);
       final seen = <String>{};
-      final unique = all.where((a) => seen.add(a.url.isNotEmpty ? a.url : a.name.toLowerCase())).toList();
+      final unique = filtered.where((a) => seen.add(a.url.isNotEmpty ? a.url : a.name.toLowerCase())).toList();
       final mid = unique.length ~/ 2;
       setState(() { _trending = unique.take(mid).toList(); _recent = unique.skip(mid).toList(); _tomorrow = []; });
     } catch (e) {
@@ -382,24 +389,54 @@ class _HomeScreenState extends State<HomeScreen> {
     final bannerWidth = isTv ? ThemeConstants.bannerWidthTv : 260.0;
     final bannerHeight = bannerWidth * 0.55;
 
+    final nsfwSetting = SettingsService.instance.nsfwFilterLevel;
+
+    // ponytail: itens salvos (favoritos/histórico) não guardam gêneros/
+    // isAdult — classifica via cache de enrichment AniList quando existir,
+    // senão por keyword de título (fail-open).
+    bool storedAllowed(Map<String, dynamic> item) {
+      final title = item['title']?.toString() ?? '';
+      final detail = title.isEmpty
+          ? null
+          : AppCaches.enrichment
+              .get<AniListMediaDetail>(TextUtils.cleanTitle(title));
+      return NsfwFilter.levelAllowed(
+          NsfwFilter.classifyStoredItem(title: title, detail: detail),
+          nsfwSetting);
+    }
+
+    final historyFiltered = history.where(storedAllowed).toList();
+    final favoritesFiltered = favorites.where(storedAllowed).toList();
+
     final watching = _anilistLists
-        .expand((g) => g.entries
-            .where((e) => e.status == 'CURRENT' || e.status == 'REPEATING'))
+        .expand((g) => g.entries.where((e) =>
+            (e.status == 'CURRENT' || e.status == 'REPEATING') &&
+            NsfwFilter.shouldShowMedia(e.media, nsfwSetting)))
         .toList()
       // ponytail: "Continue assistindo" ordenado por último atualizado (o que
       // você assistiu mais recente vem primeiro). updatedAt null cai no fim.
       ..sort((a, b) => (b.updatedAt ?? 0).compareTo(a.updatedAt ?? 0));
 
     final planning = _anilistLists
-        .expand((g) => g.entries.where((e) => e.status == 'PLANNING'))
+        .expand((g) => g.entries
+            .where((e) =>
+                e.status == 'PLANNING' &&
+                NsfwFilter.shouldShowMedia(e.media, nsfwSetting)))
         .toList();
 
     final otherGroups = _anilistLists
-        .where((g) => g.entries.isNotEmpty &&
-            g.entries.every((e) =>
-                e.status != 'CURRENT' &&
-                e.status != 'REPEATING' &&
-                e.status != 'PLANNING'))
+        .where((g) => g.entries.any((e) =>
+            e.status != 'CURRENT' &&
+            e.status != 'REPEATING' &&
+            e.status != 'PLANNING' &&
+            NsfwFilter.shouldShowMedia(e.media, nsfwSetting)))
+        .map((g) => AniListGroup(
+              name: g.name,
+              entries: g.entries
+                  .where((e) => NsfwFilter.shouldShowMedia(e.media, nsfwSetting))
+                  .toList(),
+            ))
+        .where((g) => g.entries.isNotEmpty)
         .toList();
 
     List<Widget> section(
@@ -490,8 +527,8 @@ class _HomeScreenState extends State<HomeScreen> {
         // limbo onde logado sem watching escondia o histórico local.
         if (_anilistLoggedIn && watching.isNotEmpty)
           ..._buildWatchingSection(watching, screenWidth)
-        else if (history.isNotEmpty)
-          ...section('Continue assistindo', history.take(10).toList(), cardHeight,
+        else if (historyFiltered.isNotEmpty)
+          ...section('Continue assistindo', historyFiltered.take(10).toList(), cardHeight,
               (item) {
             final m = item as Map<String, dynamic>;
             return FocusableCard(
@@ -501,7 +538,7 @@ class _HomeScreenState extends State<HomeScreen> {
               height: cardHeight,
               onTap: () => openFromMap(context, m),
             );
-          }, subtitle: '${history.length} no histórico'),
+          }, subtitle: '${historyFiltered.length} no histórico'),
         if (_trending.isNotEmpty)
           ...section('Em Alta', _trending.take(10).toList(), bannerHeight,
               (item) => FocusableBannerCard(
@@ -545,8 +582,8 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () => openAnilistDetail(context, e.media),
             );
           }, subtitle: '${planning.length} na fila'),
-        if (favorites.isNotEmpty)
-          ...section('Favoritos', favorites.take(10).toList(), cardHeight,
+        if (favoritesFiltered.isNotEmpty)
+          ...section('Favoritos', favoritesFiltered.take(10).toList(), cardHeight,
               (item) {
             final m = item as Map<String, dynamic>;
             return FocusableCard(

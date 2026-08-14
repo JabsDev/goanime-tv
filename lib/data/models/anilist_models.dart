@@ -25,6 +25,8 @@ class AniListMedia {
   final int? episodes;
   final String? format;
   final String? status;
+  final bool? isAdult;
+  final List<String> genres;
 
   AniListMedia({
     required this.id,
@@ -35,6 +37,8 @@ class AniListMedia {
     this.episodes,
     this.format,
     this.status,
+    this.isAdult,
+    this.genres = const [],
   });
 
   factory AniListMedia.fromJson(Map<String, dynamic> json) {
@@ -52,6 +56,9 @@ class AniListMedia {
       episodes: json['episodes'] as int?,
       format: json['format']?.toString(),
       status: json['status']?.toString(),
+      isAdult: json['isAdult'] as bool?,
+      genres: (json['genres'] as List?)?.map((e) => e.toString()).toList() ??
+          const [],
     );
   }
 }
@@ -128,6 +135,8 @@ class AniListMediaDetail {
   final String? status;
   final double? averageScore;
   final List<String> genres;
+  final bool? isAdult;
+  final List<String> tags;
   final AniListCoverImage coverImage;
 
   AniListMediaDetail({
@@ -140,6 +149,8 @@ class AniListMediaDetail {
     this.status,
     this.averageScore,
     this.genres = const [],
+    this.isAdult,
+    this.tags = const [],
     required this.coverImage,
   });
 
@@ -156,6 +167,12 @@ class AniListMediaDetail {
       status: json['status']?.toString(),
       averageScore: (json['averageScore'] as num?)?.toDouble(),
       genres: (json['genres'] as List?)?.map((e) => e.toString()).toList() ?? [],
+      isAdult: json['isAdult'] as bool?,
+      tags: (json['tags'] as List?)
+              ?.map((e) => (e as Map)['name']?.toString() ?? '')
+              .where((n) => n.isNotEmpty)
+              .toList() ??
+          const [],
       coverImage: AniListCoverImage.fromJson(
         json['coverImage'] as Map<String, dynamic>? ?? {},
       ),

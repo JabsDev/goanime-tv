@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../storage/local_storage.dart';
 import '../utils/device_capability.dart';
+import '../utils/nsfw_filter.dart';
 
 /// Configurações de runtime + alavancas do "modo lite".
 /// ponytail: um único Inherited-ish service expõe getters — leitura uma vez
@@ -12,6 +13,7 @@ class SettingsService {
   SettingsService._();
 
   static const _kLiteMode = 'settings_lite_mode';
+  static const _kNsfwFilter = 'settings_nsfw_filter';
 
   bool? _userPref;
   bool _autoLite = false;
@@ -20,6 +22,11 @@ class SettingsService {
   final ValueNotifier<bool> _liteModeVN = ValueNotifier<bool>(false);
   ValueListenable<bool> get liteModeListenable => _liteModeVN;
 
+  NsfwFilterSetting _nsfwFilter = NsfwFilterSetting.strict;
+  final ValueNotifier<NsfwFilterSetting> _nsfwFilterVN =
+      ValueNotifier<NsfwFilterSetting>(NsfwFilterSetting.strict);
+  ValueListenable<NsfwFilterSetting> get nsfwFilterListenable => _nsfwFilterVN;
+
   Future<void> init() async {
     LocalStorage.ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
@@ -27,8 +34,11 @@ class SettingsService {
     _autoLite = await DeviceCapability.isLowEnd();
     _initialized = true;
     _liteModeVN.value = _resolveLite();
+    _nsfwFilter = NsfwFilterSetting.values[
+        prefs.getInt(_kNsfwFilter) ?? NsfwFilterSetting.strict.index];
+    _nsfwFilterVN.value = _nsfwFilter;
     debugPrint(
-        '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value');
+        '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value nsfw=$_nsfwFilter');
   }
 
   bool _resolveLite() {
@@ -49,6 +59,15 @@ class SettingsService {
       await prefs.setBool(_kLiteMode, v);
     }
     _liteModeVN.value = _resolveLite();
+  }
+
+  NsfwFilterSetting get nsfwFilterLevel => _nsfwFilter;
+
+  Future<void> setNsfwFilterLevel(NsfwFilterSetting v) async {
+    _nsfwFilter = v;
+    _nsfwFilterVN.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kNsfwFilter, v.index);
   }
 
   // Levers. Lê uma vez por build(), não em cada widget aninhado.

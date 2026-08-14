@@ -8,11 +8,15 @@ import '../../data/repositories/anime_repository.dart';
 import '../../core/storage/local_storage.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/utils/nsfw_filter.dart';
 import '../../core/utils/quality_picker.dart';
 import '../../core/sources/source_ping_service.dart';
 import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/focus_key_handler.dart';
+import '../../shared/widgets/app_top_bar.dart';
+import '../../shared/widgets/tv_button.dart';
 import '../player/player_screen.dart';
+import '../settings/settings_screen.dart';
 
 class DetailScreen extends StatefulWidget {
   final Anime anime;
@@ -161,8 +165,88 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
     );
   }
 
+  Widget _buildBlocked(NsfwFilterSetting setting) {
+    final isStrict = setting == NsfwFilterSetting.strict;
+    final label = isStrict
+        ? 'Conteúdo oculto pelo filtro'
+        : 'Conteúdo adulto oculto pelo filtro';
+    final hint = isStrict
+        ? 'Este anime é classificado como ecchi ou hentai. Ajuste o filtro '
+            'de conteúdo nas configurações para exibi-lo.'
+        : 'Este anime é classificado como hentai. Ajuste o filtro de '
+            'conteúdo nas configurações para exibi-lo.';
+    return Scaffold(
+      backgroundColor: ThemeConstants.background,
+      body: Column(
+        children: [
+          AppTopBar(
+            title: widget.anime.name,
+            icon: Icons.visibility_off,
+            onBack: () => Navigator.pop(context),
+          ),
+          Expanded(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.visibility_off,
+                        color: ThemeConstants.textSecondary, size: 56),
+                    const SizedBox(height: 16),
+                    Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: ThemeConstants.white,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      hint,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        color: ThemeConstants.textSecondary,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    TVButton(
+                      label: 'Ajustar filtro',
+                      icon: Icons.settings,
+                      isPrimary: false,
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SettingsScreen(),
+                          ),
+                        );
+                      },
+                      width: 240,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // ponytail: rede de segurança contra caminhos que contornam o filtro
+    // (ex.: favoritos/histórico salvos antes do filtro existir). Caminhos
+    // normais já filtram na origem (busca/home/favoritos).
+    final setting = SettingsService.instance.nsfwFilterLevel;
+    if (!NsfwFilter.shouldShow(widget.anime, setting)) {
+      return _buildBlocked(setting);
+    }
     return Scaffold(
       backgroundColor: ThemeConstants.background,
       body: CustomScrollView(

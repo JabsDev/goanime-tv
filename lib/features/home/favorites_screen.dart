@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import '../../core/cache/app_caches.dart';
 import '../../core/storage/local_storage.dart';
+import '../../core/storage/settings_service.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/utils/nsfw_filter.dart';
+import '../../core/utils/text_utils.dart';
+import '../../data/models/anilist_models.dart';
 import '../../shared/widgets/app_top_bar.dart';
 import '../../shared/widgets/focusable_card.dart';
 import 'home_navigation.dart';
@@ -10,7 +15,19 @@ class FavoritesScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final favorites = LocalStorage.getFavorites();
+    final nsfwSetting = SettingsService.instance.nsfwFilterLevel;
+    final favorites = LocalStorage.getFavorites()
+        .where((item) {
+          final title = item['title']?.toString() ?? '';
+          final detail = title.isEmpty
+              ? null
+              : AppCaches.enrichment
+                  .get<AniListMediaDetail>(TextUtils.cleanTitle(title));
+          return NsfwFilter.levelAllowed(
+              NsfwFilter.classifyStoredItem(title: title, detail: detail),
+              nsfwSetting);
+        })
+        .toList();
 
     return Scaffold(
       backgroundColor: ThemeConstants.background,

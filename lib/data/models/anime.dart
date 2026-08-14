@@ -13,6 +13,9 @@ class Anime {
   List<String> genres;
   int? anilistId;
 
+  /// AniList `isAdult` flag — canonical NSFW signal used by [NsfwFilter].
+  bool? isAdult;
+
   /// English title (from AniList), used as fallback when the primary [name]
   /// (typically romaji) doesn't match a scraping source's catalog.
   String? englishName;
@@ -32,6 +35,7 @@ class Anime {
     this.genres = const [],
     this.englishName,
     this.anilistId,
+    this.isAdult,
   });
 
   String get imageUrl => fallbackImageUrl ?? '';

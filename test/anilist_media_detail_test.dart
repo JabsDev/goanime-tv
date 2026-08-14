@@ -32,4 +32,31 @@ void main() {
     }));
     expect(detail.nextAiringEpisodeNumber, isNull);
   });
+
+  test('parses isAdult and tag names for NSFW filtering', () {
+    final detail = AniListMediaDetail.fromJson(_m({
+      'id': 2,
+      'isAdult': true,
+      'genres': ['Ecchi'],
+      'tags': [
+        {'name': 'Ecchi', 'isAdult': true},
+        {'name': 'Fanservice', 'isAdult': false},
+      ],
+      'title': {'english': 'Y'},
+      'coverImage': <String, dynamic>{},
+    }));
+    expect(detail.isAdult, isTrue);
+    expect(detail.genres, ['Ecchi']);
+    expect(detail.tags, ['Ecchi', 'Fanservice']);
+  });
+
+  test('isAdult and tags default to null/empty when absent', () {
+    final detail = AniListMediaDetail.fromJson(_m({
+      'id': 3,
+      'title': {'english': 'Z'},
+      'coverImage': <String, dynamic>{},
+    }));
+    expect(detail.isAdult, isNull);
+    expect(detail.tags, isEmpty);
+  });
 }
