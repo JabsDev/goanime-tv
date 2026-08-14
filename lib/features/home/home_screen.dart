@@ -9,13 +9,17 @@ import '../../core/storage/local_storage.dart';
 import '../../core/utils/text_utils.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/profile/profile_service.dart';
 import '../../core/storage/settings_service.dart';
+import '../../data/models/profile.dart';
 import '../../core/utils/nsfw_filter.dart';
 import '../../shared/widgets/focusable_card.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import '../search/search_screen.dart';
+import '../profiles/profile_switcher_screen.dart';
+import '../profiles/widgets/profile_avatar.dart';
 import 'anilist_banner.dart';
 import 'home_navigation.dart';
 import 'anilist_login_dialog.dart';
@@ -167,6 +171,25 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Troca de perfil em sessão (Netflix-style): abre o switcher; ao voltar com
+  // perfil selecionado, reseta o estado AniList e recarrega dados da Home.
+  Future<void> _openProfileSwitcher() async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => const ProfileSwitcherScreen(showOnBoot: false),
+      ),
+    );
+    if (!mounted) return;
+    if (changed == true) {
+      setState(() {
+        _anilistLoggedIn = false;
+        _anilistUser = null;
+        _anilistLists = [];
+      });
+      await _loadDataWithTimeout();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -243,14 +266,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(width: 24),
-                // ponytail: botão único de perfil — fundiu avatar AniList + nav Perfil.
-                // Dropdown cobre conectar/desconectar, atualizar, favoritos. Tudo num só.
+                // ponytail: botão único de perfil — reflete o perfil ATIVO
+                // (avatar letra inicial p/ local, foto p/ anilist) + nome.
                 _ProfileButton(
-                  loggedIn: _anilistLoggedIn,
-                  user: _anilistUser,
+                  profile: ProfileService.instance.currentProfile,
                   onTap: _showProfileMenu,
-                ),
-              ],
+                ),              ],
             ),
           ),
         ],
@@ -259,13 +280,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showProfileMenu() {
+    final profile = ProfileService.instance.currentProfile;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: ThemeConstants.surface,
         title: Row(
           children: [
-            if (_anilistUser?.avatar != null)
+            if (profile != null)
+              ProfileAvatar(profile: profile, radius: 22)
+            else if (_anilistUser?.avatar != null)
               CircleAvatar(
                 radius: 22,
                 backgroundImage:
@@ -278,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             const SizedBox(width: 12),
             Text(
-              _anilistUser?.name ?? 'Visitante',
+              profile?.displayName ?? _anilistUser?.name ?? 'Visitante',
               style: const TextStyle(color: Colors.white),
             ),
           ],
@@ -286,6 +310,14 @@ class _HomeScreenState extends State<HomeScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _menuEntry(
+              icon: Icons.switch_account,
+              label: 'Trocar perfil',
+              onTap: () {
+                Navigator.pop(ctx);
+                _openProfileSwitcher();
+              },
+            ),
             if (!_anilistLoggedIn)
               _menuEntry(
                 icon: Icons.login,
@@ -818,13 +850,11 @@ class _FocusableNavItemState extends State<_FocusableNavItem> {
 }
 
 class _ProfileButton extends StatefulWidget {
-  final bool loggedIn;
-  final AniListUser? user;
+  final Profile? profile;
   final VoidCallback onTap;
 
   const _ProfileButton({
-    required this.loggedIn,
-    required this.user,
+    required this.profile,
     required this.onTap,
   });
 
@@ -864,21 +894,16 @@ class _ProfileButtonState extends State<_ProfileButton> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundImage: widget.loggedIn &&
-                            widget.user?.avatar != null
-                        ? CachedNetworkImageProvider(widget.user!.avatar!)
-                        : null,
-                    child: !(widget.loggedIn &&
-                            widget.user?.avatar != null)
-                        ? const Icon(Icons.person,
-                            size: 20, color: Colors.white)
-                        : null,
-                  ),
+                  if (widget.profile != null)
+                    ProfileAvatar(profile: widget.profile!, radius: 18)
+                  else
+                    const CircleAvatar(
+                      radius: 18,
+                      child: Icon(Icons.person, size: 20, color: Colors.white),
+                    ),
                   const SizedBox(width: 10),
                   Text(
-                    widget.loggedIn ? (widget.user?.name ?? '') : 'Perfil',
+                    widget.profile?.displayName ?? 'Perfil',
                     style: TextStyle(
                       color: _isFocused
                           ? ThemeConstants.primary
