@@ -902,22 +902,14 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     debugPrint(
         '[ProviderDialog] resolve ep ${widget.episode.number} anime=${widget.anime.name}');
     try {
-      final resolution = await _repo.resolveProvidersForEpisode(
-          widget.anime, widget.episode.number);
-      if (!mounted) return;
-      // Auto-select the highest-priority provider that has the episode.
-      final best = resolution.providers.isEmpty
-          ? null
-          : resolution.providers.keys.first;
-      debugPrint('[ProviderDialog] resolved ${resolution.providers.length} '
-          'providers best=$best matchedUnavailable=${resolution.matchedUnavailable}');
-      setState(() {
-        _providers = resolution.providers;
-        _matchedUnavailable = resolution.matchedUnavailable;
-        _selectedProvider = best;
-        _loading = false;
-      });
-      _probeLatency(resolution.providers.keys);
+      // partial: o picker abre assim que a melhor fonte resolve, sem esperar a
+      // mais lenta — as demais fontes chegam via onUpdate progressivamente.
+      await _repo.resolveProvidersForEpisode(
+        widget.anime,
+        widget.episode.number,
+        partial: true,
+        onUpdate: _applyResolution,
+      );
     } catch (e) {
       if (!mounted) return;
       debugPrint('[ProviderDialog] resolve error: $e');
@@ -925,6 +917,34 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
         _error = 'Fonte indisponível. Tente novamente.';
         _loading = false;
       });
+    }
+  }
+
+  /// Incremental application of a (possibly partial) resolution, fired by the
+  /// repo as each provider lands. Keeps loading while nothing resolved yet and
+  /// providers are still on their way; renders the picker as soon as there's at
+  /// least one. The auto-selection re-evaluates so a higher-priority provider
+  /// arriving later claims the best slot.
+  void _applyResolution(EpisodeResolution resolution) {
+    if (!mounted) return;
+    final nextBest =
+        resolution.providers.isEmpty ? null : resolution.providers.keys.first;
+    debugPrint('[ProviderDialog] partial ${resolution.providers.length} '
+        'providers best=$nextBest complete=${resolution.complete} '
+        'matchedUnavailable=${resolution.matchedUnavailable}');
+    setState(() {
+      _error = null;
+      _matchedUnavailable = resolution.matchedUnavailable;
+      if (resolution.providers.isNotEmpty) {
+        _providers = resolution.providers;
+        _selectedProvider = nextBest;
+        _loading = false;
+      } else if (resolution.complete) {
+        _loading = false;
+      }
+    });
+    if (resolution.providers.isNotEmpty) {
+      _probeLatency(resolution.providers.keys);
     }
   }
 

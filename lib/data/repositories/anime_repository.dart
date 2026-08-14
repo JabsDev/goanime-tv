@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/cache/app_caches.dart';
@@ -20,10 +22,17 @@ class EpisodeResolution {
   final Set<AnimeSource> matchedUnavailable;
   final Set<AnimeSource> notFound;
 
+  /// True when every implemented provider has already been asked (cache hit or
+  /// the full fan-out finished). During a progressive (`partial`) resolution
+  /// the UI uses this to keep a loading state until the last provider lands —
+  /// a timing-full `providers` that is not yet [complete] can still grow.
+  final bool complete;
+
   const EpisodeResolution({
     required this.providers,
     required this.matchedUnavailable,
     required this.notFound,
+    this.complete = true,
   });
 }
 
@@ -41,6 +50,17 @@ class AnimeRepository {
       : _adapters = adapters ?? SourceRegistry.adapters;
 
   final List<AnimeSourceAdapter> _adapters;
+
+  /// Per-call budget for a provider step (page match or video extraction). A
+  /// provider that exceeds it is dropped from the resolution instead of
+  /// stalling the rest — dead/cloudflare-gated sources can no longer hold the
+  /// episode picker hostage for up to 30s × retries.
+  static const Duration providerStepTimeout = Duration(seconds: 8);
+
+  /// In `partial` mode, how long to wait for the best provider to produce
+  /// video before returning with what's already resolved. The providers still
+  /// running continue in the background and stream in via [onUpdate].
+  static const Duration partialGateDeadline = Duration(milliseconds: 3500);
 
   Future<List<Anime>> searchAnime(String query) async {
     return AnimeScraper.searchAnime(query);
@@ -143,10 +163,24 @@ class AnimeRepository {
   /// the first tap on a show pays a search-by-name per provider. A matched page
   /// that resolves no video keeps its persisted match (the page is valid; the
   /// extractor is what failed) — only genuinely absent pages are dropped.
+  ///
+  /// Each provider is time-boxed by [providerStepTimeout], so a hung/dead
+  /// source is dropped instead of gating the others.
+  ///
+  /// When [partial] is true the future completes as soon as the best-priority
+  /// provider that delivers video is final (or after [partialGateDeadline]),
+  /// so the picker opens without waiting for the slowest provider; providers
+  /// still running carry on in the background and [onUpdate] is invoked with an
+  /// incremental resolution each time one of them lands. The returned
+  /// [EpisodeResolution.complete] reflects whether the snapshot is final. The
+  /// default (`partial: false`) preserves the old blocking semantics — full
+  /// fan-out awaited — used by the player re-resolve and prefetch paths.
   Future<EpisodeResolution> resolveProvidersForEpisode(
     Anime anime,
-    int episodeNumber,
-  ) async {
+    int episodeNumber, {
+    bool partial = false,
+    void Function(EpisodeResolution resolution)? onUpdate,
+  }) async {
     final identity = ProviderMatchStore.identity(anime);
     final cacheKey = '$identity:$episodeNumber';
     // Only the happy-path map is cached; unavailable/notFound states are cheap
@@ -165,6 +199,54 @@ class AnimeRepository {
     final matchedUnavailable = <AnimeSource>{};
     final notFound = <AnimeSource>{};
     final adapters = _adapters.where((a) => a.implemented).toList();
+    final done = <AnimeSource>{};
+
+    // Best-effort snapshot of the current (possibly partial) resolution.
+    EpisodeResolution snapshot() {
+      final keys = results.keys.toList()
+        ..sort((a, b) => a.priority.compareTo(b.priority));
+      final ordered = <AnimeSource, List<VideoSource>>{
+        for (final k in keys) k: results[k]!,
+      };
+      return EpisodeResolution(
+        providers: ordered,
+        matchedUnavailable: {...matchedUnavailable},
+        notFound: {...notFound},
+        complete: done.length == adapters.length,
+      );
+    }
+
+    // Time-boxes a single provider step so a slow source can't block the rest.
+    Future<T> step<T>(Future<T> Function() op) {
+      return op().timeout(providerStepTimeout);
+    }
+
+    // Fires the partial gate once the best provider with video is final (or
+    // everything is done). Non-null only in `partial` mode.
+    Completer<void>? gate;
+    bool useGate = false;
+    if (partial && adapters.isNotEmpty) {
+      gate = Completer<void>();
+      useGate = true;
+    }
+    void checkGate() {
+      final g = gate;
+      if (g == null || g.isCompleted) return;
+      AnimeSource? best;
+      for (final k in results.keys) {
+        if (best == null || k.priority < best.priority) best = k;
+      }
+      if (best != null && done.contains(best)) {
+        g.complete();
+      } else if (done.length == adapters.length) {
+        g.complete();
+      }
+    }
+
+    void maybeCache() {
+      if (done.length != adapters.length || results.isEmpty) return;
+      AppCaches.resolutions.set(cacheKey, snapshot().providers);
+    }
 
     Future<void> resolve(AnimeSourceAdapter adapter) async {
       final src = adapter.source;
@@ -172,19 +254,20 @@ class AnimeRepository {
         // 1. Reuse the persisted page match when available (no network).
         var match = Anime(name: anime.name, url: '', source: src);
         final persisted = await ProviderMatchStore.urlFor(identity, src);
-        var freshlyFound = false;
         if (persisted != null && persisted.isNotEmpty) {
           match = Anime(name: anime.name, url: persisted, source: src);
         } else {
-          // 2. First hit: locate the page (search-by-name); don't persist yet —
-          //    only a page that delivers the requested episode is worth saving.
-          final found = await adapter.resolveAnime(anime);
+          // 2. First hit: locate the page (search-by-name). The page-level
+          //    match is persisted right away — even if this episode's
+          //    extraction fails (Blogger SPA, timeout), the next tap skips the
+          //    search-by-name instead of re-paying it.
+          final found = await step(() => adapter.resolveAnime(anime));
           if (found == null || found.url.isEmpty) {
             notFound.add(src);
             return;
           }
           match = found;
-          freshlyFound = true;
+          await ProviderMatchStore.saveMatch(identity, src, match.url);
         }
         if (match.url.isEmpty) {
           notFound.add(src);
@@ -192,7 +275,7 @@ class AnimeRepository {
         }
 
         // 3. Resolve the stream(s) of episode N on that page.
-        final sources = await adapter.resolveVideo(match, episodeNumber);
+        final sources = await step(() => adapter.resolveVideo(match, episodeNumber));
         if (sources.isEmpty) {
           // Page exists but no video resolved (Blogger SPA, or the episode just
           // isn't indexable here). The persisted match is kept so the next tap
@@ -201,32 +284,24 @@ class AnimeRepository {
           return;
         }
         results[src] = sources;
-        // Persist only after the page delivered >=1 source for the episode.
-        if (freshlyFound) {
-          await ProviderMatchStore.saveMatch(identity, src, match.url);
-        }
       } catch (e) {
         debugPrint(
             '[Repo] resolve ep $episodeNumber on $src failed: $e');
+      } finally {
+        done.add(src);
+        onUpdate?.call(snapshot());
+        checkGate();
+        maybeCache();
       }
     }
 
-    await Future.wait(adapters.map(resolve));
+    final futures = adapters.map(resolve).toList();
 
-    // Stable priority ordering for display (AnimeFire first).
-    final keys = results.keys.toList()
-      ..sort((a, b) => a.priority.compareTo(b.priority));
-    final ordered = <AnimeSource, List<VideoSource>>{
-      for (final k in keys) k: results[k]!,
-    };
-
-    if (ordered.isNotEmpty) {
-      AppCaches.resolutions.set(cacheKey, ordered);
+    if (useGate) {
+      await gate!.future.timeout(partialGateDeadline, onTimeout: () {});
+      return snapshot();
     }
-    return EpisodeResolution(
-      providers: ordered,
-      matchedUnavailable: matchedUnavailable,
-      notFound: notFound,
-    );
+    await Future.wait(futures);
+    return snapshot();
   }
 }
