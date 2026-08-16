@@ -39,6 +39,8 @@ class _ProfileSwitcherScreenState extends State<ProfileSwitcherScreen> {
   @override
   Widget build(BuildContext context) {
     final profiles = ProfileService.instance.profiles;
+    // Primeira execução: não há perfis ainda → apresentação de boas-vindas.
+    final isFirstRun = widget.showOnBoot && profiles.isEmpty;
     return Scaffold(
       backgroundColor: ThemeConstants.background,
       body: SafeArea(
@@ -49,16 +51,44 @@ class _ProfileSwitcherScreenState extends State<ProfileSwitcherScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Padding(
-                    padding: EdgeInsets.only(bottom: 40),
+                    padding: EdgeInsets.only(bottom: 12),
                     child: Text(
-                      'Quem está assistindo?',
+                      'Bem-vindo ao GoAnime TV',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 32,
+                        fontSize: 34,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
+                  if (!isFirstRun)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 40),
+                      child: Text(
+                        'Quem está assistindo?',
+                        style: TextStyle(
+                          color: ThemeConstants.textSecondary,
+                          fontSize: 20,
+                        ),
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(
+                          left: 60, right: 60, bottom: 36),
+                      child: Text(
+                        'Crie um perfil para salvar seu progresso de '
+                        'episódios, favoritos e histórico neste aparelho.\n'
+                        'Você pode usar como Visitante, mas seu progresso '
+                        'não será salvo.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: ThemeConstants.textSecondary,
+                          fontSize: 17,
+                          height: 1.5,
+                        ),
+                      ),
+                    ),
                   Wrap(
                     alignment: WrapAlignment.center,
                     spacing: 32,
@@ -73,6 +103,16 @@ class _ProfileSwitcherScreenState extends State<ProfileSwitcherScreen> {
                       _AddProfileCard(onTap: _showAddOptions),
                     ],
                   ),
+                  if (isFirstRun) ...[
+                    const SizedBox(height: 36),
+                    TVButton(
+                      label: 'Continuar como Visitante',
+                      icon: Icons.visibility_outlined,
+                      isPrimary: false,
+                      width: 340,
+                      onPressed: _enterHome,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -95,6 +135,11 @@ class _ProfileSwitcherScreenState extends State<ProfileSwitcherScreen> {
   }
 
   void _enterHome() {
+    // Primeira execução: marca o onboarding como visto assim que o usuário sai
+    // da escolha (criou perfil OU seguiu como Visitante) — não reapresenta.
+    if (widget.showOnBoot) {
+      SettingsService.instance.markOnboardingSeen();
+    }
     if (widget.showOnBoot) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),

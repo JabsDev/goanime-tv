@@ -14,10 +14,12 @@ class SettingsService {
 
   static const _kLiteMode = 'settings_lite_mode';
   static const _kNsfwFilter = 'settings_nsfw_filter';
+  static const _kOnboardingSeen = 'settings_onboarding_seen';
 
   bool? _userPref;
   bool _autoLite = false;
   bool _initialized = false;
+  bool _onboardingSeen = false;
 
   final ValueNotifier<bool> _liteModeVN = ValueNotifier<bool>(false);
   ValueListenable<bool> get liteModeListenable => _liteModeVN;
@@ -33,6 +35,7 @@ class SettingsService {
     _userPref = prefs.getBool(_kLiteMode);
     _autoLite = await DeviceCapability.isLowEnd();
     _initialized = true;
+    _onboardingSeen = prefs.getBool(_kOnboardingSeen) ?? false;
     _liteModeVN.value = _resolveLite();
     _nsfwFilter = NsfwFilterSetting.values[
         prefs.getInt(_kNsfwFilter) ?? NsfwFilterSetting.strict.index];
@@ -62,6 +65,17 @@ class SettingsService {
   }
 
   NsfwFilterSetting get nsfwFilterLevel => _nsfwFilter;
+
+  /// Primeira execução ainda não apresentada. Quando `false` e não há perfis,
+  /// o app abre o fluxo de boas-vindas (criar perfil local ou continuar como
+  /// Visitante).
+  bool get onboardingSeen => _onboardingSeen;
+
+  Future<void> markOnboardingSeen() async {
+    _onboardingSeen = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kOnboardingSeen, true);
+  }
 
   Future<void> setNsfwFilterLevel(NsfwFilterSetting v) async {
     _nsfwFilter = v;
