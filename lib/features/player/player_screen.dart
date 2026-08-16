@@ -371,6 +371,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _maybePushAnilistProgress();
   }
 
+  // Grava last-played + retomada por episódio (positions). NÃO marca assistido:
+  // "assistido" só entra via markEpisodeWatched no gate de 75% (ver abaixo).
   void _writeWatchProgressToDisk(int episodeNumber) {
     final posMs = (_positionSec * 1000).toInt();
     LocalStorage.saveWatchProgress(
@@ -424,13 +426,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
         .catchError((e) => debugPrint('[Player] AniList push error: $e'));
   }
 
+  /// BUGFIX (75%): retomada lida do mapa `positions` (retorno por episódio).
+  /// Antes usava o high-water `episode`/`position`, que era gravado já nos
+  /// primeiros segundos de reprodução — por isso restaurar "voltava do início".
   void _restoreProgress() {
+    // Ep já assistido não retoma (evita posição residual do flush do dispose).
     final progress = LocalStorage.getWatchProgress(widget.anime.name);
-    if (progress != null && progress['episode'] == widget.episodeIndex) {
-      final posMs = progress['position'] as int? ?? 0;
-      if (posMs > 5000) {
-        _player.seek(Duration(milliseconds: posMs));
-      }
+    final watchedSet =
+        (progress?['watched'] as List?)?.cast<int>().toSet() ?? <int>{};
+    if (watchedSet.contains(widget.episodeIndex)) return;
+    final resume = LocalStorage.getResumePosition(
+        widget.anime.name, widget.episodeIndex);
+    if (resume == null) return;
+    if (resume.inMilliseconds > 5000) {
+      _player.seek(resume);
     }
   }
 

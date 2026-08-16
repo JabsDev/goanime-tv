@@ -88,15 +88,13 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
     final localProg = LocalStorage.getWatchProgress(widget.anime.name);
     final watched =
         (localProg?['watched'] as List?)?.cast<int>().toSet() ?? <int>{};
-    // legacy fallback (pré-migração, sem chave 'watched'): high-water do
-    // último episode INDEX jogado.
-    final legacyEp = localProg?['episode'] as int? ?? -1;
-    int localHigh;
-    if (watched.isEmpty) {
-      localHigh = legacyEp + 1;
-    } else {
-      localHigh = watched.reduce((a, b) => a > b ? a : b) + 1;
-    }
+    // BUGFIX (75%): localHigh reflete só o que REALMENTE foi assistido (gate de
+    // 75% / reconcileWatched). Removido o fallback legado `episode+1`: abrir um
+    // ep e sair gravava esse high-water e, via max-merge, marcava 0..N verdes
+    // e empurrava progresso falso ao AniList.
+    var localHigh = watched.isEmpty
+        ? 0
+        : watched.reduce((a, b) => a > b ? a : b) + 1;
     if (localHigh < 0) localHigh = 0;
     final anilistProgress = entry?.progress ?? 0;
     final effective = anilistProgress > localHigh ? anilistProgress : localHigh;
@@ -584,16 +582,12 @@ if (_episodes.isEmpty)
     final progress = LocalStorage.getWatchProgress(widget.anime.name);
     final watchedSet =
         (progress?['watched'] as List?)?.cast<int>().toSet() ?? <int>{};
-    // ponytail: pinta prefixo contíguo 0..maxWatchedIdx. Combina high-water do
-    // último ep tocado (progress['episode']) com o maior índice no conjunto
-    // 'watched' (preenchido pelo gate de 75% do player e pelo reconcileWatched
-    // quando o AniList reporta progress N). Garante que TODOS os eps até o
-    // último assistido fiquem verdes, mesmo em fluxos não-contíguos.
-    final epIndex = (progress?['episode'] as int?) ?? -1;
-    final maxWatchedIdx = [
-      if (watchedSet.isNotEmpty) watchedSet.reduce((a, b) => a > b ? a : b),
-      epIndex,
-    ].fold<int>(-1, (a, b) => a > b ? a : b);
+    // BUGFIX (75%): a cor verde reflete EXATAMENTE o conjunto 'watched'
+    // (gate de 75% do player + reconcileWatched via AniList). Antes o
+    // high-water 'episode' (previous last-played, gravado já nos primeiros
+    // segundos de playback) era fundido aqui e abrir-e-sair pintava 0..N
+    // como assistido — contradizendo o gate de 75% e o progresso AniList.
+    final resumePositions = LocalStorage.getResumePositions(widget.anime.name);
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
       sliver: SliverGrid.builder(
@@ -609,7 +603,8 @@ if (_episodes.isEmpty)
           index: i,
           episode: _episodes[i],
           anime: widget.anime,
-          isWatched: i <= maxWatchedIdx,
+          isWatched: watchedSet.contains(i),
+          resumeMs: !watchedSet.contains(i) ? resumePositions[i] : null,
           isFirstRow: i < crossAxisCount,
           // The continue card is the natural focus target when visible, so
           // the first grid card only autofocuses when there's no such card.
@@ -629,6 +624,7 @@ class _EpisodeCard extends StatefulWidget {
   final CatalogEpisode episode;
   final Anime anime;
   final bool isWatched;
+  final int? resumeMs;
   final bool isFirstRow;
   final bool autofocus;
   final VoidCallback? onUpFromFirstRow;
@@ -641,6 +637,7 @@ class _EpisodeCard extends StatefulWidget {
     required this.anime,
     required this.isWatched,
     required this.onPlay,
+    this.resumeMs,
     this.isFirstRow = false,
     this.autofocus = false,
     this.onUpFromFirstRow,
@@ -683,6 +680,54 @@ class _EpisodeCardState extends State<_EpisodeCard> {
       ),
       maxLines: 3,
       overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  // BUGFIX (75%): minutagem salva de retomada do ep (não-assistido). Mostra
+  // onde o usuário parou; abrir o ep retoma daqui (player lê getResumePosition).
+  Widget _buildResumeBadge() {
+    final ms = widget.resumeMs ?? 0;
+    final show = !widget.isWatched && ms >= 5000;
+    if (!show) return const SizedBox.shrink();
+    final d = Duration(milliseconds: ms);
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    final time = h > 0
+        ? '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}'
+        : '$m:${s.toString().padLeft(2, '0')}';
+    return Positioned(
+      left: 4,
+      right: 4,
+      bottom: 4,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.75),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.play_arrow, color: ThemeConstants.primaryLight, size: 12),
+            const SizedBox(width: 3),
+            Flexible(
+              child: Text(
+                // "Retomar" colide com o badge EP; só a minutagem resolve melhor
+                // em card ~300lp.
+                time,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: ThemeConstants.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -739,6 +784,7 @@ class _EpisodeCardState extends State<_EpisodeCard> {
               ),
             ),
           ),
+          _buildResumeBadge(),
         ],
       ),
     );

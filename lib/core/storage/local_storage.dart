@@ -22,6 +22,22 @@ class LocalStorage {
     return null;
   }
 
+  /// Lê o mapa de retomada por episódio (`positions`: "índice" → milissegundos).
+  /// O high-water `episode`/`position` continua sendo o last-played; a retomada
+  /// fina de cada ep vive aqui, independente do estado `watched`.
+  static Map<int, int> _readPositions(Map<String, dynamic>? progress) {
+    final raw = progress?['positions'] as Map? ?? const {};
+    final out = <int, int>{};
+    for (final e in raw.entries) {
+      final idx = int.tryParse(e.key.toString());
+      final ms = e.value is int
+          ? e.value as int
+          : int.tryParse(e.value.toString());
+      if (idx != null && ms != null) out[idx] = ms;
+    }
+    return out;
+  }
+
   /// Normaliza os títulos guardados (chave + título) para exibição, de modo
   /// que entradas legadas ainda mostrem o nome limpo.
   static List<Map<String, dynamic>> _normalizedEntries(
@@ -51,6 +67,12 @@ class LocalStorage {
 
   static bool isInitialized() => _prefs != null;
 
+  /// BUGFIX (75%): este método NÃO marca assistido — só persiste o last-played
+  /// (`episode`/`position`) e a retomada fina por episódio (`positions`). Antes
+  /// o high-water `episode`, gravado já nos primeiros segundos, era usado pelo
+  /// grid como evidência de "assistido", fazendo abrir-e-sair deixar 0..N verdes
+  /// (e permitindo back-push falso ao AniList). "Assistido" agora vem só do
+  /// conjunto `watched` (gate de 75% em markEpisodeWatched / reconcileWatched).
   static Future<void> saveWatchProgress({
     required String animeKey,
     required int episodeNumber,
@@ -59,17 +81,22 @@ class LocalStorage {
   }) async {
     ensureInitialized();
     final key = _normalizeKey(animeKey);
-    // ponytail: preserva conjunto 'watched' ao reescrever progress. Antes o
-    // overwrite incondicional descartava todos os eps já marcados — fatal para
-    // fluxos não-contíguos (ex.: assistir 1-8 e 12).
+    // ponytail: preserva conjunto 'watched' e mapa 'positions' ao reescrever
+    // progress. Antes o overwrite incondicional descartava todos os eps já
+    // marcados — fatal para fluxos não-contíguos (ex.: assistir 1-8 e 12).
     final existing = _findProgress(key);
     final watched = (existing?['watched'] as List?)?.cast<int>().toList() ??
         const <int>[];
+    final positions = _readPositions(existing);
+    positions[episodeNumber] = position.inMilliseconds;
     await ProfileStore.instance.setProgress(key, {
       'episode': episodeNumber,
       'position': position.inMilliseconds,
       'totalEpisodes': totalEpisodes,
       'watched': watched,
+      'positions': {
+        for (final e in positions.entries) '${e.key}': e.value,
+      },
     });
   }
 
@@ -78,9 +105,35 @@ class LocalStorage {
     return _findProgress(_normalizeKey(animeKey));
   }
 
+  /// Mapa de retomada por episódio (índice → ms) do anime, para o grid exibir
+  /// onde cada ep parou. Vazio quando nada foi assistido pela metade.
+  static Map<int, int> getResumePositions(String animeKey) {
+    ensureInitialized();
+    return _readPositions(_findProgress(_normalizeKey(animeKey)));
+  }
+
+  /// Posição salva de retomada do episódio [episodeIndex]. Lê do mapa
+  /// `positions`; fallback legado para o `position` único quando ele pertence
+  /// ao mesmo ep (schema antigo, um único last-played).
+  static Duration? getResumePosition(String animeKey, int episodeIndex) {
+    ensureInitialized();
+    final progress = _findProgress(_normalizeKey(animeKey));
+    final positions = _readPositions(progress);
+    final ms = positions[episodeIndex];
+    if (ms != null) return Duration(milliseconds: ms);
+    if ((progress?['episode'] as int?) == episodeIndex) {
+      final pos = progress?['position'] as int?;
+      if (pos != null) return Duration(milliseconds: pos);
+    }
+    return null;
+  }
+
   // Marca um episódio como assistido no conjunto do perfil atual.
   // Totalmente idempotente: re-marcar um índice existente não cresce a lista
   // nem reescreve o disco (toSet().add + early-return).
+  // Gate único de "assistido": chamado pelo player ao cruzar 75% do ep (e por
+  // reconcileWatched via progresso AniList). Ao marcar, remove a retomada
+  // (positions/position) do ep — assistido não mostra mais badge de retomada.
   static Future<void> markEpisodeWatched({
     required String animeKey,
     required int episodeIndex,
@@ -92,6 +145,14 @@ class LocalStorage {
         ((existing['watched'] as List?)?.cast<int>() ?? const <int>[]).toSet();
     if (!watched.add(episodeIndex)) return;
     existing['watched'] = watched.toList();
+    final positions = _readPositions(existing);
+    positions.remove(episodeIndex);
+    existing['positions'] = {
+      for (final e in positions.entries) '${e.key}': e.value,
+    };
+    if (existing['episode'] == episodeIndex) {
+      existing.remove('position');
+    }
     await ProfileStore.instance.setProgress(key, existing);
   }
 
