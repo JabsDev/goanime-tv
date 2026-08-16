@@ -147,7 +147,71 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
 
   void _playEpisode(int index) {
     debugPrint('[Detail] Tap EP index=$index num=${_episodes[index].number}');
-    _showEpisodeSourcePicker(index);
+    // BUGFIX (retomada): ep parado no meio (minutagem salva e não assistido)
+    // pergunta se o usuário quer continuar de onde parou ou recomeçar.
+    final progress = LocalStorage.getWatchProgress(widget.anime.name);
+    final watchedSet =
+        (progress?['watched'] as List?)?.cast<int>().toSet() ?? <int>{};
+    final resume =
+        LocalStorage.getResumePosition(widget.anime.name, index);
+    final partial =
+        !watchedSet.contains(index) &&
+        resume != null &&
+        resume.inMilliseconds > 5000;
+    if (partial) {
+      _showResumeChoiceDialog(index, resume);
+    } else {
+      _showEpisodeSourcePicker(index);
+    }
+  }
+
+  /// BUGFIX (retomada): diálogo de escolha para episódio parado no meio.
+  /// "Continuar" abre normal (o player restaura a minutagem); "Recomeçar"
+  /// limpa a minutagem salva para o player abrir do zero.
+  void _showResumeChoiceDialog(int index, Duration resume) {
+    final d = resume;
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    final time = h > 0
+        ? '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}'
+        : '$m:${s.toString().padLeft(2, '0')}';
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ThemeConstants.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Continuar de onde parou?',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          'O episódio ${_episodes[index].number} parou em $time. '
+          'Deseja continuar de onde parou ou recomeçar?',
+          style: const TextStyle(
+              color: ThemeConstants.textSecondary, fontSize: 16, height: 1.4),
+        ),
+        actions: [
+          _DialogButton(
+            label: 'Continuar',
+            primary: true,
+            autofocus: true,
+            onTap: () {
+              Navigator.pop(ctx);
+              _showEpisodeSourcePicker(index);
+            },
+          ),
+          _DialogButton(
+            label: 'Recomeçar',
+            onTap: () {
+              Navigator.pop(ctx);
+              LocalStorage.clearResumePosition(
+                  animeKey: widget.anime.name, episodeIndex: index);
+              _showEpisodeSourcePicker(index);
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   void _showEpisodeSourcePicker(int index) {
@@ -438,7 +502,7 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
       );
     }
 
-    final nextEpisodeIndex = _nextEpisodeIndex();
+    final continueIndex = _continueIndex();
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
       sliver: SliverList(
@@ -484,7 +548,7 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
                 }).toList(),
               ),
             ),
-          if (nextEpisodeIndex != null) _buildContinueCard(nextEpisodeIndex),
+          if (continueIndex != null) _buildContinueCard(continueIndex),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: const Text(
@@ -543,33 +607,38 @@ if (_episodes.isEmpty)
      );
    }
 
-  /// Next episode index to continue from, derived from the same watch progress
-  /// the grid uses (contiguous `watched` prefix ∪ high-water `episode`).
-  /// Returns `null` when there's no history or the series is finished.
-  int? _nextEpisodeIndex() {
+  /// Índice do card "Continuar de onde parou".
+  /// BUGFIX (retomada): se o último episódio tocado ainda NÃO foi concluído
+  /// (parado no meio sem atingir o gate de 75%), o card aponta para ELE MESMO
+  /// — retomar o episódio em andamento em vez de pular para o próximo.
+  int? _continueIndex() {
     if (_episodes.isEmpty) return null;
     final progress = LocalStorage.getWatchProgress(widget.anime.name);
     if (progress == null) return null;
     final watchedSet =
         (progress['watched'] as List?)?.cast<int>().toSet() ?? <int>{};
     final epIndex = (progress['episode'] as int?) ?? -1;
-    var maxWatchedIdx = -1;
-    if (watchedSet.isNotEmpty) {
-      final m = watchedSet.reduce((a, b) => a > b ? a : b);
-      if (m > maxWatchedIdx) maxWatchedIdx = m;
-    }
-    if (epIndex > maxWatchedIdx) maxWatchedIdx = epIndex;
-    final next = maxWatchedIdx + 1;
-    if (next >= _episodes.length) return null;
-    return next;
+    return LocalStorage.nextContinueIndex(
+      episodeCount: _episodes.length,
+      watched: watchedSet,
+      lastPlayedIndex: epIndex,
+    );
   }
 
-  Widget _buildContinueCard(int nextIndex) {
+  Widget _buildContinueCard(int index) {
+    // BUGFIX (retomada): o card mostra o ponto de retomada quando o episódio
+    // está parado no meio ("retomar de 14:23"). Continuar dependente da
+    // escolha; sem minutagem salva mostra "a seguir".
+    final resume = LocalStorage.getResumePosition(widget.anime.name, index);
+    final resumeMs = (resume != null && resume.inMilliseconds > 5000)
+        ? resume.inMilliseconds
+        : null;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: _ContinueWatchingCard(
-        episode: _episodes[nextIndex],
-        onPlay: () => _showEpisodeSourcePicker(nextIndex),
+        episode: _episodes[index],
+        resumeMs: resumeMs,
+        onPlay: () => _showEpisodeSourcePicker(index),
       ),
     );
   }
@@ -608,7 +677,7 @@ if (_episodes.isEmpty)
           isFirstRow: i < crossAxisCount,
           // The continue card is the natural focus target when visible, so
           // the first grid card only autofocuses when there's no such card.
-          autofocus: i == 0 && _nextEpisodeIndex() == null,
+          autofocus: i == 0 && _continueIndex() == null,
           onUpFromFirstRow: i < crossAxisCount
               ? () => _favoriteFocus.requestFocus()
               : null,
@@ -884,11 +953,13 @@ class _EpisodeCardState extends State<_EpisodeCard> {
 /// with the next episode. Same focus mechanics as [_EpisodeCard].
 class _ContinueWatchingCard extends StatefulWidget {
   final CatalogEpisode episode;
+  final int? resumeMs;
   final VoidCallback onPlay;
 
   const _ContinueWatchingCard({
     required this.episode,
     required this.onPlay,
+    this.resumeMs,
   });
 
   @override
@@ -897,6 +968,17 @@ class _ContinueWatchingCard extends StatefulWidget {
 
 class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
   bool _isFocused = false;
+
+  String _formatResume(int ms) {
+    final d = Duration(milliseconds: ms);
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    if (h > 0) {
+      return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -962,7 +1044,10 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Episódio ${widget.episode.number} a seguir',
+                        widget.resumeMs != null
+                            ? 'Episódio ${widget.episode.number} · '
+                                'retomar de ${_formatResume(widget.resumeMs!)}'
+                            : 'Episódio ${widget.episode.number} a seguir',
                         style: const TextStyle(
                           color: ThemeConstants.textSecondary,
                           fontSize: 14,
@@ -1615,12 +1700,14 @@ class _ProviderItemState extends State<_ProviderItem> {
 class _DialogButton extends StatefulWidget {
   final String label;
   final bool primary;
+  final bool autofocus;
   final VoidCallback onTap;
 
   const _DialogButton({
     required this.label,
     required this.onTap,
     this.primary = false,
+    this.autofocus = false,
   });
 
   @override
@@ -1633,6 +1720,7 @@ class _DialogButtonState extends State<_DialogButton> {
   @override
   Widget build(BuildContext context) {
     return Focus(
+      autofocus: widget.autofocus,
       onFocusChange: (f) => setState(() => _isFocused = f),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
       child: Semantics(

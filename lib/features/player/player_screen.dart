@@ -34,10 +34,19 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen>
+    with WidgetsBindingObserver {
   final AnimeRepository _repo = AnimeRepository();
   late final Player _player;
   late final VideoController _videoController;
+
+  // BUGFIX (retomada): o seek emitido logo após open() pode ser descartado
+  // pelo mpv antes do stream ficar pronto. Alvo + flag permitem re-aplicar o
+  // seek quando o vídeo fica ready — e cancelar quando a posição confirma que
+  // o seek inicial pegou.
+  double _resumeTargetSec = 0;
+  bool _resumeApplied = false;
+  bool _restoreAttempted = false;
 
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<Duration>? _durationSub;
@@ -110,9 +119,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _player = Player();
     _videoController = VideoController(_player);
     _initPlayer();
+  }
+
+  // BUGFIX (retomada): TV desligada/HOME/switch de app NÃO faz pop da rota →
+  // dispose() não roda e o processo pode ser morto a qualquer momento. Flush
+  // imediato no pause/background cobre saída por HOME/desligar; o throttle
+  // periódico de 8s segue como backstop para queda de energia.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      if (_videoReady && _durationSec >= 10) {
+        _writeWatchProgressToDisk(widget.episodeIndex);
+      }
+    }
   }
 
   Future<void> _initPlayer() async {
@@ -120,6 +146,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _isLoading = true;
       _error = null;
     });
+    _resumeTargetSec = 0;
+    _resumeApplied = false;
+    _restoreAttempted = false;
     try {
       List<VideoSource> sources;
       int startIndex = widget.initialIndex;
@@ -248,6 +277,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (!mounted) return;
       _positionSec = p.inMilliseconds / 1000.0;
       _positionVN.value = _positionSec;
+      // BUGFIX (retomada): posição alcançou o alvo → o seek inicial pegou;
+      // não re-seek quando o vídeo ficar ready.
+      if (!_resumeApplied &&
+          _resumeTargetSec > 0 &&
+          _positionSec >= _resumeTargetSec - 2) {
+        _resumeApplied = true;
+      }
       if (_videoReady) _saveProgress();
     });
     _durationSub = _player.stream.duration.listen((d) {
@@ -261,6 +297,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _showControls();
         _prefetchNextEpisode();
         debugPrint('[Player] Video is ready, duration: ${_durationSec}s');
+        // BUGFIX (retomada): re-aplica o seek agora que o stream está pronto —
+        // o seek inicial logo após open() pode ter sido descartado pelo mpv.
+        if (!_resumeApplied && _resumeTargetSec > 0) {
+          _applyResumeSeek();
+          _resumeApplied = true;
+        }
       }
     });
     _completedSub = _player.stream.completed.listen((_) {
@@ -429,7 +471,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// BUGFIX (75%): retomada lida do mapa `positions` (retorno por episódio).
   /// Antes usava o high-water `episode`/`position`, que era gravado já nos
   /// primeiros segundos de reprodução — por isso restaurar "voltava do início".
+  /// BUGFIX (retomada): o seek após open() pode ser ignorado pelo mpv antes do
+  /// stream ficar pronto → _applyResumeSeek re-aplica quando o vídeo fica
+  /// `ready` (ver transição de _videoReady no listener de duração). Executa uma
+  /// única vez por abertura; retry de qualidade/fonte não re-busca o ponto.
   void _restoreProgress() {
+    if (_restoreAttempted) return;
+    _restoreAttempted = true;
     // Ep já assistido não retoma (evita posição residual do flush do dispose).
     final progress = LocalStorage.getWatchProgress(widget.anime.name);
     final watchedSet =
@@ -437,10 +485,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (watchedSet.contains(widget.episodeIndex)) return;
     final resume = LocalStorage.getResumePosition(
         widget.anime.name, widget.episodeIndex);
-    if (resume == null) return;
-    if (resume.inMilliseconds > 5000) {
-      _player.seek(resume);
-    }
+    if (resume == null || resume.inMilliseconds <= 5000) return;
+    _resumeTargetSec = resume.inMilliseconds / 1000.0;
+    _resumeApplied = false;
+    _applyResumeSeek();
+  }
+
+  void _applyResumeSeek() {
+    if (_resumeTargetSec <= 0) return;
+    _player.seek(Duration(milliseconds: (_resumeTargetSec * 1000).toInt()));
+    debugPrint('[Player] Resume seek -> ${_resumeTargetSec}s');
   }
 
   void _triggerAutoNext() {
@@ -571,6 +625,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _positionSub?.cancel();
     _durationSub?.cancel();
     _completedSub?.cancel();

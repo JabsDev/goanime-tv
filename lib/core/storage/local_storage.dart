@@ -128,6 +128,58 @@ class LocalStorage {
     return null;
   }
 
+  /// Remove a retomada salva do episódio [episodeIndex] — usado quando o
+  /// usuário escolhe "Recomeçar" no diálogo de retomada. Limpa tanto o mapa
+  /// `positions` quanto o fallback legado `position` (quando o last-played é
+  /// o mesmo ep), senão o player restauraria o ponto de novo no próximo play.
+  static Future<void> clearResumePosition({
+    required String animeKey,
+    required int episodeIndex,
+  }) async {
+    ensureInitialized();
+    final key = _normalizeKey(animeKey);
+    final existing = _findProgress(key);
+    if (existing == null) return;
+    final positions = _readPositions(existing);
+    positions.remove(episodeIndex);
+    existing['positions'] = {
+      for (final e in positions.entries) '${e.key}': e.value,
+    };
+    if (existing['episode'] == episodeIndex) {
+      existing.remove('position');
+    }
+    await ProfileStore.instance.setProgress(key, existing);
+  }
+
+  /// Índice do card "Continuar de onde parou".
+  ///
+  /// BUGFIX (retomada): se o último episódio tocado ainda NÃO foi concluído
+  /// (não pertence ao conjunto `watched`, i.e. não atingiu o gate de 75%), o
+  /// card aponta para ELE MESMO — retomar o episódio em andamento, em vez de
+  /// pular para o próximo. Caso contrário, aponta para o primeiro episódio
+  /// depois do high-water (watched ∪ last-played). `null` quando a série está
+  /// toda concluída ou não há episódios.
+  static int? nextContinueIndex({
+    required int episodeCount,
+    required Set<int> watched,
+    required int lastPlayedIndex,
+  }) {
+    if (episodeCount <= 0) return null;
+    if (lastPlayedIndex >= 0 &&
+        lastPlayedIndex < episodeCount &&
+        !watched.contains(lastPlayedIndex)) {
+      return lastPlayedIndex;
+    }
+    var high = lastPlayedIndex;
+    if (watched.isNotEmpty) {
+      final m = watched.reduce((a, b) => a > b ? a : b);
+      if (m > high) high = m;
+    }
+    final next = high + 1;
+    if (next >= episodeCount) return null;
+    return next;
+  }
+
   // Marca um episódio como assistido no conjunto do perfil atual.
   // Totalmente idempotente: re-marcar um índice existente não cresce a lista
   // nem reescreve o disco (toSet().add + early-return).

@@ -139,4 +139,87 @@ void main() {
     final progress = LocalStorage.getWatchProgress('naruto')!;
     expect(progress['watched'], [1]);
   });
+
+  group('nextContinueIndex', () {
+    test('ep em andamento (parado no meio) → retoma ELE MESMO', () {
+      expect(
+        LocalStorage.nextContinueIndex(
+            episodeCount: 12, watched: {0, 1, 2}, lastPlayedIndex: 4),
+        4,
+      );
+    });
+
+    test('ep concluído (watched) → próximo após o high-water', () {
+      expect(
+        LocalStorage.nextContinueIndex(
+            episodeCount: 12, watched: {0, 1, 2, 3}, lastPlayedIndex: 3),
+        4,
+      );
+      expect(
+        LocalStorage.nextContinueIndex(
+            episodeCount: 12, watched: {0, 1, 2, 3}, lastPlayedIndex: 2),
+        4,
+      );
+    });
+
+    test('sem watched: vira o último tocado (parcial) ou 0', () {
+      expect(
+        LocalStorage.nextContinueIndex(
+            episodeCount: 12, watched: {}, lastPlayedIndex: 7),
+        7,
+      );
+      expect(
+        LocalStorage.nextContinueIndex(
+            episodeCount: 12, watched: {}, lastPlayedIndex: -1),
+        0,
+      );
+    });
+
+    test('watched com gaps: high-water mais longe domina quando último foi visto',
+        () {
+      expect(
+        LocalStorage.nextContinueIndex(
+            episodeCount: 12, watched: {0, 1, 2, 11}, lastPlayedIndex: 2),
+        null,
+      );
+    });
+
+    test('série terminada → null', () {
+      expect(
+        LocalStorage.nextContinueIndex(
+            episodeCount: 12, watched: {0, 1, 2, 3, 11}, lastPlayedIndex: 11),
+        null,
+      );
+      expect(
+        LocalStorage.nextContinueIndex(
+            episodeCount: 0, watched: {}, lastPlayedIndex: -1),
+        null,
+      );
+    });
+  });
+
+  test('clearResumePosition remove a retomada do ep (map e fallback legado)',
+      () async {
+    await LocalStorage.saveWatchProgress(
+        animeKey: 'naruto',
+        episodeNumber: 3,
+        position: const Duration(minutes: 9),
+        totalEpisodes: 12);
+    expect(LocalStorage.getResumePosition('naruto', 3),
+        const Duration(minutes: 9));
+
+    await LocalStorage.clearResumePosition(
+        animeKey: 'naruto', episodeIndex: 3);
+    expect(LocalStorage.getResumePosition('naruto', 3), isNull);
+
+    // fallback legado (schema antigo, position único do last-played)
+    await ProfileStore.instance.setProgress('naruto', {
+      'episode': 5,
+      'position': 60000,
+      'totalEpisodes': 12,
+    });
+    await LocalStorage.clearResumePosition(
+        animeKey: 'naruto', episodeIndex: 5);
+    expect(LocalStorage.getResumePosition('naruto', 5), isNull);
+  });
 }

@@ -188,11 +188,19 @@ class AnimeRepository {
     final cached =
         AppCaches.resolutions.get<Map<AnimeSource, List<VideoSource>>>(cacheKey);
     if (cached != null) {
-      return EpisodeResolution(
+      final resolution = EpisodeResolution(
         providers: cached,
         matchedUnavailable: const {},
         notFound: const {},
+        complete: true,
       );
+      // BUGFIX (fontes não carregam na 2ª abertura): o cache hit retornava antes
+      // do fan-out e NUNCA chamava o `onUpdate` — o consumidor (_ProviderQualityDialog)
+      // dependia do onUpdate para sair de `_loading=true`. Ao reabrir o mesmo ep
+      // dentro do TTL, o diálogo ficava eternamente em "Procurando fontes de
+      // vídeo...". Alimenta o consumidor com a resolução cacheada como progresso.
+      if (onUpdate != null) onUpdate(resolution);
+      return resolution;
     }
 
     final results = <AnimeSource, List<VideoSource>>{};

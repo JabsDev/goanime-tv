@@ -327,4 +327,41 @@ void main() {
     expect(sw.elapsedMilliseconds, greaterThanOrEqualTo(60),
         reason: 'modo full espera a fonte lenta terminar');
   });
+
+  test('BUGFIX fontes não carregam na 2ª abertura: cache hit ainda chama onUpdate',
+      () async {
+    final repo = AnimeRepository(adapters: [_FastAdapter()]);
+    final anime = _anime(id: 29);
+
+    // 1ª resolução: popula o cache (happy-path).
+    await repo.resolveProvidersForEpisode(
+      anime,
+      1,
+      partial: true,
+      onUpdate: (_) {},
+    );
+    final identity = ProviderMatchStore.identity(anime);
+    expect(
+      AppCaches.resolutions
+          .get<Map<AnimeSource, List<VideoSource>>>('$identity:1'),
+      isNotNull,
+      reason: 'a 1ª resolução tem que ter sido cacheada para o teste 2 bater o bug',
+    );
+
+    // 2ª abertura dentro do TTL → cache hit NÃO pode deixar o consumidor preso
+    // em loading: o onUpdate precisa ser alimentado mesmo sem fan-out.
+    final secondUpdates = <EpisodeResolution>[];
+    final res = await repo.resolveProvidersForEpisode(
+      anime,
+      1,
+      partial: true,
+      onUpdate: secondUpdates.add,
+    );
+
+    expect(secondUpdates, isNotEmpty,
+        reason: 'cache hit deve alimentar o onUpdate/consumidor');
+    expect(secondUpdates.last.providers, isNotEmpty);
+    expect(secondUpdates.last.complete, isTrue);
+    expect(res.providers[AnimeSource.animeFire], isNotEmpty);
+  });
 }
