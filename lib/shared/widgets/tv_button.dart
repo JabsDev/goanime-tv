@@ -9,6 +9,7 @@ class TVButton extends StatefulWidget {
   final VoidCallback onPressed;
   final bool isPrimary;
   final double width;
+  final bool autofocus;
 
   const TVButton({
     super.key,
@@ -17,6 +18,7 @@ class TVButton extends StatefulWidget {
     required this.onPressed,
     this.isPrimary = true,
     this.width = 200,
+    this.autofocus = false,
   });
 
   @override
@@ -30,6 +32,7 @@ class _TVButtonState extends State<TVButton> {
   Widget build(BuildContext context) {
     final s = SettingsService.instance;
     return Focus(
+      autofocus: widget.autofocus,
       onFocusChange: (focused) => setState(() => _isFocused = focused),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onPressed),
       child: Semantics(

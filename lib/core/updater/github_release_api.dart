@@ -80,31 +80,66 @@ class ReleaseInfo {
   }
 }
 
+/// Constrói um ReleaseInfo "bloqueado" (não-instalável) apenas quando a
+/// release é candidata a feedback: tag válida, NÃO draft, e não-instalável
+/// (docs-only sem asset .apk ou prerelease). Retorna null caso contrário.
+///
+/// NOTA: viola deliberadamente o invariante de [ReleaseInfo] ("só releases
+/// instaláveis") — por isso este tipo só circula em `blockedNewer` e jamais
+/// é passado a `downloadAndInstall`/`pending`.
+ReleaseInfo? _blockedFrom(Map<String, dynamic> json) {
+  final tagName = json['tag_name'] as String?;
+  if (tagName == null || tagName.isEmpty) return null;
+  if (json['draft'] == true) return null;
+  // Se é instalável, não é "bloqueado".
+  if (ReleaseInfo.tryParse(json) != null) return null;
+  final prerelease = json['prerelease'] == true;
+  return ReleaseInfo(
+    tagName: tagName,
+    versionLabel: (json['name'] as String?)?.isNotEmpty == true
+        ? json['name'] as String
+        : json['tag_name'] as String?,
+    changelog: json['body'] as String?,
+    apkUrl: null,
+    isPrerelease: prerelease,
+    isDraft: false,
+  );
+}
+
 /// Resultado de [fetchLatestRelease]: a release candidata (ou null) e se a
 /// checagem obteve resposta HTTP válida — o throttle só deve ser gravado
 /// quando `httpOk` for true (D4: 403/429/erro de rede não "trancam" 24h).
 class ReleaseCheckResult {
   final ReleaseInfo? info;
   final bool httpOk;
-  const ReleaseCheckResult(this.info, this.httpOk);
+  /// Release mais nova vista que NÃO é instalável pelo app (docs-only sem
+  /// asset .apk, ou prerelease). Serve APENAS para feedback ("versão nova
+  /// ainda não disponível") — NUNCA para oferecer download. Drafts nunca
+  /// são capturados. Só é setado em checagens com httpOk == true.
+  final ReleaseInfo? blockedNewer;
+  const ReleaseCheckResult(this.info, this.httpOk, {this.blockedNewer});
 }
 
 /// Busca a última release com asset `.apk` do repositório.
 ///
 /// Caminho rápido: `GET /releases/latest`. Se essa for *docs-only* (sem APK),
 /// cai para `GET /releases?per_page=20` e toma a última com asset `.apk`
-/// (correção D1 do plano v2).
+/// (correção D1 do plano v2). A release mais nova não-instalável é capturada
+/// em `blockedNewer` para o feedback ("versão nova ainda não disponível").
 ///
 /// Nunca lança exceção: erros de rede/HTTP são "sem update" silencioso.
 Future<ReleaseCheckResult> fetchLatestRelease({http.Client? client}) async {
   final c = client ?? http.Client();
   try {
+    ReleaseInfo? blocked;
     final latest = await _getJson(c, '/releases/latest');
     if (latest.$2) {
       final latestRaw = latest.$1;
       if (latestRaw is Map<String, dynamic>) {
         final info = ReleaseInfo.tryParse(latestRaw);
         if (info != null) return ReleaseCheckResult(info, true);
+        // latest docs-only (ou draft): captura o primeiro "bloqueado".
+        blocked ??= _blockedFrom(latestRaw);
       } else if (latestRaw == null) {
         // 404: repositório sem releases — checagem válida e silenciosa.
         return const ReleaseCheckResult(null, true);
@@ -115,14 +150,18 @@ Future<ReleaseCheckResult> fetchLatestRelease({http.Client? client}) async {
     if (list.$2) {
       final listRaw = list.$1;
       if (listRaw is List) {
-        // per_page retorna do mais novo para o mais velho — acha a primeira
-        // com APK (releases/latest docs-only cai neste caminho).
+        // per_page retorna do mais novo para o mais velho. A primeira
+        // instalável é a info; o primeiro não-instalável encontrado é o
+        // blocked (só se o caminho latest ainda não tiver definido um).
         for (final r in listRaw.cast<Map<String, dynamic>>()) {
           final info = ReleaseInfo.tryParse(r);
-          if (info != null) return ReleaseCheckResult(info, true);
+          if (info != null) {
+            return ReleaseCheckResult(info, true, blockedNewer: blocked);
+          }
+          blocked ??= _blockedFrom(r);
         }
-        // 200 com lista sem APK: checagem válida, sem update.
-        return const ReleaseCheckResult(null, true);
+        // 200 com lista sem APK: checagem válida, sem update (pode ter blocked).
+        return ReleaseCheckResult(null, true, blockedNewer: blocked);
       }
     }
 

@@ -80,6 +80,7 @@ class UpdateAvailableDialog extends StatelessWidget {
                   icon: Icons.download,
                   onPressed: onUpdate,
                   width: 220,
+                  autofocus: true,
                 ),
                 const SizedBox(width: 16),
                 TVButton(

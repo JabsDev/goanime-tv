@@ -370,18 +370,45 @@ class _CheckNowRowState extends State<_CheckNowRow> {
 
   Future<void> _checkNow() async {
     if (_busy) return;
-    setState(() => _busy = true);
     final updater = UpdateService.instance;
+    final st = updater.state.value;
+    if (st != UpdateState.idle) {
+      // Estado ativo → não chama check (que retornaria null). Dá feedback.
+      final msg = switch (st) {
+        UpdateState.checking => 'Verificação em andamento...',
+        UpdateState.updateAvailable => 'Uma atualização já está disponível.',
+        UpdateState.downloading => 'Uma atualização está sendo baixada.',
+        UpdateState.installing => 'Uma atualização está sendo instalada.',
+        UpdateState.done => 'A atualização foi concluída. Reabra o app.',
+        UpdateState.error => 'A última atualização falhou.',
+        UpdateState.idle => 'Uma atualização está em andamento.',
+      };
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 3),
+      ));
+      return;
+    }
+
+    setState(() => _busy = true);
     final result = await updater.check(manual: true);
     if (!mounted) return;
     setState(() => _busy = false);
+
     if (result == false) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Você está na versão mais recente.'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+      final msg = updater.lastCheckNotice ?? 'Você está na versão mais recente.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 3),
+      ));
+    } else if (result == null) {
+      // Só sobra erro de rede/timeout aqui: o no-op por estado ativo já foi
+      // tratado no pré-check acima.
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(
+            'Não foi possível verificar atualizações agora. Tente novamente.'),
+        duration: Duration(seconds: 3),
+      ));
     }
   }
 

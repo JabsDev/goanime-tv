@@ -36,6 +36,15 @@ void main() {
         ],
       };
 
+  Map<String, dynamic> docsOnly(String tag, {bool pre = false}) => {
+        'tag_name': tag,
+        'name': tag,
+        'body': 'changelog',
+        'prerelease': pre,
+        'draft': false,
+        'assets': <Map<String, dynamic>>[],
+      };
+
   http.Response okList(Object body) => http.Response.bytes(
         utf8.encode(jsonEncode(body)),
         200,
@@ -147,6 +156,56 @@ void main() {
     expect(UpdateService.instance.state.value, UpdateState.updateAvailable);
     final r = await UpdateService.instance.check(manual: true);
     expect(r, isNull);
+  });
+
+  test('manual: docs-only mais nova → false + notice de indisponível',
+      () async {
+    // latest docs-only (v1.0.1) + lista com a antiga instalável (v1.0.0, igual
+    // à instalada). Sem o fix, o app responderia "você está na versão mais
+    // recente" mesmo desatualizado (sintoma D).
+    UpdateService.clientOverride = MockClient((req) async {
+      if (req.url.path.endsWith('/releases/latest')) {
+        return okList(docsOnly('v1.0.1+1000001'));
+      }
+      return okList([
+        docsOnly('v1.0.1+1000001'), // docs-only, mais nova
+        releaseJson('v1.0.0+1000000'), // instalável, igual à instalada
+      ]);
+    });
+    final r = await UpdateService.instance.check(manual: true);
+    expect(r, isFalse);
+    expect(UpdateService.instance.state.value, UpdateState.idle);
+    expect(UpdateService.instance.lastCheckNotice,
+        contains('ainda não está disponível para instalação'));
+  });
+
+  test('manual: sem update real → false + "versão mais recente"', () async {
+    UpdateService.clientOverride = MockClient(
+        (req) async => okList(releaseJson('v1.0.0+1000000')));
+    final r = await UpdateService.instance.check(manual: true);
+    expect(r, isFalse);
+    expect(UpdateService.instance.state.value, UpdateState.idle);
+    expect(UpdateService.instance.lastCheckNotice,
+        contains('Você está na versão mais recente.'));
+  });
+
+  test('manual: latest docs-only + prerelease na lista → notice de indisponível',
+      () async {
+    UpdateService.clientOverride = MockClient((req) async {
+      if (req.url.path.endsWith('/releases/latest')) {
+        return okList(docsOnly('v1.1.0+1000010'));
+      }
+      return okList([
+        docsOnly('v1.1.0+1000010'), // docs-only mais novo → blocked
+        releaseJson('v1.0.1+1000001', pre: true), // prerelease com apk
+        releaseJson('v1.0.0+1000000'), // instalável, igual à instalada
+      ]);
+    });
+    final r = await UpdateService.instance.check(manual: true);
+    expect(r, isFalse);
+    expect(UpdateService.instance.state.value, UpdateState.idle);
+    expect(UpdateService.instance.lastCheckNotice,
+        contains('ainda não está disponível para instalação'));
   });
 
   test('download: chega no instalador (sem canal nativo) → error', () async {

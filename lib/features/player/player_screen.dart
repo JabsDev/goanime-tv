@@ -11,6 +11,7 @@ import '../../core/anilist/anilist_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/utils/quality_picker.dart';
 import '../../shared/widgets/focus_key_handler.dart';
+import 'resume_seek_tracker.dart';
 
 class PlayerScreen extends StatefulWidget {
   final Anime anime;
@@ -41,11 +42,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   late final VideoController _videoController;
 
   // BUGFIX (retomada): o seek emitido logo após open() pode ser descartado
-  // pelo mpv antes do stream ficar pronto. Alvo + flag permitem re-aplicar o
-  // seek quando o vídeo fica ready — e cancelar quando a posição confirma que
-  // o seek inicial pegou.
-  double _resumeTargetSec = 0;
-  bool _resumeApplied = false;
+  // pelo mpv antes do stream ficar pronto. O `ResumeSeekTracker` (lógica pura,
+  // testável) decide quando confirmar / re-aplicar o seek: só com o vídeo
+  // pronto, com confirmação por amostras consecutivas e re-seek com backoff.
+  final ResumeSeekTracker _resumeSeek = ResumeSeekTracker();
   bool _restoreAttempted = false;
 
   StreamSubscription<Duration>? _positionSub;
@@ -146,9 +146,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       _isLoading = true;
       _error = null;
     });
-    _resumeTargetSec = 0;
-    _resumeApplied = false;
-    _restoreAttempted = false;
+    // Resets de retomada vivem EXCLUSIVAMENTE em `_playSource` (um único
+    // ponto): `_restoreAttempted = false` e `_resumeSeek.reset()`. Isso
+    // garante que cada troca de fonte re-aplica a retomada (Furo 3).
     try {
       List<VideoSource> sources;
       int startIndex = widget.initialIndex;
@@ -207,6 +207,13 @@ class _PlayerScreenState extends State<PlayerScreen>
       _videoReady = false;
       _gotPlayback = false;
       _anilistPushedForThisEp = false;
+      // BUGFIX (retomada por fonte): cada `_playSource` reseta a restauração e
+      // desarma o tracker. Se `_restoreProgress` retornar cedo para esta fonte
+      // (ep já assistido / resume ≤ 5s / sem resume), o tracker já foi
+      // desarmado — sem isso ele carregaria o target/ready da fonte anterior e
+      // poderia emitir seeks espúrios (inclusive contra um seek manual).
+      _restoreAttempted = false;
+      _resumeSeek.reset();
     });
     _loadTimeout?.cancel();
     _loadTimeout = Timer(const Duration(seconds: 20), () {
@@ -277,12 +284,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (!mounted) return;
       _positionSec = p.inMilliseconds / 1000.0;
       _positionVN.value = _positionSec;
-      // BUGFIX (retomada): posição alcançou o alvo → o seek inicial pegou;
-      // não re-seek quando o vídeo ficar ready.
-      if (!_resumeApplied &&
-          _resumeTargetSec > 0 &&
-          _positionSec >= _resumeTargetSec - 2) {
-        _resumeApplied = true;
+      // BUGFIX (retomada): o tracker decide quando (re-)aplicar o seek —
+      // confirmação só com o vídeo pronto e amostras consecutivas; re-seek com
+      // backoff quando a posição caiu bem abaixo do alvo.
+      if (_resumeSeek.onPosition(_positionSec)) {
+        _applyResumeSeek();
       }
       if (_videoReady) _saveProgress();
     });
@@ -294,15 +300,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (_durationSec >= 10 && !_videoReady) {
         _loadTimeout?.cancel();
         _videoReady = true;
+        // BUGFIX (retomada): marca o stream como pronto ANTES de avaliar
+        // posições — o tracker só confirma/re-emite seek depois disso (se
+        // inverter, reintroduz o Furo 1). A re-aplicação é dirigida pelo
+        // tracker via eventos de posição, não por tentativa única aqui.
+        _resumeSeek.markVideoReady();
         _showControls();
         _prefetchNextEpisode();
         debugPrint('[Player] Video is ready, duration: ${_durationSec}s');
-        // BUGFIX (retomada): re-aplica o seek agora que o stream está pronto —
-        // o seek inicial logo após open() pode ter sido descartado pelo mpv.
-        if (!_resumeApplied && _resumeTargetSec > 0) {
-          _applyResumeSeek();
-          _resumeApplied = true;
-        }
       }
     });
     _completedSub = _player.stream.completed.listen((_) {
@@ -486,15 +491,15 @@ class _PlayerScreenState extends State<PlayerScreen>
     final resume = LocalStorage.getResumePosition(
         widget.anime.name, widget.episodeIndex);
     if (resume == null || resume.inMilliseconds <= 5000) return;
-    _resumeTargetSec = resume.inMilliseconds / 1000.0;
-    _resumeApplied = false;
+    _resumeSeek.arm(resume.inMilliseconds / 1000.0);
     _applyResumeSeek();
   }
 
   void _applyResumeSeek() {
-    if (_resumeTargetSec <= 0) return;
-    _player.seek(Duration(milliseconds: (_resumeTargetSec * 1000).toInt()));
-    debugPrint('[Player] Resume seek -> ${_resumeTargetSec}s');
+    final target = _resumeSeek.targetSec;
+    if (target <= 0) return;
+    _player.seek(Duration(milliseconds: (target * 1000).toInt()));
+    debugPrint('[Player] Resume seek -> ${target}s');
   }
 
   void _triggerAutoNext() {

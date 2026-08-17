@@ -65,6 +65,11 @@ class UpdateService {
   String? get errorMessage => _errorMessage;
   bool get canOpenInstaller => _errorCanOpenInstaller;
 
+  String? _lastCheckNotice;
+  /// Mensagem pronta para a UI após `check()`. `null` → nada a mostrar
+  /// (erro de rede ou no-op). Definida apenas em checagens válidas.
+  String? get lastCheckNotice => _lastCheckNotice;
+
   String? _errorMessage;
   bool _errorCanOpenInstaller = false;
 
@@ -168,6 +173,23 @@ class UpdateService {
     }
   }
 
+  /// Se existe uma release "bloqueada" (docs-only/prerelease) MAIS NOVA que a
+  /// instalada e não ignorada pelo usuário, devolve a mensagem de feedback.
+  /// Senão null. Evita o falso "você está na versão mais recente" (sintoma D).
+  String? _blockedNotice(ReleaseInfo? blocked) {
+    if (blocked == null) return null;
+    if (wasIgnored(blocked.tagName)) return null;
+    if (compareAppVersions(
+          installedBuild: _installedBuild,
+          installedVersion: _installedVersion,
+          tagName: blocked.tagName,
+        ) <= 0) {
+      return null;
+    }
+    return 'Existe uma versão nova, mas ela ainda não está disponível '
+        'para instalação. Tente novamente mais tarde.';
+  }
+
   /// Checa por atualização. [manual]=true ignora o throttle. 
   /// `true` → update sendo oferecido; `false` → checagem ok, sem update;
   /// `null` → no-op (guarda de concorrência ou throttle automático).
@@ -182,6 +204,7 @@ class UpdateService {
         return null; // throttled (1×/dia)
       }
     }
+    _lastCheckNotice = null; // limpa SEMPRE antes de validar
 
     _state.value = UpdateState.checking;
     _errorMessage = null;
@@ -197,10 +220,16 @@ class UpdateService {
 
       if (res.info == null) {
         _state.value = UpdateState.idle;
-        return res.httpOk ? false : null;
+        if (!res.httpOk) return null; // erro de rede → UI mostra "não foi possível"
+        // Checagem válida sem release instalável: distingue blocked de "ok".
+        _lastCheckNotice =
+            _blockedNotice(res.blockedNewer) ?? 'Você está na versão mais recente.';
+        return false;
       }
+
       final r = res.info!;
-      final newer = !wasIgnored(r.tagName) &&
+      final ignored = wasIgnored(r.tagName);
+      final newer = !ignored &&
           compareAppVersions(
             installedBuild: _installedBuild,
             installedVersion: _installedVersion,
@@ -208,14 +237,21 @@ class UpdateService {
           ) > 0;
       if (!newer) {
         _state.value = UpdateState.idle;
+        // CAUSA RAIZ do sintoma D: `r` é a última instalável (pode ser igual à
+        // instalada) enquanto existe uma docs-only mais nova. A mensagem tem
+        // prioridade sobre o falso "versão mais recente".
+        _lastCheckNotice = _blockedNotice(res.blockedNewer) ??
+            (ignored ? 'Você ignorou esta versão.' : 'Você está na versão mais recente.');
         return res.httpOk ? false : null;
       }
+
       _pending = r;
       _state.value = UpdateState.updateAvailable;
       return true;
     } catch (e) {
       debugPrint('[updater] check error: $e');
       _state.value = UpdateState.idle;
+      _lastCheckNotice = null;
       return null;
     }
   }
@@ -395,10 +431,19 @@ class UpdateService {
     }
   }
 
-  /// Diálogo ignorado/fechou: finaliza o estado com "agora não".
+  /// Fecha/ignora o fluxo atual. Diálogo de update ignorado ("Agora não") OU
+  /// resultado fechado pelo usuário ("Fechar" em done/error): volta ao idle para
+  /// que o _sync do UpdateManager derrube o diálogo.
+  /// Estados em andamento (downloading/installing) NÃO são abatidos.
   void dismiss() {
-    if (_state.value == UpdateState.updateAvailable) {
-      _state.value = UpdateState.idle;
+    switch (_state.value) {
+      case UpdateState.updateAvailable:
+      case UpdateState.done:
+      case UpdateState.error:
+        _state.value = UpdateState.idle;
+        break;
+      default:
+        break; // idle/checking/downloading/installing
     }
   }
 
@@ -422,6 +467,7 @@ class UpdateService {
     _errorCanOpenInstaller = false;
     _cancelRequested = false;
     _apkFile = null;
+    _lastCheckNotice = null;
     _state.value = UpdateState.idle;
     _progress.value = null;
   }

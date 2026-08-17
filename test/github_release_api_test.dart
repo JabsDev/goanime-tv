@@ -140,6 +140,37 @@ void main() {
     expect(res.info!.apkDigest, 'ab' * 32);
   });
 
+  test('latest docs-only → info antiga + blockedNewer preenchido', () async {
+    final client = serve(
+      latest: release(tag: 'v1.1.0+1000005', assets: []), // docs-only
+      all: [
+        release(tag: 'v1.1.0+1000005', assets: []), // docs-only, mais nova
+        release(tag: 'v1.0.1+1000001', assets: [asset('a.apk')]),
+      ],
+    );
+    final res = await fetchLatestRelease(client: client);
+    expect(res.info!.tagName, 'v1.0.1+1000001');
+    expect(res.blockedNewer, isNotNull);
+    expect(res.blockedNewer!.tagName, 'v1.1.0+1000005');
+    expect(res.blockedNewer!.apkUrl, isNull);
+  });
+
+  test('latest docs-only + lista sem instalável → blockedNewer + httpOk true',
+      () async {
+    final client = serve(
+      latest: release(tag: 'v1.1.0+1000005', assets: []),
+      all: [
+        release(tag: 'v1.1.0+1000005', assets: []),
+        release(tag: 'v1.0.1+1000001', assets: []),
+      ],
+    );
+    final res = await fetchLatestRelease(client: client);
+    expect(res.info, isNull);
+    expect(res.httpOk, isTrue);
+    expect(res.blockedNewer, isNotNull);
+    expect(res.blockedNewer!.tagName, 'v1.1.0+1000005');
+  });
+
   test('draft é ignorado', () async {
     final client = serve(
       latest: release(tag: 'v9.9.9+999999', draft: true, assets: [asset('x.apk')]),
@@ -147,6 +178,8 @@ void main() {
     );
     final res = await fetchLatestRelease(client: client);
     expect(res.info!.tagName, 'v1.0.1+1000001');
+    // draft não vira blockedNewer (privadas/efêmeras não são feedback)
+    expect(res.blockedNewer, isNull);
   });
 
   test('apiBase configurável via dart-define respeita o client', () {

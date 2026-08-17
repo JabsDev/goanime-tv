@@ -31,7 +31,7 @@ class UpdateFlowDialog extends StatelessWidget {
               case UpdateState.downloading:
                 return _downloading(s);
               case UpdateState.installing:
-                return _installing();
+                return _installing(context);
               case UpdateState.done:
                 return _done(s);
               case UpdateState.error:
@@ -86,6 +86,7 @@ class UpdateFlowDialog extends StatelessWidget {
                   isPrimary: false,
                   onPressed: s.cancelDownload,
                   width: 160,
+                  autofocus: true,
                 ),
               ],
             ),
@@ -95,29 +96,44 @@ class UpdateFlowDialog extends StatelessWidget {
     );
   }
 
-  Widget _installing() {
-    return const Column(
+  // BUGFIX (saída garantida): o estado `installing` antes não tinha NENHUMA
+  // ação → usuário só saía matando o app se o nativo nunca respondesse
+  // (sintoma C). "Voltar ao app" fecha o diálogo SEM cancelar a instalação —
+  // o resultado nativo continua fluindo pelo MethodChannel e o _sync reabre o
+  // fluxo em done/error. Column não pode ser const (TVButton tem closure).
+  Widget _installing(BuildContext context) {
+    return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _Header(
+        const _Header(
           icon: Icons.settings_suggest,
           title: 'Instalando...',
         ),
-        SizedBox(height: 16),
-        LinearProgressIndicator(
+        const SizedBox(height: 16),
+        const LinearProgressIndicator(
           minHeight: 6,
           color: ThemeConstants.primary,
           backgroundColor: ThemeConstants.surfaceLight,
         ),
-        SizedBox(height: 12),
-        Text(
+        const SizedBox(height: 12),
+        const Text(
           'Aguarde a confirmação do Android. Se o app fechar, reabra o '
           'GoAnime TV após a instalação.',
           style: TextStyle(
             color: ThemeConstants.textSecondary,
             fontSize: 14,
             height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Center(
+          child: TVButton(
+            label: 'Voltar ao app',
+            isPrimary: false,
+            onPressed: () => Navigator.of(context).pop(),
+            width: 200,
+            autofocus: true,
           ),
         ),
       ],
@@ -137,39 +153,54 @@ class UpdateFlowDialog extends StatelessWidget {
           label: 'Fechar',
           onPressed: s.dismiss,
           width: 160,
+          autofocus: true,
         ),
       ],
     );
   }
 
+  // BUGFIX (foco): o primeiro botão visível do estado `error` recebe autofocus
+  // — "sempre exatamente um" (regra Fase A). O closure `addButton` decide na
+  // hora da inserção, sem depender de firstWhereOrNull.
   Widget _error(UpdateService s) {
     final canOpen = s.canOpenInstaller;
+    final children = <Widget>[];
+    void addButton({
+      required String label,
+      required VoidCallback onPressed,
+      double width = 200,
+    }) {
+      final isFirst = children.isEmpty;
+      children.add(TVButton(
+        label: label,
+        isPrimary: false,
+        onPressed: onPressed,
+        width: width,
+        autofocus: isFirst,
+      ));
+    }
+
+    if (canOpen) {
+      addButton(
+        label: 'Abrir instalador do sistema',
+        onPressed: s.openSystemInstaller,
+        width: 260,
+      );
+    }
+    if (s.pending != null) {
+      addButton(
+        label: 'Tentar novamente',
+        onPressed: () => s.downloadAndInstall(s.pending!),
+        width: 220,
+      );
+    }
+    addButton(label: 'Fechar', onPressed: s.dismiss, width: 160);
     return _ResultBody(
       icon: Icons.error_outline,
       iconColor: ThemeConstants.accent,
       title: 'Não foi possível atualizar',
       message: s.errorMessage ?? 'Erro desconhecido.',
-      children: [
-        if (canOpen)
-          TVButton(
-            label: 'Abrir instalador do sistema',
-            isPrimary: false,
-            onPressed: s.openSystemInstaller,
-            width: 260,
-          ),
-        if (s.pending != null)
-          TVButton(
-            label: 'Tentar novamente',
-            isPrimary: false,
-            onPressed: () => s.downloadAndInstall(s.pending!),
-            width: 220,
-          ),
-        TVButton(
-          label: 'Fechar',
-          onPressed: s.dismiss,
-          width: 160,
-        ),
-      ],
+      children: children,
     );
   }
 }

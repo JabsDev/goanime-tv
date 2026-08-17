@@ -23,6 +23,10 @@ class UpdateManager extends StatefulWidget {
 class _UpdateManagerState extends State<UpdateManager> {
   String? _openDialog;
   bool _started = false;
+  // Fase C: token monotônico. Cada `_closeCurrent` incrementa e invalida os
+  // `whenComplete` pendentes de diálogos anteriores (race que zerava
+  // `_openDialog` depois que um diálogo novo já havia sido aberto).
+  int _dialogToken = 0;
 
   @override
   void initState() {
@@ -49,6 +53,11 @@ class _UpdateManagerState extends State<UpdateManager> {
 
   void _onState() {
     if (!mounted) return;
+    // ponytail: garante que um frame seja agendado. Sem isto, quando a UI está
+    // totalmente ociosa (nenhuma animação/cursor rodando) o postFrameCallback
+    // abaixo fica esperando para sempre e o diálogo nunca abre — sintoma
+    // "popup não aparece sozinho" depois da checagem automática.
+    WidgetsBinding.instance.ensureVisualUpdate();
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
   }
 
@@ -62,16 +71,15 @@ class _UpdateManagerState extends State<UpdateManager> {
         if (release == null || _openDialog == 'available') return;
         _closeCurrent(nav);
         _openDialog = 'available';
-        unawaited(showDialog<void>(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => UpdateAvailableDialog(
+        _openDialogGuard(
+          nav,
+          UpdateAvailableDialog(
             release: release,
             onUpdate: () => s.downloadAndInstall(release),
             onLater: s.dismiss,
             onIgnore: () => s.ignore(release),
           ),
-        ).whenComplete(() => _openDialog = null));
+        );
 
       case UpdateState.downloading:
       case UpdateState.installing:
@@ -80,11 +88,7 @@ class _UpdateManagerState extends State<UpdateManager> {
         if (_openDialog == 'flow') return;
         _closeCurrent(nav);
         _openDialog = 'flow';
-        unawaited(showDialog<void>(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => UpdateFlowDialog(release: s.pending),
-        ).whenComplete(() => _openDialog = null));
+        _openDialogGuard(nav, UpdateFlowDialog(release: s.pending));
 
       case UpdateState.idle:
       case UpdateState.checking:
@@ -95,8 +99,33 @@ class _UpdateManagerState extends State<UpdateManager> {
     }
   }
 
+  /// Abre um diálogo de update. O `whenComplete` só zera `_openDialog` se o
+  /// token não tiver sido incrementado (ou seja, se o diálogo NÃO foi fechado
+  /// por `_closeCurrent`). O token é capturado DEPOIS de `_closeCurrent`, que
+  /// é quem incrementa — assim um completion stale do diálogo anterior nunca
+  /// zera o guard do diálogo novo.
+  void _openDialogGuard(NavigatorState nav, Widget dialog) {
+    final token = _dialogToken;
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => dialog,
+    ).whenComplete(() {
+      if (token != _dialogToken) return; // completion stale — ignora
+      _openDialog = null;
+      // Hardening (sintoma C/B/D): se o usuário derrubou o diálogo "available"
+      // com Back (sem passar por _closeCurrent), não deixar o estado preso em
+      // updateAvailable — senão o próximo check(manual) retorna null sem
+      // feedback e o app parece travado.
+      if (UpdateService.instance.state.value == UpdateState.updateAvailable) {
+        UpdateService.instance.dismiss();
+      }
+    }));
+  }
+
   void _closeCurrent(NavigatorState nav) {
     if (_openDialog != null) {
+      _dialogToken++; // invalida o whenComplete do diálogo atual
       nav.pop();
       _openDialog = null;
     }
