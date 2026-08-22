@@ -41,6 +41,11 @@ class AppCaches {
     maxSize: 300,
   );
 
+  static final TtlCache skip = TtlCache(
+    defaultTtl: const Duration(days: 7),
+    maxSize: 300,
+  );
+
   // In-memory cache for HTTP responses to prevent caching errors
   static final Map<String, List<int>> _httpCache = {};
   static final Map<String, DateTime> _httpExpiry = {};
@@ -52,6 +57,7 @@ class AppCaches {
     httpResponses.clear();
     catalog.clear();
     resolutions.clear();
+    skip.clear();
     _httpCache.clear();
     _httpExpiry.clear();
     if (kDebugMode) debugPrint('[AppCaches] Cleared all caches');

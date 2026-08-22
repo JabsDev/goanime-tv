@@ -159,21 +159,31 @@ class WebViewNavigationLayer {
     report('char', { len: v.length, masked: masked ? 1 : 0, text: masked ? new Array(v.length + 1).join('•') : v });
   }
   function init() {
+    if (document.querySelector('style[data-gatv-nav]')) return;
     var style = document.createElement('style');
+    style.setAttribute('data-gatv-nav', '1');
     style.textContent = '.gatv-nav-hl{outline:3px solid #ff8c00 !important;outline-offset:2px;border-radius:4px;}';
     document.head.appendChild(style);
-    // Foco inicial no primeiro campo editável, se houver.
-    var items = collect();
-    for (var j = 0; j < items.length; j++) {
-      if (isText(items[j])) { setFocus(items[j]); return; }
-    }
-    report('ready', { count: items.length });
+    // Poll até o SPA do AniList montar o form (lento em projetor/TV).
+    var tries = 0;
+    var iv = setInterval(function() {
+      tries++;
+      var items = collect();
+      for (var j = 0; j < items.length; j++) {
+        if (isText(items[j])) { setFocus(items[j]); clearInterval(iv); return; }
+      }
+      if (tries >= 80) { // ~24s
+        clearInterval(iv);
+        report('ready', { count: items.length });
+      }
+    }, 300);
   }
   // API pública Flutter→JS
   window.__gatvNav.move = move;
   window.__gatvNav.activate = activate;
   window.__gatvNav.char = char;
   window.__gatvNav.backspace = backspace;
+  window.__gatvNav.init = init;
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

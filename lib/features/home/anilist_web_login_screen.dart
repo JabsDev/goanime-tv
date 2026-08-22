@@ -47,7 +47,10 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
 
   /// Kill-switch (Plano Fase 4): se o JS injetado falhar/charge-by da página,
   /// desliga a camada e volta ao fluxo sem injeção.
-  bool _navEnabled = WebViewNavigationLayer.enabled;
+  /// HY320 mini: o build debug vem sem WEBVIEW_NAV mas o projetor precisa
+  /// da camada; liga por padrão quando não há credenciais de teste.
+  bool _navEnabled = WebViewNavigationLayer.enabled ||
+      (_testEmail.isEmpty && _testPass.isEmpty);
 
   /// Teclado overlay ativo (substitui o IME do SO, que não abre em inputs
   /// focados por JS na Fire TV). Aberto quando o D-pad ativa um input de texto.
@@ -94,6 +97,13 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
     try {
       await _controller.runJavaScript('window.__gatvNav && $cmd');
     } catch (e) {
+      // HY320 lento: camada ainda não injetada quando a primeira tecla chega.
+      try {
+        await _controller.runJavaScript(WebViewNavigationLayer.source);
+        await _controller.runJavaScript(
+            'window.__gatvNav && (window.__gatvNav.init && window.__gatvNav.init(), $cmd)');
+        return;
+      } catch (_) {}
       debugPrint('[AnilistWeb] nav forward failed: $e');
       setState(() => _navEnabled = false); // kill-switch
     }
@@ -240,8 +250,9 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
     if (!isAuthorizeOrLoginPage || url.contains('/callback')) {
       return;
     }
-    // Fase TV: injeta a camada de navegação D-pad (só com a flag ligada e sem
-    // credenciais de teste — nunca misturar injeção no fluxo de preenchimento).
+    // Fase TV: injeta a camada de navegação D-pad (só sem credenciais de teste
+    // — nunca misturar injeção no fluxo de preenchimento). Re-injeta a cada
+    // page finish porque o SPA pode recriar o DOM (HY320 lento).
     if (_navEnabled && _testEmail.isEmpty && _testPass.isEmpty) {
       try {
         await _controller.runJavaScript(WebViewNavigationLayer.source);
@@ -328,38 +339,38 @@ class _AnilistWebLoginScreenState extends State<AnilistWebLoginScreen> {
       ),
       body: Stack(
         children: [
-          // Captura D-pad no Flutter e traduz para o JS da camada. Só
-          // setas/OK relevantes são: consumidas; o resto passa direto.
-          Focus(
-            autofocus: _navEnabled,
-            onKeyEvent: (node, event) {
-              if (WebViewNavigationLayer.debug) {
-                debugPrint('[AnilistWeb] keyevent: ${event.runtimeType} '
-                    'logical=${event.logicalKey} kbVisible=$_kbVisible '
-                    'focus=${FocusManager.instance.primaryFocus?.debugLabel ?? 'none'}');
-              }
-              // Teclado aberto: setas/OK são do Flutter (navegar/digitar);
-              // BACK fecha o teclado em vez de sair da tela.
-              if (_kbVisible) {
-                if (event is KeyDownEvent &&
-                    (event.logicalKey == LogicalKeyboardKey.goBack ||
-                        event.logicalKey == LogicalKeyboardKey.escape)) {
-                  _closeKeyboard();
-                  return KeyEventResult.handled;
+          // HY320 mini: WebView precisa ficar focável via D-pad E mouse/air-mouse.
+          // Quando a camada está ativa, o Focus captura as setas/OK e traduz
+          // para JS; quando desativada (kill-switch/teste), o WebView fica
+          // direto sem wrapper para receber foco nativo da plataforma.
+          if (_navEnabled)
+            Focus(
+              autofocus: true,
+              onKeyEvent: (node, event) {
+                if (WebViewNavigationLayer.debug) {
+                  debugPrint('[AnilistWeb] keyevent: ${event.runtimeType} '
+                      'logical=${event.logicalKey} kbVisible=$_kbVisible '
+                      'focus=${FocusManager.instance.primaryFocus?.debugLabel ?? 'none'}');
                 }
-                // Fire TV pode soltar o foco das teclas (focus=none); re-ancôra
-                // no scope do teclado a cada evento para não ficar mudo.
-                _kbKey.currentState?.refocus();
-                return KeyEventResult.ignored;
-              }
-              if (!_navEnabled) return KeyEventResult.ignored;
-              final cmd = WebViewNavigationLayer.commandForKey(event);
-              if (cmd == null) return KeyEventResult.ignored;
-              _forwardKey(cmd);
-              return KeyEventResult.handled;
-            },
-            child: WebViewWidget(controller: _controller),
-          ),
+                if (_kbVisible) {
+                  if (event is KeyDownEvent &&
+                      (event.logicalKey == LogicalKeyboardKey.goBack ||
+                          event.logicalKey == LogicalKeyboardKey.escape)) {
+                    _closeKeyboard();
+                    return KeyEventResult.handled;
+                  }
+                  _kbKey.currentState?.refocus();
+                  return KeyEventResult.ignored;
+                }
+                final cmd = WebViewNavigationLayer.commandForKey(event);
+                if (cmd == null) return KeyEventResult.ignored;
+                _forwardKey(cmd);
+                return KeyEventResult.handled;
+              },
+              child: WebViewWidget(controller: _controller),
+            )
+          else
+            WebViewWidget(controller: _controller),
           if (_error != null)
             Positioned(
               left: 16,

@@ -8,7 +8,10 @@ import '../../data/models/episode.dart';
 import '../../data/repositories/anime_repository.dart';
 import '../../core/storage/local_storage.dart';
 import '../../core/anilist/anilist_service.dart';
+import '../../core/aniskip/aniskip_models.dart';
+import '../../core/aniskip/aniskip_service.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/storage/settings_service.dart';
 import '../../core/utils/quality_picker.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import 'resume_seek_tracker.dart';
@@ -105,6 +108,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   late final FocusNode _replayNode = FocusNode();
   late final FocusNode _playNode = FocusNode();
   late final FocusNode _forwardNode = FocusNode();
+  late final FocusNode _skipNode = FocusNode();
   List<FocusNode> get _controlNodes => [
         _backNode,
         _qualityNode,
@@ -112,9 +116,17 @@ class _PlayerScreenState extends State<PlayerScreen>
         _replayNode,
         _playNode,
         _forwardNode,
+        _skipNode,
       ];
   bool get _aControlIsFocused =>
       _controlNodes.any((n) => n.hasPrimaryFocus);
+
+  // Skip intro (AniSkip) — intervalos OP/ED com episodeLength preciso
+  List<SkipInterval> _skips = [];
+  SkipInterval? _activeSkip;
+  bool _skipFetched = false;
+  bool _skipFailedWithEstimate = false;
+  bool _skipAutoDone = false;
 
   @override
   void initState() {
@@ -207,6 +219,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       _videoReady = false;
       _gotPlayback = false;
       _anilistPushedForThisEp = false;
+      _skips = [];
+      _activeSkip = null;
+      _skipFetched = false;
+      _skipFailedWithEstimate = false;
+      _skipAutoDone = false;
       // BUGFIX (retomada por fonte): cada `_playSource` reseta a restauração e
       // desarma o tracker. Se `_restoreProgress` retornar cedo para esta fonte
       // (ep já assistido / resume ≤ 5s / sem resume), o tracker já foi
@@ -249,6 +266,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       setState(() => _isLoading = false);
       _showControls();
       _restoreProgress();
+      // busca skip com estimate (AniList duration) já, antes do ready
+      _fetchSkips();
     } catch (e) {
       _loadTimeout?.cancel();
       debugPrint('[Player] Error source $index: $e');
@@ -290,7 +309,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (_resumeSeek.onPosition(_positionSec)) {
         _applyResumeSeek();
       }
-      if (_videoReady) _saveProgress();
+      if (_videoReady) {
+        _saveProgress();
+        _updateActiveSkip();
+      }
     });
     _durationSub = _player.stream.duration.listen((d) {
       if (!mounted) return;
@@ -307,7 +329,11 @@ class _PlayerScreenState extends State<PlayerScreen>
         _resumeSeek.markVideoReady();
         _showControls();
         _prefetchNextEpisode();
+        _fetchSkips();
         debugPrint('[Player] Video is ready, duration: ${_durationSec}s');
+      } else if (_videoReady && _skipFailedWithEstimate) {
+        // retry com duração precisa se primeira busca usou estimate e falhou
+        _fetchSkips();
       }
     });
     _completedSub = _player.stream.completed.listen((_) {
@@ -402,6 +428,97 @@ class _PlayerScreenState extends State<PlayerScreen>
         .resolveProvidersForEpisode(widget.anime, next)
         .then((_) {}, onError: (e) =>
             debugPrint('[Player] Prefetch next ep $next failed: $e'));
+  }
+
+  Future<void> _fetchSkips() async {
+    if (_skipFetched && !_skipFailedWithEstimate) return;
+    final malId = widget.anime.idMal;
+    if (malId == null) {
+      // tenta enriquecer se veio do catalog sem idMal
+      await AniListService.enrich(widget.anime);
+      if (widget.anime.idMal == null) return;
+    }
+    final id = widget.anime.idMal;
+    if (id == null) return;
+    final ep = widget.episodeIndex + 1;
+    final len = AniskipService.episodeLengthFor(
+      anilistDurationMin: widget.anime.duration,
+      playerDurationSec: _durationSec,
+      videoReady: _videoReady,
+    );
+    final isEstimate = !_videoReady || _durationSec < 10;
+    debugPrint('[Player] Fetch skip malId=$id ep=$ep len=$len estimate=$isEstimate');
+    final res = await AniskipService.getSkipTimes(
+      malId: id,
+      episode: ep,
+      episodeLength: len,
+      types: const ['op', 'ed', 'mixed-op', 'mixed-ed', 'recap'],
+    );
+    if (!mounted) return;
+    if (!res.found || res.intervals.isEmpty) {
+      if (isEstimate) _skipFailedWithEstimate = true;
+      setState(() {
+        _skips = [];
+        _activeSkip = null;
+        _skipFetched = true;
+      });
+      return;
+    }
+    // filtra intervalos inválidos e clampa ao duration
+    final filtered = res.intervals.where((s) {
+      if (s.start >= s.end) return false;
+      if (_videoReady && s.end > _durationSec + 5) return false;
+      return true;
+    }).toList();
+    setState(() {
+      _skips = filtered;
+      _skipFetched = true;
+      _skipFailedWithEstimate = false;
+    });
+    _updateActiveSkip();
+  }
+
+  void _updateActiveSkip() {
+    if (!_videoReady || _skips.isEmpty || _durationSec < 10) {
+      if (_activeSkip != null) setState(() => _activeSkip = null);
+      return;
+    }
+    SkipInterval? active;
+    for (final s in _skips) {
+      // janela visível: 2s antes do start até end (ponytail: tolerância para sincronizar)
+      if (_positionSec >= s.start - 2 && _positionSec < s.end) {
+        active = s;
+        break;
+      }
+    }
+    if (active != _activeSkip) {
+      setState(() => _activeSkip = active);
+      if (active != null) {
+        _showControls();
+        // auto-skip se habilitado (off por padrão)
+        if (SettingsService.instance.autoSkipIntro &&
+            !_skipAutoDone &&
+            active.isOpening) {
+          _skipAutoDone = true;
+          _skipCurrent();
+        } else if (!_skipAutoDone) {
+          // tenta focar o botão skip quando aparece (TV)
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _activeSkip != null) _skipNode.requestFocus();
+          });
+        }
+      }
+    }
+  }
+
+  void _skipCurrent() {
+    final s = _activeSkip;
+    if (s == null) return;
+    final target = s.end.clamp(0.0, _durationSec);
+    _player.seek(Duration(milliseconds: (target * 1000).toInt()));
+    setState(() => _activeSkip = null);
+    _showControls();
+    debugPrint('[Player] Skip ${s.skipType} ${s.start}->${s.end}');
   }
 
   void _saveProgress() {
@@ -697,6 +814,11 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             if (_controlsVisible)
               _buildControlsOverlay(),
+            if (_activeSkip != null &&
+                _videoReady &&
+                !_showNextOverlay &&
+                _error == null)
+              _buildSkipButton(),
             if (_showNextOverlay)
               _buildNextOverlay(),
           ],
@@ -990,14 +1112,52 @@ class _PlayerScreenState extends State<PlayerScreen>
                                         milliseconds:
                                             (fraction * durSec * 1000).toInt()));
                                   },
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(4),
-                                    child: LinearProgressIndicator(
-                                      value: durSec > 0 ? posSec / durSec : 0,
-                                      backgroundColor: Colors.white24,
-                                      valueColor: const AlwaysStoppedAnimation(
-                                          ThemeConstants.primary),
-                                      minHeight: 6,
+                                  child: SizedBox(
+                                    height: 6,
+                                    child: Stack(
+                                      children: [
+                                        ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(4),
+                                          child: LinearProgressIndicator(
+                                            value: durSec > 0
+                                                ? posSec / durSec
+                                                : 0,
+                                            backgroundColor: Colors.white24,
+                                            valueColor:
+                                                const AlwaysStoppedAnimation(
+                                                    ThemeConstants.primary),
+                                            minHeight: 6,
+                                          ),
+                                        ),
+                                        if (durSec > 10 && _skips.isNotEmpty)
+                                          for (final s in _skips)
+                                            if (s.end > s.start &&
+                                                s.start < durSec)
+                                              Positioned(
+                                                left: (s.start / durSec * width)
+                                                    .clamp(0.0, width),
+                                                width: ((s.end - s.start) /
+                                                        durSec *
+                                                        width)
+                                                    .clamp(2.0, width),
+                                                top: 0,
+                                                bottom: 0,
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    color: s.isEnding
+                                                        ? Colors.purple
+                                                            .withValues(
+                                                                alpha: 0.85)
+                                                        : Colors.orange
+                                                            .withValues(
+                                                                alpha: 0.85),
+                                                    borderRadius:
+                                                        BorderRadius.circular(2),
+                                                  ),
+                                                ),
+                                              ),
+                                      ],
                                     ),
                                   ),
                                 );
@@ -1075,6 +1235,54 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
 );
             }).toList(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSkipButton() {
+    final s = _activeSkip;
+    if (s == null) return const SizedBox.shrink();
+    final label = s.isRecap
+        ? 'Pular recapitulação'
+        : s.isEnding
+            ? 'Pular encerramento'
+            : 'Pular abertura';
+    return Positioned(
+      bottom: 96,
+      right: 24,
+      child: _controlButton(
+        node: _skipNode,
+        onTap: _skipCurrent,
+        child: Semantics(
+          button: true,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _skipCurrent,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: ThemeConstants.primary,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.skip_next, color: Colors.white, size: 20),
+                    const SizedBox(width: 6),
+                    Text(label,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
             ),
           ),
         ),

@@ -18,6 +18,8 @@ class AniListUser {
 
 class AniListMedia {
   final int id;
+  final int? idMal;
+  final int? duration;
   final String title;
   final String? coverImage;
   final String? coverImageExtra;
@@ -30,6 +32,8 @@ class AniListMedia {
 
   AniListMedia({
     required this.id,
+    this.idMal,
+    this.duration,
     required this.title,
     this.coverImage,
     this.coverImageExtra,
@@ -46,6 +50,8 @@ class AniListMedia {
     final cover = json['coverImage'] as Map?;
     return AniListMedia(
       id: json['id'] as int,
+      idMal: json['idMal'] as int?,
+      duration: json['duration'] as int?,
       title: titleObj['romaji']?.toString() ??
              titleObj['english']?.toString() ??
              titleObj['native']?.toString() ??
@@ -127,6 +133,8 @@ class AniListCoverImage {
 
 class AniListMediaDetail {
   final int id;
+  final int? idMal;
+  final int? duration;
   final String? englishName;
   final String? bannerImage;
   final String? description;
@@ -141,6 +149,8 @@ class AniListMediaDetail {
 
   AniListMediaDetail({
     required this.id,
+    this.idMal,
+    this.duration,
     this.englishName,
     this.bannerImage,
     this.description,
@@ -159,6 +169,8 @@ class AniListMediaDetail {
     final next = json['nextAiringEpisode'] as Map?;
     return AniListMediaDetail(
       id: json['id'] as int? ?? 0,
+      idMal: json['idMal'] as int?,
+      duration: json['duration'] as int?,
       englishName: title['english']?.toString(),
       bannerImage: json['bannerImage']?.toString(),
       description: json['description']?.toString(),

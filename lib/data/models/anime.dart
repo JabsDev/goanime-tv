@@ -12,6 +12,8 @@ class Anime {
   double? averageScore;
   List<String> genres;
   int? anilistId;
+  int? idMal;
+  int? duration;
 
   /// AniList `isAdult` flag — canonical NSFW signal used by [NsfwFilter].
   bool? isAdult;
@@ -35,6 +37,8 @@ class Anime {
     this.genres = const [],
     this.englishName,
     this.anilistId,
+    this.idMal,
+    this.duration,
     this.isAdult,
   });
 

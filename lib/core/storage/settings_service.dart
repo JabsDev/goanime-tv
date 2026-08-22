@@ -15,6 +15,7 @@ class SettingsService {
   static const _kLiteMode = 'settings_lite_mode';
   static const _kNsfwFilter = 'settings_nsfw_filter';
   static const _kOnboardingSeen = 'settings_onboarding_seen';
+  static const _kAutoSkipIntro = 'settings_auto_skip_intro';
 
   bool? _userPref;
   bool _autoLite = false;
@@ -29,6 +30,11 @@ class SettingsService {
       ValueNotifier<NsfwFilterSetting>(NsfwFilterSetting.strict);
   ValueListenable<NsfwFilterSetting> get nsfwFilterListenable => _nsfwFilterVN;
 
+  bool _autoSkipIntro = false;
+  final ValueNotifier<bool> _autoSkipIntroVN = ValueNotifier<bool>(false);
+  ValueListenable<bool> get autoSkipIntroListenable => _autoSkipIntroVN;
+  bool get autoSkipIntro => _autoSkipIntro;
+
   Future<void> init() async {
     LocalStorage.ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
@@ -40,8 +46,10 @@ class SettingsService {
     _nsfwFilter = NsfwFilterSetting.values[
         prefs.getInt(_kNsfwFilter) ?? NsfwFilterSetting.strict.index];
     _nsfwFilterVN.value = _nsfwFilter;
+    _autoSkipIntro = prefs.getBool(_kAutoSkipIntro) ?? false;
+    _autoSkipIntroVN.value = _autoSkipIntro;
     debugPrint(
-        '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value nsfw=$_nsfwFilter');
+        '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value nsfw=$_nsfwFilter autoSkip=$_autoSkipIntro');
   }
 
   bool _resolveLite() {
@@ -82,6 +90,13 @@ class SettingsService {
     _nsfwFilterVN.value = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_kNsfwFilter, v.index);
+  }
+
+  Future<void> setAutoSkipIntro(bool v) async {
+    _autoSkipIntro = v;
+    _autoSkipIntroVN.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAutoSkipIntro, v);
   }
 
   // Levers. Lê uma vez por build(), não em cada widget aninhado.

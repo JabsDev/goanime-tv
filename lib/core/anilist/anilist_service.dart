@@ -499,6 +499,8 @@ class AniListService {
         updatedAt
         media {
            id
+           idMal
+           duration
            title { romaji english native }
            coverImage { large extraLarge }
            bannerImage
@@ -589,6 +591,8 @@ class AniListService {
       Page(page: 1, perPage: \$perPage) {
         media(type: ANIME, sort: \$sort, season: \$season, seasonYear: \$seasonYear, isAdult: false) {
           id
+          idMal
+          duration
           title { romaji english native }
           coverImage { extraLarge large medium }
           bannerImage
@@ -648,6 +652,8 @@ class AniListService {
             airingAt
             media {
               id
+              idMal
+              duration
               title { romaji english native }
               coverImage { extraLarge large medium }
               bannerImage
@@ -781,6 +787,8 @@ class AniListService {
         'name': a.name,
         'englishName': a.englishName,
         'anilistId': a.anilistId,
+        'idMal': a.idMal,
+        'duration': a.duration,
         'fallbackImageUrl': a.fallbackImageUrl,
         'bannerImage': a.bannerImage,
         'description': a.description,
@@ -796,6 +804,8 @@ class AniListService {
         url: '',
         source: AnimeSource.animeFire,
         anilistId: m['anilistId'] as int?,
+        idMal: m['idMal'] as int?,
+        duration: m['duration'] as int?,
         fallbackImageUrl: m['fallbackImageUrl']?.toString(),
         bannerImage: m['bannerImage']?.toString(),
         description: m['description']?.toString(),
@@ -824,6 +834,8 @@ class AniListService {
       url: '',
       source: AnimeSource.animeFire,
       anilistId: m['id'] as int?,
+      idMal: m['idMal'] as int?,
+      duration: m['duration'] as int?,
       fallbackImageUrl: cover.best,
       bannerImage: m['bannerImage']?.toString(),
       description: m['description']?.toString(),
@@ -864,6 +876,8 @@ class AniListService {
 
   static void _applyDetail(Anime anime, AniListMediaDetail media) {
     anime.anilistId ??= media.id;
+    anime.idMal ??= media.idMal;
+    anime.duration ??= media.duration;
     anime.englishName ??= media.englishName;
     anime.bannerImage = media.bannerImage;
     anime.description = media.description;
@@ -887,6 +901,7 @@ class AniListService {
           Media(search: \$search, type: ANIME) {
             id
             idMal
+            duration
             title { romaji english native }
             coverImage { extraLarge large medium }
             bannerImage

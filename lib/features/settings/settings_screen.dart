@@ -145,6 +145,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 32),
                     const Text(
+                      'Reprodução',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: ThemeConstants.white,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Pula automaticamente a introdução quando os tempos estiverem disponíveis.',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: ThemeConstants.textSecondary,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ValueListenableBuilder<bool>(
+                      valueListenable:
+                          SettingsService.instance.autoSkipIntroListenable,
+                      builder: (context, autoSkip, _) => _AutoSkipToggle(
+                        on: autoSkip,
+                        onChanged: (v) =>
+                            SettingsService.instance.setAutoSkipIntro(v),
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    const Text(
                       'Atualizações',
                       style: TextStyle(
                         fontSize: 22,
@@ -270,6 +298,94 @@ class _ModeOption extends StatefulWidget {
 
   @override
   State<_ModeOption> createState() => _ModeOptionState();
+}
+
+class _AutoSkipToggle extends StatefulWidget {
+  final bool on;
+  final ValueChanged<bool> onChanged;
+
+  const _AutoSkipToggle({required this.on, required this.onChanged});
+
+  @override
+  State<_AutoSkipToggle> createState() => _AutoSkipToggleState();
+}
+
+class _AutoSkipToggleState extends State<_AutoSkipToggle> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) =>
+          FocusKeyHandler.handle(node, event, _toggle),
+      child: Semantics(
+        button: true,
+        toggled: widget.on,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: _toggle,
+            borderRadius: BorderRadius.circular(12),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              decoration: BoxDecoration(
+                color: ThemeConstants.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : ThemeConstants.surfaceLight,
+                  width: _isFocused ? 2 : 1.5,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    widget.on ? Icons.check_box : Icons.check_box_outline_blank,
+                    color: widget.on
+                        ? ThemeConstants.primary
+                        : ThemeConstants.textSecondary,
+                    size: 26,
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Pular introdução automaticamente',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: ThemeConstants.white,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Quando o tempo da intro estiver disponível, avança sozinho.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: ThemeConstants.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _toggle() {
+    if (mounted) widget.onChanged(!widget.on);
+  }
 }
 
 class _UpdateToggle extends StatefulWidget {
