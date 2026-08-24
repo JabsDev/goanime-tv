@@ -214,6 +214,9 @@ class AnimeScraper {
           case AnimeSource.animesDrive:
           case AnimeSource.animeQ:
           case AnimeSource.animePlay:
+          case AnimeSource.animesOnlineHdk:
+          case AnimeSource.animesOrion:
+          case AnimeSource.animesHd:
             return a.url.isNotEmpty;
           case AnimeSource.anilist:
             return false; // metadata provider, no stream URL

@@ -13,12 +13,19 @@ import 'cdn_resolver.dart' show probeMediaUrl;
 import 'dooplay_v2_extractor.dart' show DooPlayV2Extractor;
 
 /// DooPlay provider (PT-BR): shared WordPress theme used by several Brazilian
-/// anime sites (BetterAnime, AnimesRoll, among others). Search and episode
-/// listing are HTML scraping; video resolves through the site's `/wp-json/
-/// dooplayer/v2/<post>/<type>/<nume>` player API which returns a Blogger-keyed
-/// embed whose token is base64-decoded and reversed.
+/// anime sites (BetterAnime, AnimesRoll, AnimesOnline HDK, AnimesHD, Animes
+/// Orion, among others). Search and episode listing are HTML scraping; video
+/// resolves through the theme's player API:
 ///
-/// The [DooPlayAdapter.source] selects the base URL (see [baseUrl]).
+///  - `wp_json`    → GET  <player_api><post>/<type>/<nume> (BetterAnime)
+///  - `admin_ajax` → POST <url> action=doo_player_ajax&post=…&nume=…&type=…
+///                    (AnimesHD, Animes Orion)
+///
+/// Both return the same JSON (`embed_url` + `type`); the embed is then probed
+/// for a direct mp4/m3u8 or walked through the Blogger-jW player fallback.
+///
+/// Per-source differences (base URL, catalog path, episode path, transport)
+/// are driven by [source] so one adapter covers the whole DooPlay family.
 class DooPlayAdapter extends AnimeSourceAdapter {
   final AnimeSource _source;
   final http.Client? _client;
@@ -35,15 +42,34 @@ class DooPlayAdapter extends AnimeSourceAdapter {
   @override
   bool get implemented => true;
 
-  /// Base URL for the selected source. `animesRoll` is not fully wired via the
-  /// old `anroll.plus` constant; BetterAnime is the primary PT-BR DooPlay site.
+  /// Base URL for the selected source. BetterAnime is the primary PT-BR
+  /// DooPlay site; `animesRoll` is not fully wired via the old `anroll.plus`
+  /// constant.
   static const Map<AnimeSource, String> baseUrls = {
     AnimeSource.dooPlay: 'https://betteranime.io',
     AnimeSource.betterAnime: 'https://betteranime.io',
     AnimeSource.animesRoll: 'https://anroll.tv',
+    AnimeSource.animesOnlineHdk: 'https://animesonlinehdk.com',
+    AnimeSource.animesHd: 'https://animeshd.to',
+    AnimeSource.animesOrion: 'https://animesorion.cc',
   };
 
   String get baseUrl => baseUrls[_source] ?? 'https://betteranime.io';
+
+  /// Catalog path of anime detail pages, used to filter search results. HDK
+  /// exposes series under `/tvshows/`, the rest under `/animes/`.
+  String get _searchPath => switch (_source) {
+        AnimeSource.animesOnlineHdk => '/tvshows/',
+        _ => '/animes/',
+      };
+
+  /// URL segment that episode pages live under: HDK uses `/episodes/`, the
+  /// other DooPlay sites `/episodios/`.
+  String get _episodePath => switch (_source) {
+        AnimeSource.animesOnlineHdk => '/episodes/',
+        _ => '/episodios/',
+      };
+
   static const _ua =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
@@ -77,7 +103,7 @@ class DooPlayAdapter extends AnimeSourceAdapter {
       for (final item in doc.querySelectorAll('.result-item article')) {
         final a = item.querySelector('.image a') ?? item.querySelector('a');
         final href = a?.attributes['href'] ?? '';
-        if (href.isEmpty || !href.contains('/animes/')) continue;
+        if (href.isEmpty || !href.contains(_searchPath)) continue;
         final img = item.querySelector('img');
         final name = TextUtils.cleanTitle(
           img?.attributes['alt'] ?? a?.text.trim() ?? href.split('/').last,
@@ -133,7 +159,7 @@ class DooPlayAdapter extends AnimeSourceAdapter {
       final hrefs = <String>{};
       for (final a in doc.querySelectorAll('a')) {
         final href = a.attributes['href'] ?? '';
-        if (href.contains('/episodios/') && !href.endsWith('/episodios/')) {
+        if (href.contains(_episodePath) && !href.endsWith(_episodePath)) {
           hrefs.add(href);
         }
       }
@@ -169,9 +195,15 @@ class DooPlayAdapter extends AnimeSourceAdapter {
     }
   }
 
+  /// Episode number from an episode URL. Handles both naming schemes used by
+  /// the DooPlay family: `...-episodio-<n>/` (BetterAnime, AnimesHD) and
+  /// `...-<s>x<n>/` (HDK, Animes Orion, where `<s>` is the season).
   int? _episodeNumber(String url) {
-    final m = RegExp(r'episodio[\s-]*(\d+)').firstMatch(url);
-    return m == null ? null : int.tryParse(m.group(1)!);
+    final classic = RegExp(r'episodio[\s-]*(\d+)').firstMatch(url);
+    if (classic != null) return int.tryParse(classic.group(1)!);
+    final season = RegExp(r'-(\d+)x(\d+)/?$').firstMatch(url);
+    if (season != null) return int.tryParse(season.group(2)!);
+    return null;
   }
 
   @override
@@ -206,9 +238,10 @@ class DooPlayAdapter extends AnimeSourceAdapter {
     if (res.statusCode != 200) return [];
 
     // The episode page embeds the player options: data-type / data-post /
-    // data-nume on `li.player-option-N.dooplay_player_option`.
+    // data-nume on `li.player-option-N.dooplay_player_option`. No trailing
+    // space — real pages end the tag with `'` + newline or `>`.
     final m = RegExp(
-      r'''data-type='([\w-]+)' data-post='(\d+)' data-nume='([\d.]+)' ''',
+      r'''data-type='([\w-]+)' data-post='(\d+)' data-nume='([\d.]+)''',
     ).firstMatch(res.body);
 
     if (m == null) return [];
@@ -217,19 +250,20 @@ class DooPlayAdapter extends AnimeSourceAdapter {
     final post = m.group(2)!;
     final nume = m.group(3)!;
 
-    final apiUrl =
-        Uri.parse('$baseUrl/wp-json/dooplayer/v2/$post/$type/$nume');
-    final apiRes = await _httpGet(apiUrl, headers: {
-      'User-Agent': _ua,
-      'Accept': 'application/json',
-      'Referer': episodeUrl,
-    });
-    if (apiRes.statusCode != 200) return [];
+    // Transport is theme-dependent (`dtAjax.play_method`); when the page
+    // carries no `dtAjax`, try the classic wp-json route first and fall back to
+    // admin_ajax (AnimesHD serves no dtAjax but only answers admin_ajax).
+    final method = _playMethod(res.body);
+    Map<String, dynamic>? payload;
+    if (method == 'admin_ajax') {
+      payload = await _adminAjaxPayload(post, nume, type, episodeUrl);
+      payload ??= await _wpJsonPayload(res.body, post, type, nume, episodeUrl);
+    } else {
+      payload = await _wpJsonPayload(res.body, post, type, nume, episodeUrl);
+      payload ??= await _adminAjaxPayload(post, nume, type, episodeUrl);
+    }
 
-    final decoded = jsonDecode(apiRes.body);
-    if (decoded is! Map) return [];
-
-    final embedUrl = decoded['embed_url']?.toString();
+    final embedUrl = payload?['embed_url']?.toString();
     if (embedUrl == null || embedUrl.isEmpty) return [];
 
     // mvp-direct (P8): when the dooplayer source is a real mp4/m3u8 URL (not a
@@ -238,6 +272,7 @@ class DooPlayAdapter extends AnimeSourceAdapter {
     final direct = DooPlayV2Extractor.mp4FromEmbed(embedUrl);
     if (direct != null &&
         await probeMediaUrl(Uri.parse(direct),
+                client: _client,
                 headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'}) >=
             0) {
       return [
@@ -253,6 +288,85 @@ class DooPlayAdapter extends AnimeSourceAdapter {
     return _resolveJwplayerEmbed(embedUrl);
   }
 
+  static final RegExp _dtAjaxRe = RegExp(
+    r'dtAjax\s*=\s*(\{.*?\})\s*;?',
+    dotAll: true,
+  );
+  static final RegExp _playMethodRe = RegExp(r'"play_method"\s*:\s*"([^"]*)"');
+  static final RegExp _playerApiRe = RegExp(r'"player_api"\s*:\s*"([^"]*)"');
+
+  /// `wp_json`/`admin_ajax` from the page's `dtAjax` blob, or null when the
+  /// theme doesn't expose it.
+  String? _playMethod(String body) {
+    final blob = _dtAjaxRe.firstMatch(body)?.group(1);
+    if (blob == null) return null;
+    return _playMethodRe.firstMatch(blob)?.group(1);
+  }
+
+  Future<Map<String, dynamic>?> _wpJsonPayload(
+    String pageBody,
+    String post,
+    String type,
+    String nume,
+    String episodeUrl,
+  ) async {
+    try {
+      final blob = _dtAjaxRe.firstMatch(pageBody)?.group(1);
+      var api = _playerApiRe.firstMatch(blob ?? '')?.group(1);
+      if (api == null || api.isEmpty) {
+        api = '$baseUrl/wp-json/dooplayer/v2/';
+      }
+      final apiBase = api.startsWith('http') ? api : '$baseUrl$api';
+      final apiUrl = Uri.parse('$apiBase$post/$type/$nume');
+      final apiRes = await _httpGet(apiUrl, headers: {
+        'User-Agent': _ua,
+        'Accept': 'application/json',
+        'Referer': episodeUrl,
+      });
+      if (apiRes.statusCode != 200) return null;
+      return _decode(apiRes.body);
+    } catch (e) {
+      debugPrint('[DooPlay] wp-json player API error: $e');
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> _adminAjaxPayload(
+    String post,
+    String nume,
+    String type,
+    String episodeUrl,
+  ) async {
+    try {
+      final uri = Uri.parse('$baseUrl/wp-admin/admin-ajax.php');
+      final headers = {
+        'User-Agent': _ua,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': episodeUrl,
+      };
+      final body = 'action=doo_player_ajax&post=$post&nume=$nume&type=$type';
+      final apiRes = _client != null
+          ? await _client.post(uri, headers: headers, body: body)
+          : await apiClient.post(uri, headers: headers, body: body);
+      if (apiRes.statusCode != 200) return null;
+      return _decode(apiRes.body);
+    } catch (e) {
+      debugPrint('[DooPlay] admin-ajax player API error: $e');
+      return null;
+    }
+  }
+
+  Map<String, dynamic>? _decode(String body) {
+    if (body.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is! Map) return null;
+      return decoded.map((k, v) => MapEntry(k.toString(), v));
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<List<VideoSource>> _resolveJwplayerEmbed(String embedUrl) async {
     try {
       final res = await _httpGet(Uri.parse(embedUrl), headers: {
@@ -266,7 +380,7 @@ class DooPlayAdapter extends AnimeSourceAdapter {
       // `decode_blogger_video` admin-ajax endpoint. Best-effort: if the Azure
       // token resolve isn't feasible here due to anti-bot/JS, we still surface
       // the direct mp4/m3u8 if present in the player page.
-final direct = RegExp(
+      final direct = RegExp(
         r'''https?://[^"'\s<>]+(?:\.mp4|\.m3u8)''',
       ).firstMatch(res.body);
       if (direct != null) {

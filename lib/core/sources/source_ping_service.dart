@@ -28,6 +28,9 @@ class SourcePingService {
     AnimeSource.animesDrive: 'animesdrive.online',
     AnimeSource.animeQ: 'animeq.blog',
     AnimeSource.animePlay: 'animeplay.cloud',
+    AnimeSource.animesOnlineHdk: 'animesonlinehdk.com',
+    AnimeSource.animesOrion: 'animesorion.cc',
+    AnimeSource.animesHd: 'animeshd.to',
   };
 
   final Map<AnimeSource, ({int ms, DateTime at})> _cache = {};

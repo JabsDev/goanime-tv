@@ -25,6 +25,9 @@ class SourceRegistry {
     AnimesOnlineAdapter(source: AnimeSource.animesDrive),
     AnimesOnlineAdapter(source: AnimeSource.animeQ),
     AnimesOnlineAdapter(source: AnimeSource.animePlay),
+    DooPlayAdapter(source: AnimeSource.animesOnlineHdk),
+    DooPlayAdapter(source: AnimeSource.animesOrion),
+    DooPlayAdapter(source: AnimeSource.animesHd),
     AnimePlayerAdapter(),
     AllAnimeAdapter(),
   ];
@@ -40,6 +43,9 @@ class SourceRegistry {
       AnimeSource.animesDrive,
       AnimeSource.animeQ,
       AnimeSource.animePlay,
+      AnimeSource.animesOnlineHdk,
+      AnimeSource.animesOrion,
+      AnimeSource.animesHd,
       AnimeSource.animePlayer,
     ];
   }
@@ -60,16 +66,22 @@ class SourceRegistry {
         return 5;
       case AnimeSource.animePlay:
         return 6;
-      case AnimeSource.animePlayer:
+      case AnimeSource.animesOnlineHdk:
         return 7;
-      case AnimeSource.allAnime:
+      case AnimeSource.animesOrion:
         return 8;
-      case AnimeSource.betterAnime:
+      case AnimeSource.animesHd:
         return 9;
-      case AnimeSource.animesRoll:
+      case AnimeSource.animePlayer:
         return 10;
-      case AnimeSource.anilist:
+      case AnimeSource.allAnime:
         return 11;
+      case AnimeSource.betterAnime:
+        return 12;
+      case AnimeSource.animesRoll:
+        return 13;
+      case AnimeSource.anilist:
+        return 14;
     }
   }
 
@@ -77,11 +89,9 @@ class SourceRegistry {
     return _adapters.firstWhere(
       (a) => source == AnimeSource.animeFire && a is AnimeFireAdapter ||
              source == AnimeSource.goyabu && a is GoyabuAdapter ||
-             source == AnimeSource.dooPlay && a is DooPlayAdapter ||
-             source == AnimeSource.betterAnime && a is DooPlayAdapter ||
-             source == AnimeSource.animesRoll && a is DooPlayAdapter ||
              source == AnimeSource.animePlayer && a is AnimePlayerAdapter ||
              source == AnimeSource.allAnime && a is AllAnimeAdapter ||
+             a is DooPlayAdapter && a.source == source ||
              a is AnimesOnlineAdapter && a.source == source,
       orElse: () => _adapters.first,
     );

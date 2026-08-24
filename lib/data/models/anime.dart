@@ -70,6 +70,12 @@ class Anime {
         return 'AnimeQ';
       case AnimeSource.animePlay:
         return 'Anime Play';
+      case AnimeSource.animesOnlineHdk:
+        return 'Animes Online HDK';
+      case AnimeSource.animesOrion:
+        return 'Animes Orion';
+      case AnimeSource.animesHd:
+        return 'AnimesHD';
     }
   }
 }
@@ -87,6 +93,9 @@ enum AnimeSource {
   animesDrive,
   animeQ,
   animePlay,
+  animesOnlineHdk,
+  animesOrion,
+  animesHd,
 }
 
 extension AnimeSourcePriority on AnimeSource {
@@ -102,7 +111,10 @@ extension AnimeSourcePriority on AnimeSource {
       this == AnimeSource.animesOnlineCloud ||
       this == AnimeSource.animesDrive ||
       this == AnimeSource.animeQ ||
-      this == AnimeSource.animePlay;
+      this == AnimeSource.animePlay ||
+      this == AnimeSource.animesOnlineHdk ||
+      this == AnimeSource.animesOrion ||
+      this == AnimeSource.animesHd;
 
   /// Ordering priority for display/selection: lower = higher priority.
   /// PT-BR sources with reliable playback come first; AllAnime (EN, currently
@@ -129,10 +141,16 @@ extension AnimeSourcePriority on AnimeSource {
         return 8;
       case AnimeSource.animePlay:
         return 9;
-      case AnimeSource.animePlayer:
+      case AnimeSource.animesOnlineHdk:
         return 10;
-      case AnimeSource.allAnime:
+      case AnimeSource.animesOrion:
         return 11;
+      case AnimeSource.animesHd:
+        return 12;
+      case AnimeSource.animePlayer:
+        return 13;
+      case AnimeSource.allAnime:
+        return 14;
     }
   }
 }
