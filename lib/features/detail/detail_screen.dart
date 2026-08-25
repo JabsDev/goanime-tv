@@ -10,6 +10,7 @@ import '../../core/storage/settings_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/utils/nsfw_filter.dart';
 import '../../core/utils/quality_picker.dart';
+import '../../core/utils/episode_airing.dart';
 import '../../core/sources/source_ping_service.dart';
 import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/focus_key_handler.dart';
@@ -1111,6 +1112,16 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   void initState() {
     super.initState();
     _resolveProviders();
+    // Best-effort backfill: if the anime never got enriched (no airing info),
+    // fetch it in background so the "ainda não lançado" state can show the
+    // predicted date. Enrichment is session-cached, so repeats are cheap.
+    if (widget.anime.nextAiringEpisode == null) {
+      AniListService.enrich(widget.anime).then((_) {
+        if (mounted && widget.anime.nextAiringEpisode != null) {
+          setState(() {});
+        }
+      });
+    }
   }
 
   Future<void> _resolveProviders() async {
@@ -1344,21 +1355,38 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     );
   }
 
-  /// No provider delivered a stream. When at least one page matched but its
-  /// extractor failed (e.g. Blogger SPA), tell the truth: the episode exists,
-  /// the video just isn't supported — instead of a generic "not found".
+  /// No provider delivered a stream. Three honest states:
+  ///  - the tapped episode hasn't aired yet (currently airing anime + AniList
+  ///    airing info) → "ainda não lançado" with the predicted date;
+  ///  - at least one page matched but its extractor failed (e.g. Blogger SPA)
+  ///    → the episode exists, the video just isn't supported;
+  ///  - no page matched at all → generic not found.
   Widget _buildEmptyProviders() {
+    final notAired = notAiredMessage(
+      tappedEpisode: widget.episode.number,
+      anime: widget.anime,
+    );
     final unavailable = _matchedUnavailable.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          const Icon(Icons.videocam_off, color: Colors.orange, size: 48),
+          Icon(
+            notAired != null
+                ? Icons.schedule
+                : Icons.videocam_off,
+            color: notAired != null
+                ? const Color(0xFF4FC3F7)
+                : Colors.orange,
+            size: 48,
+          ),
           const SizedBox(height: 12),
           Text(
-            unavailable
-                ? 'Episódio indisponível nesta fonte'
-                : 'Nenhuma fonte disponível',
+            notAired != null
+                ? 'Episódio ainda não lançado'
+                : unavailable
+                    ? 'Episódio sem vídeo disponível'
+                    : 'Nenhuma fonte disponível',
             style: const TextStyle(
                 color: Colors.white,
                 fontSize: 20,
@@ -1366,16 +1394,16 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           ),
           const SizedBox(height: 10),
           Text(
-            unavailable
-                ? 'O Ep ${widget.episode.number} existe na fonte, mas o vídeo '
-                    'não é suportado por ela neste momento (player de vídeo '
-                    'sem stream recuperável). Pode ser que outra fonte sirva '
-                    'o episódio, ou que ele esteja disponível em breve.'
-                : 'Nenhuma fonte (AnimeFire, Goyabu, BetterAnime, '
-                    'AnimesROLL, DooPlay, AnimePlayer) resolveu um stream '
-                    'para o Ep ${widget.episode.number} deste anime agora. '
-                    'Possíveis motivos: Cloudflare, fonte fora do ar ou o '
-                    'episódio ainda não foi indexado.',
+            notAired ??
+                (unavailable
+                    ? 'O Ep ${widget.episode.number} existe na fonte, mas o '
+                        'vídeo não é suportado por ela neste momento (player '
+                        'de vídeo sem stream recuperável). Pode ser que outra '
+                        'fonte sirva o episódio.'
+                    : 'Nenhuma fonte resolveu um stream para o Ep '
+                        '${widget.episode.number} deste anime agora. '
+                        'Possíveis motivos: Cloudflare, fonte fora do ar ou o '
+                        'episódio ainda não foi indexado.'),
             style: const TextStyle(
               color: ThemeConstants.textSecondary,
               fontSize: 14,
@@ -1383,6 +1411,18 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
             ),
             textAlign: TextAlign.center,
           ),
+          if (notAired != null) ...[
+            const SizedBox(height: 4),
+            const Text(
+              'Assista aos episódios anteriores enquanto isso!',
+              style: TextStyle(
+                color: ThemeConstants.textSecondary,
+                fontSize: 12,
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
           const SizedBox(height: 20),
           Row(
             mainAxisSize: MainAxisSize.min,

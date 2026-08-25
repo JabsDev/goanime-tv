@@ -140,6 +140,10 @@ class AniListMediaDetail {
   final String? description;
   final int? episodes;
   final int? nextAiringEpisodeNumber;
+
+  /// Predicted airing epoch-seconds of [nextAiringEpisodeNumber] (AniList
+  /// `nextAiringEpisode.airingAt`).
+  final int? nextAiringAt;
   final String? status;
   final double? averageScore;
   final List<String> genres;
@@ -156,6 +160,7 @@ class AniListMediaDetail {
     this.description,
     this.episodes,
     this.nextAiringEpisodeNumber,
+    this.nextAiringAt,
     this.status,
     this.averageScore,
     this.genres = const [],
@@ -176,6 +181,7 @@ class AniListMediaDetail {
       description: json['description']?.toString(),
       episodes: json['episodes'] as int?,
       nextAiringEpisodeNumber: next?['episode'] as int?,
+      nextAiringAt: next?['airingAt'] as int?,
       status: json['status']?.toString(),
       averageScore: (json['averageScore'] as num?)?.toDouble(),
       genres: (json['genres'] as List?)?.map((e) => e.toString()).toList() ?? [],

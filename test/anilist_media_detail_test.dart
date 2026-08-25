@@ -14,12 +14,13 @@ void main() {
       'id': 21,
       'episodes': null,
       'status': 'RELEASING',
-      'nextAiringEpisode': {'episode': 1173, 'timeUntilAiring': 203320},
+      'nextAiringEpisode': {'episode': 1173, 'airingAt': 1787654321},
       'title': {'english': 'One Piece'},
       'coverImage': <String, dynamic>{},
     }));
     expect(detail.episodes, isNull);
     expect(detail.nextAiringEpisodeNumber, 1173);
+    expect(detail.nextAiringAt, 1787654321);
   });
 
   test('nextAiringEpisode is null when absent', () {

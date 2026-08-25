@@ -22,6 +22,15 @@ class Anime {
   /// (typically romaji) doesn't match a scraping source's catalog.
   String? englishName;
 
+  /// First not-yet-aired episode number (AniList `nextAiringEpisode.episode`).
+  /// Present only while the series is airing; drives the "ainda não lançado"
+  /// state in the episode picker.
+  int? nextAiringEpisode;
+
+  /// Predicted airing timestamp of [nextAiringEpisode] as Unix epoch seconds
+  /// (AniList `airingAt`).
+  int? nextAiringAt;
+
   Anime({
     required this.name,
     required this.url,
@@ -40,6 +49,8 @@ class Anime {
     this.idMal,
     this.duration,
     this.isAdult,
+    this.nextAiringEpisode,
+    this.nextAiringAt,
   });
 
   String get imageUrl => fallbackImageUrl ?? '';

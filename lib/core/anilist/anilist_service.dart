@@ -889,6 +889,8 @@ class AniListService {
     anime.averageScore = media.averageScore;
     anime.genres = media.genres;
     anime.isAdult = media.isAdult;
+    anime.nextAiringEpisode = media.nextAiringEpisodeNumber;
+    anime.nextAiringAt = media.nextAiringAt;
     if (media.coverImage.best.isNotEmpty) {
       anime.fallbackImageUrl = media.coverImage.best;
     }
@@ -912,7 +914,7 @@ class AniListService {
             isAdult
             genres
             tags { name }
-            nextAiringEpisode { episode timeUntilAiring }
+            nextAiringEpisode { episode airingAt }
           }
         }
       ''';
