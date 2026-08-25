@@ -46,14 +46,12 @@ GoAnime TV é um app de **Android TV** 100% navegável por **controle remoto** (
 
 <table>
   <tr>
-    <td align="center"><img src="screenshots/home.png" width="240" alt="Home com destaques" /><br/><sub>Home</sub></td>
-    <td align="center"><img src="screenshots/search.png" width="240" alt="Busca agregada" /><br/><sub>Busca</sub></td>
-    <td align="center"><img src="screenshots/detail.png" width="240" alt="Detalhes e episódios" /><br/><sub>Detalhes</sub></td>
+    <td align="center"><img src="screenshots/home.png" width="250" alt="Tela inicial com destaques e AniList" /><br/><sub>Home com destaques, AniList e navegação por D-pad</sub></td>
+    <td align="center"><img src="screenshots/search.png" width="250" alt="Busca agregada com capas" /><br/><sub>Busca de animes com capas e resultados do AniList</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="screenshots/quality.png" width="240" alt="Seletor de fontes e qualidade" /><br/><sub>Fontes &amp; qualidade</sub></td>
-    <td align="center"><img src="screenshots/player.png" width="240" alt="Player em reprodução" /><br/><sub>Player</sub></td>
-    <td></td>
+    <td align="center"><img src="screenshots/quality.png" width="250" alt="Seleção de qualidade" /><br/><sub>Seleção de qualidade antes de iniciar o episódio</sub></td>
+    <td align="center"><img src="screenshots/player.png" width="250" alt="Player com controles D-pad" /><br/><sub>Player com controles D-pad, qualidade e legenda</sub></td>
   </tr>
 </table>
 

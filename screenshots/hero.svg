@@ -1,58 +1,99 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" role="img" aria-label="GoAnime TV — Seu anime, direto na sua TV">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-label="GoAnime TV — Seu anime, direto na sua TV">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0A0A0F"/>
       <stop offset="0.55" stop-color="#151528"/>
       <stop offset="1" stop-color="#1A1A2E"/>
     </linearGradient>
-    <radialGradient id="glowCyan" cx="0.82" cy="0.12" r="0.62">
-      <stop offset="0" stop-color="#00E5FF" stop-opacity="0.32"/>
+    <radialGradient id="glowCyan" cx="0.86" cy="0.1" r="0.6">
+      <stop offset="0" stop-color="#00E5FF" stop-opacity="0.30"/>
       <stop offset="1" stop-color="#00E5FF" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="glowPurple" cx="0.14" cy="0.95" r="0.62">
+    <radialGradient id="glowPurple" cx="0.12" cy="0.95" r="0.6">
       <stop offset="0" stop-color="#7C4DFF" stop-opacity="0.30"/>
       <stop offset="1" stop-color="#7C4DFF" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="ringGlow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#00E5FF" stop-opacity="0.16"/>
-      <stop offset="1" stop-color="#00E5FF" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#FFFFFF"/>
       <stop offset="0.6" stop-color="#E6FBFF"/>
       <stop offset="1" stop-color="#00E5FF"/>
     </linearGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.2" fill="#FFFFFF" opacity="0.05"/>
+    </pattern>
+    <!-- poster card gradients (simulated cover art) -->
+    <linearGradient id="poster1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4FC3F7"/>
+      <stop offset="1" stop-color="#1A237E"/>
+    </linearGradient>
+    <linearGradient id="poster2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B388FF"/>
+      <stop offset="1" stop-color="#4A148C"/>
+    </linearGradient>
+    <linearGradient id="poster3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#80DEEA"/>
+      <stop offset="1" stop-color="#004D40"/>
+    </linearGradient>
+    <linearGradient id="poster4" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FF8A80"/>
+      <stop offset="1" stop-color="#B71C1C"/>
+    </linearGradient>
   </defs>
 
-  <rect width="1200" height="400" fill="url(#bg)"/>
-  <rect width="1200" height="400" fill="url(#glowCyan)"/>
-  <rect width="1200" height="400" fill="url(#glowPurple)"/>
+  <rect width="1200" height="420" fill="url(#bg)"/>
+  <rect width="1200" height="420" fill="url(#glowCyan)"/>
+  <rect width="1200" height="420" fill="url(#glowPurple)"/>
+  <rect width="1200" height="420" fill="url(#dots)"/>
   <rect x="0" y="0" width="1200" height="6" fill="#00E5FF" opacity="0.9"/>
 
-  <!-- play button -->
-  <circle cx="952" cy="170" r="150" fill="url(#ringGlow)"/>
-  <circle cx="952" cy="170" r="88" fill="#0E0E1E" stroke="#00E5FF" stroke-width="3" opacity="0.95"/>
-  <circle cx="952" cy="170" r="66" fill="#00E5FF" opacity="0.14"/>
-  <path d="M924 122 L1018 170 L924 218 Z" fill="#00E5FF"/>
+  <!-- ===== TV UI mockup (prova visual do app) ===== -->
+  <g>
+    <rect x="652" y="46" width="492" height="322" rx="20" fill="#0B0B16" stroke="#2A2A4A" stroke-width="2"/>
+    <clipPath id="screenClip">
+      <rect x="652" y="46" width="492" height="322" rx="20"/>
+    </clipPath>
+    <g clip-path="url(#screenClip)">
+      <!-- header -->
+      <rect x="652" y="46" width="492" height="56" fill="#161631"/>
+      <circle cx="682" cy="74" r="15" fill="#00E5FF"/>
+      <path d="M675 63 L689 74 L675 85 Z" fill="#0A0A0F"/>
+      <text x="706" y="80" font-family="-apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="21" font-weight="700" fill="#E6FBFF">GoAnime TV</text>
+      <rect x="1102" y="63" width="28" height="24" rx="6" fill="#1F1F3D"/>
+      <path d="M1107 69 a6 6 0 1 0 8 8 l6 6" stroke="#00E5FF" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+      <rect x="1124" y="71" width="2.6" height="10" rx="1.3" fill="#00E5FF" transform="rotate(45 1125 76)"/>
+      <!-- AniList banner -->
+      <rect x="672" y="118" width="452" height="64" rx="12" fill="#2533A6"/>
+      <text x="696" y="146" font-family="-apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">Conectar com AniList</text>
+      <text x="696" y="170" font-family="-apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="15" fill="#C4CFFF">Sua watchlist e seus animes em um só lugar</text>
+      <!-- section header -->
+      <rect x="672" y="200" width="6" height="20" fill="#00E5FF"/>
+      <text x="692" y="217" font-family="-apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="18" font-weight="700" fill="#FFFFFF">Em Alta</text>
+      <!-- poster cards row -->
+      <rect x="672" y="234" width="120" height="104" rx="9" fill="url(#poster1)"/>
+      <rect x="806" y="234" width="120" height="104" rx="9" fill="url(#poster2)" stroke="#00E5FF" stroke-width="3.5"/>
+      <rect x="940" y="234" width="120" height="104" rx="9" fill="url(#poster3)"/>
+      <rect x="1074" y="234" width="120" height="104" rx="9" fill="url(#poster4)" opacity="0.45"/>
+    </g>
+  </g>
 
-  <!-- title -->
-  <text x="70" y="150" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="66" font-weight="800" fill="url(#titleGrad)" letter-spacing="1">GoAnime TV</text>
+  <!-- ===== Título ===== -->
+  <text x="56" y="157" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="72" font-weight="800" fill="url(#titleGrad)" letter-spacing="1">GoAnime TV</text>
 
-  <!-- tagline -->
-  <text x="72" y="218" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="30" font-weight="500" fill="#B9CCD0">Seu anime, direto na sua <tspan fill="#00E5FF" font-weight="700">TV</tspan>.</text>
+  <!-- ===== Tagline ===== -->
+  <text x="60" y="221" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="30" font-weight="500" fill="#B9CCD0">Seu anime, direto na sua <tspan fill="#00E5FF" font-weight="700">TV</tspan>.</text>
 
-  <!-- chips -->
-  <g font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" font-weight="600">
-    <rect x="70" y="272" rx="20" ry="20" width="186" height="48" fill="#1B1B38" stroke="#00E5FF" stroke-opacity="0.5"/>
-    <text x="163" y="303" text-anchor="middle" fill="#00E5FF">Android TV</text>
+  <!-- ===== Chips (todos terminam antes do mockup em x=652) ===== -->
+  <g font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="21" font-weight="600">
+    <rect x="58" y="281" rx="20" ry="20" width="150" height="46" fill="#1B1B38" stroke="#00E5FF" stroke-opacity="0.5"/>
+    <text x="133" y="311" text-anchor="middle" fill="#00E5FF">Android TV</text>
 
-    <rect x="278" y="272" rx="20" ry="20" width="176" height="48" fill="#1B1B38" stroke="#00E5FF" stroke-opacity="0.5"/>
-    <text x="366" y="303" text-anchor="middle" fill="#00E5FF">100% D-pad</text>
+    <rect x="222" y="281" rx="20" ry="20" width="142" height="46" fill="#1B1B38" stroke="#00E5FF" stroke-opacity="0.5"/>
+    <text x="293" y="311" text-anchor="middle" fill="#00E5FF">100% D-pad</text>
 
-    <rect x="476" y="272" rx="20" ry="20" width="128" height="48" fill="#1B1B38" stroke="#00E5FF" stroke-opacity="0.5"/>
-    <text x="540" y="303" text-anchor="middle" fill="#00E5FF">PT-BR</text>
+    <rect x="378" y="281" rx="20" ry="20" width="96" height="46" fill="#1B1B38" stroke="#00E5FF" stroke-opacity="0.5"/>
+    <text x="426" y="311" text-anchor="middle" fill="#00E5FF">PT-BR</text>
 
-    <rect x="626" y="272" rx="20" ry="20" width="168" height="48" fill="#1B1B38" stroke="#7C4DFF" stroke-opacity="0.55"/>
-    <text x="710" y="303" text-anchor="middle" fill="#B388FF">AniList</text>
+    <rect x="488" y="281" rx="20" ry="20" width="118" height="46" fill="#1B1B38" stroke="#7C4DFF" stroke-opacity="0.55"/>
+    <text x="547" y="311" text-anchor="middle" fill="#B388FF">AniList</text>
   </g>
 </svg>
