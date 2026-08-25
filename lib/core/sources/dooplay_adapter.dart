@@ -9,6 +9,7 @@ import '../network/api_client.dart';
 import '../scraper/scraper_result.dart';
 import '../utils/text_utils.dart';
 import 'anime_source_adapter.dart';
+import 'blogger_spa_resolver.dart';
 import 'cdn_resolver.dart' show probeMediaUrl;
 import 'dooplay_v2_extractor.dart' show DooPlayV2Extractor;
 
@@ -212,14 +213,23 @@ class DooPlayAdapter extends AnimeSourceAdapter {
     Anime? anime,
   }) async {
     try {
-      final sources = await _extractFromDooPlay(episode.url);
-      if (sources.isEmpty) {
+      final result = await _extractFromDooPlay(episode.url);
+      if (result.sources.isEmpty) {
+        // Blogger SPA: the episode page matched and the player answered with a
+        // Blogger embed, but the token is dead / the SPA has no recoverable
+        // stream. Distinct from "not found" so the UI can explain it.
+        if (result.bloggerSpa) {
+          return ScraperResult.failure(BloggerUnsupportedError(
+            message: 'Blogger SPA embed without a recoverable stream',
+            source: source,
+          ));
+        }
         return ScraperResult.failure(EmptyResultError(
           message: 'No video sources found',
           source: source,
         ));
       }
-      return ScraperResult.success(sources);
+      return ScraperResult.success(result.sources);
     } catch (e) {
       debugPrint('[DooPlay] Video sources error: $e');
       return ScraperResult.failure(UnknownError(
@@ -230,12 +240,13 @@ class DooPlayAdapter extends AnimeSourceAdapter {
     }
   }
 
-  Future<List<VideoSource>> _extractFromDooPlay(String episodeUrl) async {
+  Future<({List<VideoSource> sources, bool bloggerSpa})> _extractFromDooPlay(
+      String episodeUrl) async {
     final res = await _httpGet(Uri.parse(episodeUrl), headers: {
       'User-Agent': _ua,
       'Referer': '$baseUrl/',
     });
-    if (res.statusCode != 200) return [];
+    if (res.statusCode != 200) return (sources: const <VideoSource>[], bloggerSpa: false);
 
     // The episode page embeds the player options: data-type / data-post /
     // data-nume on `li.player-option-N.dooplay_player_option`. No trailing
@@ -244,7 +255,7 @@ class DooPlayAdapter extends AnimeSourceAdapter {
       r'''data-type='([\w-]+)' data-post='(\d+)' data-nume='([\d.]+)''',
     ).firstMatch(res.body);
 
-    if (m == null) return [];
+    if (m == null) return (sources: const <VideoSource>[], bloggerSpa: false);
 
     final type = m.group(1)!;
     final post = m.group(2)!;
@@ -264,28 +275,37 @@ class DooPlayAdapter extends AnimeSourceAdapter {
     }
 
     final embedUrl = payload?['embed_url']?.toString();
-    if (embedUrl == null || embedUrl.isEmpty) return [];
+    if (embedUrl == null || embedUrl.isEmpty) {
+      return (sources: const <VideoSource>[], bloggerSpa: false);
+    }
 
-    // mvp-direct (P8): when the dooplayer source is a real mp4/m3u8 URL (not a
-    // base64 blogger token) it answers the range probe without touching the
-    // jwplayer SPA page; otherwise keep the legacy blogger-resolve flow.
+    // Direct mp4/m3u8 source → probe and offer; otherwise walk the Blogger
+    // SPA resolution chain. An embed that points at a Blogger player marks the
+    // outcome as `bloggerSpa` so a dead token classifies as BloggerUnsupported
+    // instead of a plain empty result.
+    final isBlogger =
+        embedUrl.contains('blogger.com') || embedUrl.contains('type=blogger');
     final direct = DooPlayV2Extractor.mp4FromEmbed(embedUrl);
     if (direct != null &&
         await probeMediaUrl(Uri.parse(direct),
                 client: _client,
                 headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'}) >=
             0) {
-      return [
-        VideoSource(
-          url: direct,
-          quality: 'Auto',
-          headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'},
-        ),
-      ];
+      return (
+        sources: [
+          VideoSource(
+            url: direct,
+            quality: 'Auto',
+            headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'},
+          ),
+        ],
+        bloggerSpa: isBlogger,
+      );
     }
 
-    // The embed is a Blogger-jW player page whose token is base64(reversed).
-    return _resolveJwplayerEmbed(embedUrl);
+    final resolved = await BloggerSpaResolver(client: _client)
+        .resolve(embedUrl: embedUrl, referer: '$baseUrl/');
+    return (sources: resolved, bloggerSpa: isBlogger);
   }
 
   static final RegExp _dtAjaxRe = RegExp(
@@ -364,38 +384,6 @@ class DooPlayAdapter extends AnimeSourceAdapter {
       return decoded.map((k, v) => MapEntry(k.toString(), v));
     } catch (_) {
       return null;
-    }
-  }
-
-  Future<List<VideoSource>> _resolveJwplayerEmbed(String embedUrl) async {
-    try {
-      final res = await _httpGet(Uri.parse(embedUrl), headers: {
-        'User-Agent': _ua,
-        'Referer': '$baseUrl/',
-      });
-      if (res.statusCode != 200) return [];
-
-      // The amzn.jw file value is a base64 string that decodes to a reversed
-      // Blogger token; the media URL is then resolved by the site's own
-      // `decode_blogger_video` admin-ajax endpoint. Best-effort: if the Azure
-      // token resolve isn't feasible here due to anti-bot/JS, we still surface
-      // the direct mp4/m3u8 if present in the player page.
-      final direct = RegExp(
-        r'''https?://[^"'\s<>]+(?:\.mp4|\.m3u8)''',
-      ).firstMatch(res.body);
-      if (direct != null) {
-        return [
-          VideoSource(
-            url: direct.group(0)!,
-            quality: 'Auto',
-            headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'},
-          )
-        ];
-      }
-      return [];
-    } catch (e) {
-      debugPrint('[DooPlay] jwplayer resolve error: $e');
-      return [];
     }
   }
 
