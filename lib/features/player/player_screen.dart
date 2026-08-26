@@ -132,9 +132,18 @@ class _PlayerScreenState extends State<PlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _enterImmersive();
     _player = Player();
     _videoController = VideoController(_player);
     _initPlayer();
+  }
+
+  void _enterImmersive() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  void _exitImmersive() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   }
 
   // BUGFIX (retomada): TV desligada/HOME/switch de app NÃO faz pop da rota →
@@ -143,6 +152,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   // periódico de 8s segue como backstop para queda de energia.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Re-aplica imersivo ao voltar do background: o sistema reseta o modo.
+      _enterImmersive();
+    }
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
@@ -747,6 +760,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   @override
   void dispose() {
+    _exitImmersive();
     WidgetsBinding.instance.removeObserver(this);
     _positionSub?.cancel();
     _durationSub?.cancel();
