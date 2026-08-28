@@ -430,7 +430,7 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
                               Text(
                                 '${widget.anime.episodes} eps',
                                 style: const TextStyle(
-                                  fontSize: 14,
+                                  fontSize: 15,
                                   color: ThemeConstants.textSecondary,
                                 ),
                               ),
@@ -447,7 +447,8 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
                       child: Text(
                         widget.anime.status!.replaceAll('_', ' '),
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                           color: widget.anime.status == 'FINISHED'
                               ? Colors.green
                               : Colors.orange,
@@ -515,7 +516,7 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
               child: Text(
                 widget.anime.description!.replaceAll(RegExp(r'<[^>]*>'), ''),
                 style: const TextStyle(
-                  fontSize: 15,
+                  fontSize: 16,
                   color: ThemeConstants.textSecondary,
                 ),
                 maxLines: 3,
@@ -541,7 +542,7 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
                     child: Text(
                       g,
                       style: const TextStyle(
-                        fontSize: 13,
+                        fontSize: 14,
                         color: ThemeConstants.primary,
                       ),
                     ),

@@ -51,7 +51,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       'AniList em busca. Mantém todas as funções principais — '
                       'apenas efeitos visuais pesados são cortados.',
                       style: const TextStyle(
-                        fontSize: 14,
+                        fontSize: 16,
                         color: ThemeConstants.textSecondary,
                         height: 1.4,
                       ),
@@ -103,7 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       'listas. Níveis: ecchi é mais leve que hentai. O filtro '
                       'vem ativado por padrão.',
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 16,
                         color: ThemeConstants.textSecondary,
                         height: 1.4,
                       ),
@@ -156,7 +156,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const Text(
                       'Pula automaticamente a introdução quando os tempos estiverem disponíveis.',
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 16,
                         color: ThemeConstants.textSecondary,
                         height: 1.4,
                       ),
@@ -185,7 +185,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       'Verifica no GitHub por versões novas e atualiza app '
                       'instalado por cima (sem perder seus dados).',
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 16,
                         color: ThemeConstants.textSecondary,
                         height: 1.4,
                       ),
@@ -367,7 +367,7 @@ class _AutoSkipToggleState extends State<_AutoSkipToggle> {
                         Text(
                           'Quando o tempo da intro estiver disponível, avança sozinho.',
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 14,
                             color: ThemeConstants.textMuted,
                           ),
                         ),
@@ -455,7 +455,7 @@ class _UpdateToggleState extends State<_UpdateToggle> {
                         Text(
                           'Checa no primeiro frame depois do app abrir.',
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 14,
                             color: ThemeConstants.textMuted,
                           ),
                         ),
@@ -628,7 +628,7 @@ class _ModeOptionState extends State<_ModeOption> {
                           Text(
                             widget.description,
                             style: const TextStyle(
-                              fontSize: 13,
+                              fontSize: 14,
                               color: ThemeConstants.textMuted,
                               height: 1.3,
                             ),

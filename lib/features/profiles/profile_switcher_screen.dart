@@ -212,6 +212,7 @@ class _ProfileSwitcherScreenState extends State<ProfileSwitcherScreen> {
                   icon: Icons.person_outline,
                   isPrimary: false,
                   width: 220,
+                  autofocus: true,
                   onPressed: () {
                     Navigator.pop(ctx);
                     _showCreateLocal();

@@ -307,77 +307,81 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _menuEntry(
-              icon: Icons.switch_account,
-              label: 'Trocar perfil',
-              onTap: () {
-                Navigator.pop(ctx);
-                _openProfileSwitcher();
-              },
-            ),
-            if (!_anilistLoggedIn)
+        // ponytail: conteúdo scrollável para evitar corte do último item
+        // (Configurações) quando há muitos itens no menu (usuário logado).
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               _menuEntry(
-                icon: Icons.login,
-                label: 'Logar',
+                icon: Icons.switch_account,
+                label: 'Trocar perfil',
                 onTap: () {
                   Navigator.pop(ctx);
-                  _showAnilistLogin();
-                },
-              )
-            else ...[
-              _menuEntry(
-                icon: Icons.refresh,
-                label: 'Atualizar listas',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _loadDataWithTimeout();
+                  _openProfileSwitcher();
                 },
               ),
+              if (!_anilistLoggedIn)
+                _menuEntry(
+                  icon: Icons.login,
+                  label: 'Logar',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showAnilistLogin();
+                  },
+                )
+              else ...[
+                _menuEntry(
+                  icon: Icons.refresh,
+                  label: 'Atualizar listas',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _loadDataWithTimeout();
+                  },
+                ),
+                _menuEntry(
+                  icon: Icons.favorite,
+                  label: 'Favoritos',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const FavoritesScreen()),
+                    );
+                  },
+                ),
+                _menuEntry(
+                  icon: Icons.logout,
+                  label: 'Deslogar',
+                  color: Colors.red,
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await AniListService.logout();
+                    if (!mounted) return;
+                    setState(() {
+                      _anilistLoggedIn = false;
+                      _anilistUser = null;
+                      _anilistLists = [];
+                    });
+                  },
+                ),
+              ],
+              // B10: SettingsScreen era órfã — nenhum fluxo navegava até ela.
+              // Sempre visível (logado ou não).
               _menuEntry(
-                icon: Icons.favorite,
-                label: 'Favoritos',
+                icon: Icons.settings,
+                label: 'Configurações',
                 onTap: () {
                   Navigator.pop(ctx);
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                        builder: (_) => const FavoritesScreen()),
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
                   );
                 },
               ),
-              _menuEntry(
-                icon: Icons.logout,
-                label: 'Deslogar',
-                color: Colors.red,
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  await AniListService.logout();
-                  if (!mounted) return;
-                  setState(() {
-                    _anilistLoggedIn = false;
-                    _anilistUser = null;
-                    _anilistLists = [];
-                  });
-                },
-              ),
             ],
-            // B10: SettingsScreen era órfã — nenhum fluxo navegava até ela.
-            // Sempre visível (logado ou não).
-            _menuEntry(
-              icon: Icons.settings,
-              label: 'Configurações',
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                );
-              },
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -389,25 +393,14 @@ class _HomeScreenState extends State<HomeScreen> {
     required VoidCallback onTap,
     Color color = Colors.white,
   }) {
-    return Semantics(
-      button: true,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Icon(icon, color: color),
-                const SizedBox(width: 12),
-                Text(label,
-                    style: TextStyle(color: color, fontSize: 18)),
-              ],
-            ),
-          ),
-        ),
-      ),
+    // ponytail: menu do dialog usava InkWell sem Focus/FocusKeyHandler → D-pad
+    // navegava invisível (mesma classe de bug do QualityDialog). Agora segue o
+    // padrão _DialogButton: Focus + handler + anel/glow visível no remote.
+    return _MenuEntryTile(
+      icon: icon,
+      label: label,
+      color: color,
+      onTap: onTap,
     );
   }
 
@@ -708,6 +701,85 @@ class _ClockWidget extends StatefulWidget {
   State<_ClockWidget> createState() => _ClockWidgetState();
 }
 
+// ponytail: item do menu de perfil com foco visível no D-pad. Antes era
+// InkWell sem Focus → foco invisível no remote (mesma classe de bug que o
+// QualityDialog já resolveu). Herda o anel/glow primário padrão da app.
+class _MenuEntryTile extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _MenuEntryTile({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  State<_MenuEntryTile> createState() => _MenuEntryTileState();
+}
+
+class _MenuEntryTileState extends State<_MenuEntryTile> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = SettingsService.instance;
+    return Focus(
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
+      child: Semantics(
+        button: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: s.animDuration,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _isFocused
+                    ? ThemeConstants.primary.withValues(alpha: 0.12)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _isFocused
+                      ? ThemeConstants.primary
+                      : Colors.transparent,
+                  width: ThemeConstants.focusBorderWidth,
+                ),
+                boxShadow: (_isFocused && s.shadowsEnabled)
+                    ? [
+                        BoxShadow(
+                          color: ThemeConstants.primary.withValues(alpha: 0.4),
+                          blurRadius: ThemeConstants.focusGlowBlur,
+                        ),
+                      ]
+                    : [],
+              ),
+              child: Row(
+                children: [
+                  Icon(widget.icon, color: widget.color),
+                  const SizedBox(width: 12),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      color: _isFocused ? ThemeConstants.primary : widget.color,
+                      fontSize: 18,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ClockWidgetState extends State<_ClockWidget> {
   Timer? _timer;
   late DateTime _now;
@@ -783,6 +855,7 @@ class _FocusableNavItemState extends State<_FocusableNavItem> {
 
   @override
   Widget build(BuildContext context) {
+    final s = SettingsService.instance;
     return Focus(
       autofocus: widget.autofocus,
       onFocusChange: (f) => setState(() => _isFocused = f),
@@ -794,7 +867,7 @@ class _FocusableNavItemState extends State<_FocusableNavItem> {
           child: InkWell(
             onTap: widget.onTap,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: s.animDuration,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
                 color: _isFocused
@@ -807,7 +880,7 @@ class _FocusableNavItemState extends State<_FocusableNavItem> {
                       : Colors.transparent,
                   width: ThemeConstants.focusBorderWidth,
                 ),
-                boxShadow: _isFocused
+                boxShadow: (_isFocused && s.shadowsEnabled)
                     ? [
                         BoxShadow(
                           color:
@@ -867,6 +940,7 @@ class _ProfileButtonState extends State<_ProfileButton> {
 
   @override
   Widget build(BuildContext context) {
+    final s = SettingsService.instance;
     return Focus(
       onFocusChange: (f) => setState(() => _isFocused = f),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
@@ -877,7 +951,7 @@ class _ProfileButtonState extends State<_ProfileButton> {
           child: InkWell(
             onTap: widget.onTap,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: s.animDuration,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: _isFocused
@@ -890,6 +964,14 @@ class _ProfileButtonState extends State<_ProfileButton> {
                       : Colors.transparent,
                   width: ThemeConstants.focusBorderWidth,
                 ),
+                boxShadow: (_isFocused && s.shadowsEnabled)
+                    ? [
+                        BoxShadow(
+                          color: ThemeConstants.primary.withValues(alpha: 0.4),
+                          blurRadius: ThemeConstants.focusGlowBlur,
+                        ),
+                      ]
+                    : [],
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -911,6 +993,8 @@ class _ProfileButtonState extends State<_ProfileButton> {
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -967,6 +1051,7 @@ class _WatchingBannerState extends State<_WatchingBanner> {
 
   @override
   Widget build(BuildContext context) {
+    final s = SettingsService.instance;
     final media = widget.entry.media;
     final banner = media.bannerImage ?? media.coverImageExtra ?? media.coverImage;
     return Focus(
@@ -980,9 +1065,9 @@ class _WatchingBannerState extends State<_WatchingBanner> {
             onTap: widget.onTap,
             child: AnimatedScale(
               scale: _isFocused ? 1.05 : 1.0,
-              duration: const Duration(milliseconds: 200),
+              duration: s.animDuration,
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
+                duration: s.animDuration,
                 width: widget.width,
                 height: widget.height,
                 decoration: BoxDecoration(
@@ -995,7 +1080,7 @@ class _WatchingBannerState extends State<_WatchingBanner> {
                         ? ThemeConstants.focusBorderWidth
                         : 1,
                   ),
-                  boxShadow: _isFocused
+                  boxShadow: (_isFocused && s.shadowsEnabled)
                       ? [
                           BoxShadow(
                             color:
@@ -1055,7 +1140,7 @@ class _WatchingBannerState extends State<_WatchingBanner> {
                               _progressLabel(),
                               style: const TextStyle(
                                 color: ThemeConstants.primary,
-                                fontSize: 14,
+                                fontSize: 16,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -1065,7 +1150,7 @@ class _WatchingBannerState extends State<_WatchingBanner> {
                                 _nextEpLabel(),
                                 style: const TextStyle(
                                   color: ThemeConstants.textSecondary,
-                                  fontSize: 13,
+                                  fontSize: 14,
                                 ),
                               ),
                             ],

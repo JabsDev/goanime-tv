@@ -52,9 +52,11 @@ class _TVButtonState extends State<TVButton> {
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: widget.isPrimary
+                  color: _isFocused
                       ? ThemeConstants.primary
-                      : ThemeConstants.textSecondary,
+                      : (widget.isPrimary
+                          ? ThemeConstants.primary
+                          : ThemeConstants.textSecondary),
                   width: _isFocused ? 3 : 1,
                 ),
                 boxShadow: (_isFocused && s.shadowsEnabled)

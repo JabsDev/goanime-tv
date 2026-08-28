@@ -87,7 +87,7 @@ class _FocusableCardState extends State<FocusableCard> {
                     ),
                     Container(
                       width: widget.width,
-                      padding: const EdgeInsets.all(6),
+                      padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                         color: _isFocused
                             ? ThemeConstants.primaryDark.withValues(alpha: 0.3)
@@ -100,7 +100,7 @@ class _FocusableCardState extends State<FocusableCard> {
                         widget.title,
                         style: TextStyle(
                           color: ThemeConstants.white,
-                          fontSize: 12,
+                          fontSize: ThemeConstants.minFontSecondary,
                           fontWeight: FontWeight.w600,
                         ),
                         maxLines: 2,

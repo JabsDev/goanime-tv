@@ -150,7 +150,10 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Widget _buildResultsGrid() {
     final screenWidth = MediaQuery.of(context).size.width;
-    final crossAxisCount = screenWidth > 900 ? 8 : screenWidth > 600 ? 6 : 4;
+    // ponytail: 8 colunas na TV (960 log.) deixava cards ~100px e títulos
+    // truncados/ilegíveis (C3). Facilita um pouco: menos colunas em telas
+    // largas dá cards mais legíveis mantendo densidade razoável.
+    final crossAxisCount = screenWidth > 900 ? 6 : screenWidth > 600 ? 5 : 4;
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
