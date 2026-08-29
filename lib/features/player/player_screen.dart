@@ -127,6 +127,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _skipFetched = false;
   bool _skipFailedWithEstimate = false;
   bool _skipAutoDone = false;
+  // Skip button auto-oculta após 5s para não prender a HUD; reaparece ao
+  // tocar na tela enquanto o intervalo ainda está ativo.
+  bool _skipButtonVisible = false;
+  Timer? _skipButtonTimer;
 
   @override
   void initState() {
@@ -493,7 +497,13 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _updateActiveSkip() {
     if (!_videoReady || _skips.isEmpty || _durationSec < 10) {
-      if (_activeSkip != null) setState(() => _activeSkip = null);
+      if (_activeSkip != null) {
+        _skipButtonTimer?.cancel();
+        setState(() {
+          _activeSkip = null;
+          _skipButtonVisible = false;
+        });
+      }
       return;
     }
     SkipInterval? active;
@@ -505,7 +515,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
     }
     if (active != _activeSkip) {
-      setState(() => _activeSkip = active);
+      setState(() {
+        _activeSkip = active;
+        if (active == null) _skipButtonVisible = false;
+      });
       if (active != null) {
         _showControls();
         // auto-skip se habilitado (off por padrão)
@@ -520,6 +533,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             if (mounted && _activeSkip != null) _skipNode.requestFocus();
           });
         }
+      } else {
+        _skipButtonTimer?.cancel();
       }
     }
   }
@@ -529,7 +544,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (s == null) return;
     final target = s.end.clamp(0.0, _durationSec);
     _player.seek(Duration(milliseconds: (target * 1000).toInt()));
-    setState(() => _activeSkip = null);
+    _skipButtonTimer?.cancel();
+    setState(() {
+      _activeSkip = null;
+      _skipButtonVisible = false;
+    });
     _showControls();
     debugPrint('[Player] Skip ${s.skipType} ${s.start}->${s.end}');
   }
@@ -746,6 +765,16 @@ class _PlayerScreenState extends State<PlayerScreen>
         setState(() => _controlsVisible = false);
       }
     });
+    _showSkipButton();
+  }
+
+  void _showSkipButton() {
+    if (_activeSkip == null) return;
+    _skipButtonTimer?.cancel();
+    setState(() => _skipButtonVisible = true);
+    _skipButtonTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _skipButtonVisible = false);
+    });
   }
 
   String _formatTime(double sec) {
@@ -768,6 +797,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _errorSub?.cancel();
     _countdownTimer?.cancel();
     _controlsTimer?.cancel();
+    _skipButtonTimer?.cancel();
     _loadTimeout?.cancel();
     for (final n in _controlNodes) {
       n.dispose();
@@ -829,6 +859,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             if (_controlsVisible)
               _buildControlsOverlay(),
             if (_activeSkip != null &&
+                _skipButtonVisible &&
                 _videoReady &&
                 !_showNextOverlay &&
                 _error == null)
@@ -849,12 +880,14 @@ class _PlayerScreenState extends State<PlayerScreen>
     required FocusNode node,
     required VoidCallback onTap,
     required Widget child,
+    ValueChanged<bool>? onFocusChange,
   }) {
     return Focus(
       focusNode: node,
       onKeyEvent: (n, e) => FocusKeyHandler.handle(n, e, onTap),
       onFocusChange: (focused) {
         if (focused) _controlsTimer?.cancel(); // keep overlay visible while focused
+        onFocusChange?.call(focused);
         setState(() {});
       },
       child: Builder(
@@ -1270,6 +1303,13 @@ class _PlayerScreenState extends State<PlayerScreen>
       child: _controlButton(
         node: _skipNode,
         onTap: _skipCurrent,
+        onFocusChange: (focused) {
+          if (focused) {
+            _skipButtonTimer?.cancel();
+          } else if (_skipButtonVisible) {
+            _showSkipButton();
+          }
+        },
         child: Semantics(
           button: true,
           child: Material(
