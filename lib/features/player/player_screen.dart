@@ -713,6 +713,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     // era consumido aqui como _togglePlayPause — vídeo pausava mas o overlay
     // continuava (bug reportado: "Tentar novamente não removeu a mensagem").
     if (_error != null) return KeyEventResult.ignored;
+    // BUGFIX (next overlay): mesmo bug do overlay de erro — Select/Setas precisam
+    // chegar aos botões Pular/Cancelar (FocusKeyHandler deles), não virar
+    // seek/play-pause aqui. Sem isto o "Pular" nunca dispara no remote e o
+    // countdown segue contando após o usuário apertar.
+    if (_showNextOverlay) return KeyEventResult.ignored;
     // Any directional key wake-ups the controls overlay if it auto-hid.
     final k = event.logicalKey;
     if (k == LogicalKeyboardKey.arrowLeft ||
@@ -1375,43 +1380,56 @@ class _PlayerScreenState extends State<PlayerScreen>
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Semantics(
-                  button: true,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: _playNextEpisode,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: ThemeConstants.primary,
-                          borderRadius: BorderRadius.circular(8),
+                // ponytail: Focus + FocusKeyHandler — mesmo race do botão
+                // "Tentar novamente" (Select seguido de ArrowRight ~7ms no
+                // FireTV remote; InkWell.onTap perde). Autofocus puxa o foco
+                // pro "Pular" quando o overlay aparece.
+                Focus(
+                  autofocus: true,
+                  onKeyEvent: (node, event) =>
+                      FocusKeyHandler.handle(node, event, _playNextEpisode),
+                  child: Semantics(
+                    button: true,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _playNextEpisode,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: ThemeConstants.primary,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text('Pular',
+                              style: TextStyle(
+                                  color: Colors.white, fontSize: 14)),
                         ),
-                        child: const Text('Pular',
-                            style: TextStyle(
-                                color: Colors.white, fontSize: 14)),
                       ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
-                Semantics(
-                  button: true,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: _cancelAutoNext,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: ThemeConstants.surfaceLight,
-                          borderRadius: BorderRadius.circular(8),
+                Focus(
+                  onKeyEvent: (node, event) =>
+                      FocusKeyHandler.handle(node, event, _cancelAutoNext),
+                  child: Semantics(
+                    button: true,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _cancelAutoNext,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: ThemeConstants.surfaceLight,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text('Cancelar',
+                              style: TextStyle(
+                                  color: Colors.white, fontSize: 14)),
                         ),
-                        child: const Text('Cancelar',
-                            style: TextStyle(
-                                color: Colors.white, fontSize: 14)),
                       ),
                     ),
                   ),
