@@ -856,8 +856,12 @@ class _FocusableNavItemState extends State<_FocusableNavItem> {
   @override
   Widget build(BuildContext context) {
     final s = SettingsService.instance;
+    // ponytail: não rouba foco de diálogo modal (ex. update no boot). Quando
+    // o card de atualização abre sobre a Home, a transição loading→conteúdo
+    // remonta este item e o autofocus puxava o foco para trás do diálogo.
+    final isCurrent = ModalRoute.of(context)?.isCurrent ?? true;
     return Focus(
-      autofocus: widget.autofocus,
+      autofocus: widget.autofocus && isCurrent,
       onFocusChange: (f) => setState(() => _isFocused = f),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
       child: Semantics(
