@@ -46,8 +46,10 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
   @override
   AnimeSource get source => _source;
 
+  /// animeplay.cloud devolve 403 em todas as rotas (verificado 09/09/2026) —
+  /// fica fora do fan-out até voltar. Os outros 3 do cluster respondem 200.
   @override
-  bool get implemented => true;
+  bool get implemented => _source != AnimeSource.animePlay;
 
   @override
   Future<Anime?> resolveAnime(Anime animeRef) async {

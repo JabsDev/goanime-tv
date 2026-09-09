@@ -11,47 +11,17 @@ import 'package:goanime_tv/data/models/episode.dart';
 import 'package:goanime_tv/data/repositories/anime_repository.dart';
 import 'package:goanime_tv/core/storage/provider_match_store.dart';
 
-/// Offline regression for the reported "One Piece" failure, using the exact
-/// AnimeFire search markup captured from the live site. No network involved.
-String searchHtml() => '''
-<html><body>
-<div class="card-group">
-  <div class="row ml-1 mr-1">
-    <div class="col-6 mb-1 divCardUltimosEps" title="Koisuru One Piece - Todos os Epis&oacute;dios">
-      <article class="card cardUltimosEps">
-        <a href="https://animefire.io/animes/koisuru-one-piece-todos-os-episodios">
-          <img class="card-img-top lazy imgAnimes" src="" data-src="https://animefire.io/img/animes/koisuru-one-piece.webp" alt="Koisuru One Piece - Todos os Epis&oacute;dios">
-          <div class="text-block"><h3 class="animeTitle">Koisuru One Piece</h3></div>
-        </a>
-      </article>
-    </div>
-    <div class="col-6 mb-1 divCardUltimosEps" title="One Piece: Gyojin Tou-hen - Todos os Epis&oacute;dios">
-      <article class="card cardUltimosEps">
-        <a href="https://animefire.io/animes/one-piece-gyojin-tou-hen-todos-os-episodios">
-          <img class="card-img-top lazy imgAnimes" src="" data-src="https://animefire.io/img/animes/gyojin.webp" alt="One Piece: Gyojin Tou-hen - Todos os Epis&oacute;dios">
-          <div class="text-block"><h3 class="animeTitle">One Piece: Gyojin Tou-hen</h3></div>
-        </a>
-      </article>
-    </div>
-    <div class="col-6 mb-1 divCardUltimosEps" title="One Piece Film: Red - Todos os Epis&oacute;dios">
-      <article class="card cardUltimosEps">
-        <a href="https://animefire.io/animes/one-piece-film-red-dublado-todos-os-episodios">
-          <img class="card-img-top lazy imgAnimes" src="" data-src="https://animefire.io/img/animes/red.webp" alt="One Piece Film: Red - Todos os Epis&oacute;dios">
-          <div class="text-block"><h3 class="animeTitle">One Piece Film: Red</h3></div>
-        </a>
-      </article>
-    </div>
-    <div class="col-6 mb-1 divCardUltimosEps" title="One Piece - Todos os Epis&oacute;dios">
-      <article class="card cardUltimosEps">
-        <a href="https://animefire.io/animes/one-piece-todos-os-episodios">
-          <img class="card-img-top lazy imgAnimes" src="" data-src="https://animefire.io/img/animes/one-piece.webp" alt="One Piece - Todos os Epis&oacute;dios">
-          <div class="text-block"><h3 class="animeTitle">One Piece</h3></div>
-        </a>
-      </article>
-    </div>
-  </div>
-</div>
-</body></html>
+/// Offline regression for the reported "One Piece" failure, using the
+/// AnimeFire JSON API payload shape (`GET /animes/pesquisar?q=`). No network.
+String searchJson() => '''
+{"data":[
+  {"id":"koi123","title":"Koisuru One Piece","audio":"Legendado",
+   "poster_src":"https://image.tmdb.org/t/p/original/koi.webp",
+   "status":"completed","published_at":"2022-01-01"},
+  {"id":"op456","title":"One Piece","audio":"Dublado \\u0026 Legendado",
+   "poster_src":"https://image.tmdb.org/t/p/original/op.webp",
+   "status":"airing","published_at":"1999-10-20"}
+]}
 ''';
 
 /// Fake adapter: search returns the spin-off first, but the series page is
@@ -123,13 +93,13 @@ void main() {
   test('resolveAnime maps "One Piece" to the main series, not the spin-off',
       () async {
     final adapter = AnimeFireAdapter(
-      client: MockClient((req) async => http.Response(searchHtml(), 200)),
+      client: MockClient((req) async => http.Response(searchJson(), 200)),
     );
     final match = await adapter.resolveAnime(
       Anime(name: 'One Piece', url: '', source: AnimeSource.animeFire),
     );
     expect(match, isNotNull);
-    expect(match!.url, 'https://animefire.io/animes/one-piece-todos-os-episodios');
+    expect(match!.url, 'https://animefire.io/anime/op456');
     expect(match.name, 'One Piece');
   });
 

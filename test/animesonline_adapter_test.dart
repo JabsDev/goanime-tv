@@ -231,7 +231,6 @@ void main() {
       AnimeSource.animesOnlineCloud,
       AnimeSource.animesDrive,
       AnimeSource.animeQ,
-      AnimeSource.animePlay,
     ]) {
       final adapter = SourceRegistry.forSource(s);
       expect(adapter, isA<AnimesOnlineAdapter>());
@@ -245,6 +244,11 @@ void main() {
         isTrue,
       );
     }
+    // animeplay.cloud fora do ar (403 em 09/09/2026): roteável, mas fora do
+    // fan-out até voltar.
+    expect(SourceRegistry.forSource(AnimeSource.animePlay),
+        isA<AnimesOnlineAdapter>());
+    expect(SourceRegistry.forSource(AnimeSource.animePlay).implemented, isFalse);
     expect(Anime(name: '', url: '', source: AnimeSource.animesOnlineCloud).sourceName,
         'Animes Online');
     expect(Anime(name: '', url: '', source: AnimeSource.animePlay).sourceName,

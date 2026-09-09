@@ -16,37 +16,44 @@ import 'package:goanime_tv/data/models/anime.dart';
 import 'package:goanime_tv/data/models/episode.dart';
 import 'package:goanime_tv/data/repositories/anime_repository.dart';
 
-const _searchHtml =
-    '<div class="row ml-1 mr-1"><a href="/animes/black-clover-todos-os-episodios">'
-    '<img class="imgAnimes" data-src="/uploads/bc.jpg"><span>Black Clover</span>'
-    '</a></div>';
+/// New AnimeFire JSON API fixtures (site rebuild 2026 — no more HTML).
+const _searchJson =
+    '{"data":[{"id":"bc789","title":"Black Clover","audio":"Dublado",'
+    '"poster_src":"https://image.tmdb.org/t/p/original/bc.jpg"}]}';
 
-const _episodesHtml =
-    '<a class="lEp epT divNumEp smallbox px-2 mx-1 text-left d-flex" '
-    'href="/animes/black-clover/1">1</a>';
+String _animeJson(List<Map<String, Object>> episodes) =>
+    '{"data":{"episodes":['
+    '${episodes.map((e) => '{"id":"${e['id']}","title":"${e['title']}",'
+    '"audio":"Dublado","season":1,"number":${e['number']},'
+    '"still_src":"https://image.tmdb.org/t/p/original/bc${e['number']}.jpg",'
+    '"synopsis":"sinopse"}').join(',')}'
+    ']}}';
 
-/// Blogger SPA page: only an iframe pointing at the anti-bot player.
-const _bloggerSpaHtml =
-    '<html><body><iframe src="https://www.blogger.com/video.g?token=abc123">'
-    '</iframe></body></html>';
+String _episodeJson(List<String> streamUrls) =>
+    '{"data":{"id":"ep1","title":"Ep 1","audio":"Dublado","season":1,'
+    '"number":1,"streams":['
+    '${streamUrls.map((u) => '{"audio":"dublado","is_mtl":false,'
+    '"is_offline":false,"url":"$u","qualities":["480p"],'
+    '"chapters":[],"thumbnails":null}').join(',')}'
+    ']}}';
 
-const _playableHtml =
-    '<div data-video-src="https://cdn.example.com/720.mp4" data-quality="720p">'
-    '</div>';
-
-AnimeFireAdapter _adapter(String episodeHtml, {void Function()? onSearch}) {
+AnimeFireAdapter _adapter(String episodeJson, {void Function()? onSearch}) {
   return AnimeFireAdapter(
     client: MockClient((req) async {
       final path = req.url.path;
-      if (path.startsWith('/pesquisar/')) {
+      if (path == '/animes/pesquisar') {
         onSearch?.call();
-        return http.Response(_searchHtml, 200);
+        return http.Response(_searchJson, 200);
       }
-      if (path.endsWith('todos-os-episodios')) {
-        return http.Response(_episodesHtml, 200);
+      if (path == '/anime/bc789') {
+        return http.Response(
+            _animeJson([
+              {'id': 'ep1', 'number': 1, 'title': 'Ep 1'}
+            ]),
+            200);
       }
-      if (path.contains('/animes/black-clover/')) {
-        return http.Response(episodeHtml, 200);
+      if (path == '/episode/ep1') {
+        return http.Response(episodeJson, 200);
       }
       return http.Response('not found', 404);
     }),
@@ -160,9 +167,9 @@ void main() {
     AppCaches.clearAll();
   });
 
-  test('página achada + extração vazia (Blogger SPA) → matchedUnavailable',
-      () async {
-    final repo = AnimeRepository(adapters: [_adapter(_bloggerSpaHtml)]);
+  test('página achada + episódio sem streams → matchedUnavailable', () async {
+    final repo =
+        AnimeRepository(adapters: [_adapter(_episodeJson(const []))]);
     final res = await repo.resolveProvidersForEpisode(_anime(id: 21), 1);
 
     expect(res.providers, isEmpty);
@@ -185,13 +192,13 @@ void main() {
 
   test('match persistido NÃO é removido no caso matchedUnavailable', () async {
     const identity = '23';
-    const url = 'https://animefire.io/animes/black-clover-todos-os-episodios';
+    const url = 'https://animefire.io/anime/bc789';
     await ProviderMatchStore.saveMatch(
         identity, AnimeSource.animeFire, url);
 
     var searches = 0;
-    final repo =
-        AnimeRepository(adapters: [_adapter(_bloggerSpaHtml, onSearch: () => searches++)]);
+    final repo = AnimeRepository(
+        adapters: [_adapter(_episodeJson(const []), onSearch: () => searches++)]);
     final anime = _anime(id: 23);
     // identity com anilistId 23 bate com o match pré-salvo.
     expect(ProviderMatchStore.identity(anime), identity);
@@ -205,34 +212,58 @@ void main() {
         url, reason: 'removeMatch não deve rodar nesta branch');
   });
 
+  test('match persistido morto (página sem episódios) → remove + redescobre',
+      () async {
+    const identity = '30';
+    // URL legada do site antigo: sem id válido na API.
+    const stale = 'https://animefire.io/animes/black-clover-todos-os-episodios';
+    await ProviderMatchStore.saveMatch(
+        identity, AnimeSource.animeFire, stale);
+
+    var searches = 0;
+    final repo = AnimeRepository(adapters: [
+      _adapter(_episodeJson(['https://akumast.net/i/x/m.jpg']),
+          onSearch: () => searches++)
+    ]);
+    final res =
+        await repo.resolveProvidersForEpisode(_anime(id: 30), 1);
+
+    // Re-redescobriu via busca e resolveu o vídeo na página nova.
+    expect(searches, 1);
+    expect(res.providers[AnimeSource.animeFire], isNotEmpty);
+    expect(await ProviderMatchStore.urlFor(identity, AnimeSource.animeFire),
+        'https://animefire.io/anime/bc789');
+  });
+
   test('página achada + vídeo ok → providers e match persistido', () async {
-    final repo = AnimeRepository(adapters: [_adapter(_playableHtml)]);
+    final repo = AnimeRepository(adapters: [
+      _adapter(_episodeJson(['https://akumast.net/i/x/m.jpg']))
+    ]);
     final anime = _anime(id: 24);
     final res = await repo.resolveProvidersForEpisode(anime, 1);
 
     expect(res.matchedUnavailable, isEmpty);
     expect(res.providers[AnimeSource.animeFire], isNotEmpty);
     expect(res.providers[AnimeSource.animeFire]!.first.url,
-        'https://cdn.example.com/720.mp4');
+        'https://akumast.net/i/x/m.jpg');
     expect(
         await ProviderMatchStore.urlFor(
             ProviderMatchStore.identity(anime), AnimeSource.animeFire),
         isNotNull);
   });
 
-  test('getVideoSources classifica Blogger SPA como BloggerUnsupportedError',
-      () async {
-    final adapter = _adapter(_bloggerSpaHtml);
+  test('getVideoSources: episódio sem streams → EmptyResultError', () async {
+    final adapter = _adapter(_episodeJson(const []));
     final vs = await adapter.getVideoSources(
       Episode(
         number: '1',
-        url: 'https://animefire.io/animes/black-clover/1',
+        url: 'https://api.animefire.io/episode/ep1',
         owner: _anime(id: 1),
       ),
     );
     expect(vs, isA<Failure<List<VideoSource>>>());
     final err = ((vs as Failure).error);
-    expect(err, isA<BloggerUnsupportedError>());
+    expect(err, isA<EmptyResultError>());
   });
 
   test(

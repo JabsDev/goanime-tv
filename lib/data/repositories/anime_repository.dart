@@ -8,6 +8,7 @@ import '../../core/scraper/scraper_result.dart';
 import '../../core/sources/anime_source_adapter.dart';
 import '../../core/sources/source_registry.dart';
 import '../../core/storage/provider_match_store.dart';
+import '../../core/utils/episode_number.dart';
 import '../models/anime.dart';
 import '../models/anilist_models.dart';
 import '../models/episode.dart';
@@ -125,8 +126,10 @@ class AnimeRepository {
 
   /// Breaks on the first provider that delivers an episode count — for a
   /// RELEASING series (AniList episodes:null) or when AniList enrichment
-  /// failed, so a series still gets a numbered grid. Best effort — no provider
-  /// is guaranteed to respond.
+  /// failed, so a series still gets a numbered grid. Counts the HIGHEST
+  /// episode number, not the list length: a partial/paginated provider page
+  /// must not shrink the grid. Best effort — no provider is guaranteed to
+  /// respond.
   Future<int> _episodeCountFromProviders(Anime anime) async {
     for (final adapter in _adapters) {
       if (!adapter.implemented) continue;
@@ -141,7 +144,14 @@ class AnimeRepository {
         final eps = await adapter.getEpisodes(target);
         switch (eps) {
           case Success(data: final data):
-            if (data.isNotEmpty) return data.length;
+            var max = 0;
+            for (final e in data) {
+              final n = int.tryParse(e.number) ??
+                  episodeNumberFromUrl(e.url) ??
+                  0;
+              if (n > max) max = n;
+            }
+            if (max > 0) return max;
           case Failure():
           case Loading():
             break;
@@ -151,6 +161,23 @@ class AnimeRepository {
       }
     }
     return 0;
+  }
+
+  /// Page-level health probe for a persisted provider match: true when the
+  /// page still lists at least one episode. Time-boxed like every other
+  /// provider step; any failure counts as dead so the caller drops the stale
+  /// match and re-discovers instead of replaying a dead page forever.
+  Future<bool> _pageAlive(AnimeSourceAdapter adapter, Anime match) async {
+    try {
+      final eps =
+          await adapter.getEpisodes(match).timeout(providerStepTimeout);
+      return switch (eps) {
+        Success(data: final data) => data.isNotEmpty,
+        _ => false,
+      };
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Asks every implemented provider for episode [episodeNumber] of [anime] in
@@ -264,7 +291,17 @@ class AnimeRepository {
         final persisted = await ProviderMatchStore.urlFor(identity, src);
         if (persisted != null && persisted.isNotEmpty) {
           match = Anime(name: anime.name, url: persisted, source: src);
-        } else {
+          // Page-level probe: a persisted page that no longer lists episodes
+          // (site migration, removed title) is dropped and re-discovered in
+          // step 2 instead of pinning every episode to matchedUnavailable.
+          // A page that lists episodes but yields no video keeps its match
+          // (the extractor is what failed, not the page).
+          if (!await _pageAlive(adapter, match)) {
+            await ProviderMatchStore.removeMatch(identity, src);
+            match = Anime(name: anime.name, url: '', source: src);
+          }
+        }
+        if (match.url.isEmpty) {
           // 2. First hit: locate the page (search-by-name). The page-level
           //    match is persisted right away — even if this episode's
           //    extraction fails (Blogger SPA, timeout), the next tap skips the
