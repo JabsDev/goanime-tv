@@ -22,8 +22,15 @@ import 'anime_source_adapter.dart';
 ///
 /// API surface used (no auth, verified live 09/09/2026):
 ///  - `GET /animes/pesquisar?q=` → `{data:[{id,title,audio,poster_src,...}]}`
-///  - `GET /anime/{animeId}`     → `{data:{episodes:[{id,number,title,...}]}}`
+///  - `GET /anime/{animeId}`     → `{data:{seasons:[{number,first_episode_number}],
+///    episodes:[{id,season,number,title,...}]}}` — episodes are numbered
+///    **per season**; the absolute number is
+///    `first_episode_number(season) + number - 1`.
 ///  - `GET /episode/{episodeId}` → `{data:{streams:[{audio,url,qualities}]}}`
+///    where each stream URL is a single DASH manifest carrying all of its
+///    `qualities` as Representations — hence one `VideoSource` per quality
+///    (+ `Auto` when several) sharing the manifest URL, disambiguated by
+///    `dashHeight` and resolved through the local MPD proxy in the player.
 class AnimeFireAdapter extends AnimeSourceAdapter {
   static const _apiBase = 'https://api.animefire.io';
   static const _siteBase = 'https://animefire.io';
@@ -162,6 +169,12 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
           source: source,
         ));
       }
+      // Per-season numbering → absolute: `seasons[].first_episode_number`
+      // gives the absolute offset of each season (verified live: Naruto
+      // S1..S4 → 1/53/105/159; Demon Slayer → 1/27/45/56). Without it,
+      // `resolveVideo` (match by absolute `number`) misses every episode
+      // past the longest season and can match the wrong season silently.
+      final seasonOffset = _seasonOffsets(data?['seasons']);
       final episodes = <Episode>[];
       for (final item in raw) {
         if (item is! Map) continue;
@@ -171,12 +184,20 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
             ? rawNum.toInt()
             : int.tryParse(rawNum?.toString() ?? '');
         if (epId.isEmpty || n == null) continue;
+        final rawSeason = item['season'];
+        final s = (rawSeason is num)
+            ? rawSeason.toInt()
+            : int.tryParse(rawSeason?.toString() ?? '');
+        final abs = (s != null && seasonOffset.containsKey(s))
+            ? seasonOffset[s]! + n - 1
+            : n;
         episodes.add(Episode(
-          number: '$n',
+          number: '$abs',
           url: '$_apiBase/episode/$epId',
           title: item['title']?.toString(),
           thumbnail: item['still_src']?.toString(),
           description: item['synopsis']?.toString(),
+          season: s,
           owner: anime,
         ));
       }
@@ -186,8 +207,8 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
           source: source,
         ));
       }
-      // Número real da API em vez de posição no array — defesa contra
-      // payloads fora de ordem.
+      // Absolute numbers — defense against out-of-order payloads (and, with
+      // the mapping above, against per-season numbering).
       episodes.sort((a, b) =>
           (int.tryParse(a.number) ?? 0).compareTo(int.tryParse(b.number) ?? 0));
       return ScraperResult.success(episodes);
@@ -232,26 +253,62 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
       }
       final sources = <VideoSource>[];
       final seen = <String>{};
+      var skippedOffline = 0;
       for (final item in raw) {
         if (item is! Map) continue;
         final url = item['url']?.toString() ?? '';
-        if (url.isEmpty || !seen.add(url)) continue;
-        final qualities = (item['qualities'] is List)
-            ? (item['qualities'] as List).map((q) => q.toString()).toList()
-            : const <String>[];
-        // Rótulo numérico ("480p") para o quality picker pontuar; áudio
-        // (dublado/legendado) vai junto quando há mais de um stream.
-        var quality = qualities.isNotEmpty ? qualities.join('/') : 'Auto';
         final audio = item['audio']?.toString() ?? '';
-        if (raw.length > 1 && audio.isNotEmpty) quality = '$quality · $audio';
-        sources.add(VideoSource(
-          url: url,
-          quality: quality,
-          headers: {
-            'User-Agent': AppConstants.userAgent,
-            'Referer': '$_siteBase/',
-          },
-        ));
+        if (url.isEmpty) {
+          skippedOffline++;
+          continue;
+        }
+        // ponytail: dedup por (url, áudio) — por URL pura colapsaria áudios
+        // se um dia compartilharem o manifesto.
+        final streamKey = '${url.toLowerCase()}|${audio.toLowerCase()}';
+        if (!seen.add(streamKey)) continue;
+        // Um manifesto DASH carrega todas as `qualities`: uma entrada por
+        // qualidade (mesma URL, `dashHeight` distinto) + `Auto` (adaptativo)
+        // quando há mais de uma. Com qualidade única, só a fixa — `Auto`
+        // seria um botão redundante para o mesmo conteúdo.
+        final qualities = (item['qualities'] is List)
+            ? (item['qualities'] as List)
+                .map((q) => q.toString())
+                .map((q) => q.trim())
+                .where((q) => q.isNotEmpty)
+                .toSet()
+                .toList()
+            : const <String>[];
+        final suffix =
+            (raw.length > 1 && audio.isNotEmpty) ? ' · $audio' : '';
+        void add(String label, int? dashHeight) {
+          final key = '$url|$dashHeight|$audio';
+          if (!seen.add(key)) return;
+          sources.add(VideoSource(
+            url: url,
+            quality: '$label$suffix',
+            headers: {
+              'User-Agent': AppConstants.userAgent,
+              'Referer': '$_siteBase/',
+            },
+            dashHeight: dashHeight,
+          ));
+        }
+
+        if (qualities.length > 1) add('Auto', null);
+        var fixed = 0;
+        for (final q in qualities) {
+          final h = RegExp(r'(\d{3,4})').firstMatch(q);
+          final height = h == null ? null : int.tryParse(h.group(1)!);
+          if (height == null) continue;
+          add(q, height);
+          fixed++;
+        }
+        // Rótulo cru sem número (ex.: "HD") ou lista vazia: Auto honesto.
+        if (fixed == 0) add('Auto', null);
+      }
+      if (skippedOffline > 0) {
+        debugPrint('[AnimeFire] Skipped $skippedOffline offline stream(s) '
+            'for $epId (only dubbed/subbed available)');
       }
       if (sources.isEmpty) {
         return ScraperResult.failure(EmptyResultError(
@@ -327,6 +384,28 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
     if (uri == null || uri.pathSegments.isEmpty) return null;
     final seg = uri.pathSegments.last;
     return seg.isEmpty ? null : seg;
+  }
+
+  /// Maps season number → absolute first-episode number from the
+  /// `seasons` array (`[{number, first_episode_number}]`). Empty when the
+  /// payload carries no seasons — callers then fall back to raw numbers.
+  Map<int, int> _seasonOffsets(Object? seasons) {
+    final offsets = <int, int>{};
+    if (seasons is! List) return offsets;
+    for (final item in seasons) {
+      if (item is! Map) continue;
+      final rawS = item['number'];
+      final rawFirst = item['first_episode_number'];
+      final s = (rawS is num)
+          ? rawS.toInt()
+          : int.tryParse(rawS?.toString() ?? '');
+      final first = (rawFirst is num)
+          ? rawFirst.toInt()
+          : int.tryParse(rawFirst?.toString() ?? '');
+      if (s == null || first == null) continue;
+      offsets[s] = first;
+    }
+    return offsets;
   }
 
   /// Top-level `data` as List (search payload). Null on any shape mismatch.

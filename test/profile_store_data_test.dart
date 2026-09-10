@@ -6,6 +6,7 @@ import 'package:path_provider_platform_interface/path_provider_platform_interfac
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:goanime_tv/core/profile/profile_store.dart';
+import 'package:goanime_tv/data/models/profile.dart';
 
 class _FakePathProvider extends PathProviderPlatform {
   final String docs;
@@ -133,5 +134,66 @@ void main() {
     final pr = ProfileStore.instance.getProgress('chave');
     expect(pr?['episode'], 5);
     expect(ProfileStore.instance.getHistory().single['key'], 'h');
+  });
+
+  group('vincular AniList renomeia placeholder (bug __anilist_pending__)', () {
+    Future<Profile> placeholderAtivo() async {
+      final p = ProfileStore.instance
+          .createLocalProfile(kAnilistPlaceholderProfileName);
+      await ProfileStore.instance.switchProfile(p.id);
+      return p;
+    }
+
+    test('placeholder vira username + tipo anilist e persiste', () async {
+      final p = await placeholderAtivo();
+      await ProfileStore.instance.updateCurrentAnilist(
+        token: 'tok',
+        userId: 42,
+        userName: 'Jabs2',
+        avatar: 'http://a/img.png',
+      );
+      final cur = ProfileStore.instance.currentProfile!;
+      expect(cur.displayName, 'Jabs2');
+      expect(cur.type, ProfileType.anilist);
+      expect(cur.anilistUserName, 'Jabs2');
+      expect(cur.anilistUserId, 42);
+
+      // sobrevive ao reboot (lê do disco)
+      ProfileStore.instance.resetForTest();
+      await ProfileStore.instance.init();
+      expect(ProfileStore.instance.currentProfile?.displayName, 'Jabs2');
+      expect(ProfileStore.instance.currentProfile?.type, ProfileType.anilist);
+      expect(p.id, ProfileStore.instance.currentProfile?.id);
+    });
+
+    test('nome escolhido pelo usuário nunca é atropelado', () async {
+      final p = ProfileStore.instance.createLocalProfile('Sala');
+      await ProfileStore.instance.switchProfile(p.id);
+      await ProfileStore.instance.updateCurrentAnilist(
+        token: 'tok',
+        userId: 7,
+        userName: 'Jabs2',
+        avatar: null,
+      );
+      final cur = ProfileStore.instance.currentProfile!;
+      expect(cur.displayName, 'Sala');
+      expect(cur.type, ProfileType.anilist);
+      expect(cur.anilistUserName, 'Jabs2');
+    });
+
+    test('logout limpa token mas mantém o nome (sem regressão)', () async {
+      await placeholderAtivo();
+      await ProfileStore.instance.updateCurrentAnilist(
+        token: 'tok',
+        userId: 42,
+        userName: 'Jabs2',
+        avatar: null,
+      );
+      await ProfileStore.instance.updateCurrentAnilist(clear: true);
+      final cur = ProfileStore.instance.currentProfile!;
+      expect(cur.displayName, 'Jabs2');
+      expect(cur.anilistToken, isNull);
+      expect(cur.anilistUserName, isNull);
+    });
   });
 }

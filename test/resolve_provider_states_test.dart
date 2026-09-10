@@ -395,4 +395,166 @@ void main() {
     expect(secondUpdates.last.complete, isTrue);
     expect(res.providers[AnimeSource.animeFire], isNotEmpty);
   });
+
+  group('AnimeFire DASH multi-quality + temporadas (botão único + não carrega)',
+      () {
+    AnimeFireAdapter seasonAdapter(
+      Map<String, String> episodeJsonById,
+      String animeJson,
+    ) {
+      return AnimeFireAdapter(
+        client: MockClient((req) async {
+          final path = req.url.path;
+          if (path == '/animes/pesquisar') {
+            return http.Response(_searchJson, 200);
+          }
+          if (path == '/anime/bc789') {
+            return http.Response(animeJson, 200);
+          }
+          final id = req.url.pathSegments.isEmpty
+              ? ''
+              : req.url.pathSegments.last;
+          final body = episodeJsonById[id];
+          if (body != null) return http.Response(body, 200);
+          return http.Response('not found', 404);
+        }),
+      );
+    }
+
+    // 2 temporadas: S1E1..S1E2 (abs 1..2), S2E1..S2E2 (abs 3..4).
+    const seasonAnimeJson = '{"data":{"seasons":['
+        '{"number":1,"first_episode_number":1},'
+        '{"number":2,"first_episode_number":3}],'
+        '"episodes":['
+        '{"id":"s1e1","title":"E1","audio":"Dublado","season":1,"number":1},'
+        '{"id":"s1e2","title":"E2","audio":"Dublado","season":1,"number":2},'
+        '{"id":"s2e1","title":"E3","audio":"Dublado","season":2,"number":1},'
+        '{"id":"s2e2","title":"E4","audio":"Dublado","season":2,"number":2}'
+        ']}}';
+
+    String dashEpisodeJson({
+      required List<String> qualitiesDub,
+      required List<String> qualitiesLeg,
+      bool legOffline = false,
+    }) {
+      String stream(String audio, List<String> qs, String url) =>
+          '{"audio":"$audio","is_mtl":false,"is_offline":false,'
+          '"url":"$url","qualities":[${qs.map((q) => '"$q"').join(',')}],'
+          '"chapters":[],"thumbnails":null}';
+      final leg = legOffline
+          ? '{"audio":"legendado","is_mtl":false,"is_offline":true,'
+              '"url":null,"qualities":["480p"],"chapters":[],"thumbnails":null}'
+          : stream('legendado', qualitiesLeg, 'https://akumast.net/i/leg/m.jpg');
+      return '{"data":{"id":"s2e1","title":"E3","audio":"Dublado",'
+          '"season":2,"number":1,"streams":['
+          '${stream('dublado', qualitiesDub, 'https://akumast.net/i/dub/m.jpg')},'
+          '$leg]}}';
+    }
+
+    test('getEpisodes mapeia (season,number) → absoluto via offsets', () async {
+      final adapter = seasonAdapter(const {}, seasonAnimeJson);
+      final eps = await adapter.getEpisodes(
+        Anime(
+            name: 'Black Clover',
+            url: 'https://animefire.io/anime/bc789',
+            source: AnimeSource.animeFire),
+      );
+      expect(eps, isA<Success<List<Episode>>>());
+      final numbers =
+          (eps as Success<List<Episode>>).data.map((e) => e.number).toList();
+      expect(numbers, ['1', '2', '3', '4']);
+    });
+
+    test('resolveVideo(3) alcança S2E1 (antes: número repetido/errava)', () async {
+      final adapter = seasonAdapter(
+        {'s2e1': dashEpisodeJson(qualitiesDub: const ['480p'], qualitiesLeg: const ['480p'])},
+        seasonAnimeJson,
+      );
+      final sources = await adapter.resolveVideo(
+        Anime(
+            name: 'Black Clover',
+            url: 'https://animefire.io/anime/bc789',
+            source: AnimeSource.animeFire),
+        3,
+      );
+      expect(sources.map((s) => s.url),
+          contains('https://akumast.net/i/dub/m.jpg'));
+    });
+
+    test('getVideoSources multi-quality → Auto + 1 fonte por qualidade',
+        () async {
+      final adapter = seasonAdapter(
+        {
+          's2e1': dashEpisodeJson(
+            qualitiesDub: const ['480p', '720p', '1080p'],
+            qualitiesLeg: const ['480p', '720p'],
+          )
+        },
+        seasonAnimeJson,
+      );
+      final vs = await adapter.getVideoSources(
+        Episode(number: '3', url: 'https://api.animefire.io/episode/s2e1'),
+      );
+      expect(vs, isA<Success<List<VideoSource>>>());
+      final data = (vs as Success<List<VideoSource>>).data;
+      // dublado: Auto+480+720+1080; legendado: Auto+480+720.
+      expect(data, hasLength(7));
+      for (final s in data) {
+        expect(s.quality, isNot(contains('/')));
+      }
+      final byQuality = {for (final s in data) s.quality: s};
+      expect(byQuality.keys,
+          containsAll(['Auto · dublado', 'Auto · legendado']));
+      expect(byQuality['1080p · dublado']?.dashHeight, 1080);
+      expect(byQuality['720p · legendado']?.dashHeight, 720);
+      expect(byQuality['Auto · dublado']?.dashHeight, isNull);
+      // Mesma URL do manifesto em todas as entradas do mesmo áudio.
+      expect(
+          data
+              .where((s) => s.quality.endsWith('dublado'))
+              .map((s) => s.url)
+              .toSet(),
+          hasLength(1));
+    });
+
+    test('qualidade única → só a fixa (sem Auto redundante)', () async {
+      final adapter = seasonAdapter(
+        {
+          's2e1': dashEpisodeJson(
+            qualitiesDub: const ['480p'],
+            qualitiesLeg: const ['480p'],
+          )
+        },
+        seasonAnimeJson,
+      );
+      final vs = await adapter.getVideoSources(
+        Episode(number: '3', url: 'https://api.animefire.io/episode/s2e1'),
+      );
+      final data = (vs as Success<List<VideoSource>>).data;
+      expect(data.map((s) => s.quality),
+          containsAll(['480p · dublado', '480p · legendado']));
+      expect(data.any((s) => s.quality.startsWith('Auto')), isFalse);
+    });
+
+    test('stream offline (url null) é descartado, dublado sobrevive', () async {
+      final adapter = seasonAdapter(
+        {
+          's2e1': dashEpisodeJson(
+            qualitiesDub: const ['480p'],
+            qualitiesLeg: const ['480p'],
+            legOffline: true,
+          )
+        },
+        seasonAnimeJson,
+      );
+      final vs = await adapter.getVideoSources(
+        Episode(number: '3', url: 'https://api.animefire.io/episode/s2e1'),
+      );
+      final data = (vs as Success<List<VideoSource>>).data;
+      expect(data, hasLength(1));
+      expect(data.single.url, 'https://akumast.net/i/dub/m.jpg');
+      expect(data.single.quality, '480p · dublado');
+      expect(data.single.dashHeight, 480);
+    });
+  });
 }

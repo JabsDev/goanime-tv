@@ -9,7 +9,6 @@ import '../../core/storage/local_storage.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/utils/nsfw_filter.dart';
-import '../../core/utils/quality_picker.dart';
 import '../../core/utils/episode_airing.dart';
 import '../../core/sources/source_ping_service.dart';
 import '../../shared/widgets/cached_image.dart';
@@ -17,6 +16,7 @@ import '../../shared/widgets/focus_key_handler.dart';
 import '../../shared/widgets/app_top_bar.dart';
 import '../../shared/widgets/tv_button.dart';
 import '../player/player_screen.dart';
+import '../player/exo_dash_player_screen.dart';
 import '../settings/settings_screen.dart';
 
 class DetailScreen extends StatefulWidget {
@@ -1200,18 +1200,28 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     final sources = _providers?[provider] ?? const <VideoSource>[];
     if (sources.isEmpty) return;
     Navigator.pop(context);
+    // AnimeFire serve DASH que o mpv embarcado não demuxa; abre no player
+    // ExoPlayer dedicado. Demais fontes seguem no PlayerScreen (mpv).
+    final player = provider == AnimeSource.animeFire
+        ? ExoDashPlayerScreen(
+            anime: widget.anime,
+            provider: provider,
+            episodeIndex: widget.episodeIndex,
+            episodeList: widget.episodeList,
+            initialSources: sources,
+            initialIndex: qualityIndex,
+          )
+        : PlayerScreen(
+            anime: widget.anime,
+            provider: provider,
+            episodeIndex: widget.episodeIndex,
+            episodeList: widget.episodeList,
+            initialSources: sources,
+            initialIndex: qualityIndex,
+          );
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(
-          anime: widget.anime,
-          provider: provider,
-          episodeIndex: widget.episodeIndex,
-          episodeList: widget.episodeList,
-          initialSources: sources,
-          initialIndex: qualityIndex,
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => player),
     );
   }
 
@@ -1475,18 +1485,6 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     final qualityList = selected == null
         ? const <Widget>[]
         : <Widget>[
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 5),
-              child: _QualityItem(
-                quality: 'Melhor qualidade',
-                // Fase 3: atalho que abre direto na melhor — evita o 2º tap
-                // quando o usuário só quer assistir.
-                onTap: () => _navigateToPlayer(
-                  selected,
-                  bestQualityIndex(providers[selected]!),
-                ),
-              ),
-            ),
             ...providers[selected]!.asMap().entries.map((q) {
               final idx = q.key;
               return Padding(

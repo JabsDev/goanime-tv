@@ -283,7 +283,17 @@ class ProfileStore {
     bool clear = false,
   }) async {
     if (_current == null) return;
+    // Vincular o AniList assume o username como nome visível — mas SÓ quando
+    // o atual é o placeholder do login (ou vazio): nunca atropela um nome que
+    // o usuário escolheu. Sem isto o perfil criado em _startAnilistLogin
+    // exibia '__anilist_pending__' para sempre (token funcionava, nome não).
+    final link = !clear && userName != null && userName.isNotEmpty;
+    final rename = link &&
+        (_current!.displayName == kAnilistPlaceholderProfileName ||
+            _current!.displayName.trim().isEmpty);
     final updated = _current!.copyWith(
+      displayName: rename ? userName : null,
+      type: link ? ProfileType.anilist : null,
       anilistToken: token,
       anilistUserId: userId,
       anilistUserName: userName,

@@ -14,6 +14,7 @@ import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/utils/quality_picker.dart';
 import '../../shared/widgets/focus_key_handler.dart';
+import 'dash_manifest_proxy.dart';
 import 'resume_seek_tracker.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -82,6 +83,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   List<VideoSource> _sources = [];
   int _selectedQualityIndex = 0;
+
+  // Proxy local de manifestos DASH (AnimeFire): re-serve o MPD com extensão
+  // `.mpd` (o `/m.jpg` do CDN não abre no demuxer) e filtra a representação
+  // da qualidade escolhida. Uma instância por tela, fechada no dispose.
+  final DashManifestProxy _dashProxy = DashManifestProxy();
 
   bool _showNextOverlay = false;
   int _countdownSec = 10;
@@ -273,8 +279,26 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
       final headers = <String, String>{};
       if (src.headers.isNotEmpty) headers.addAll(src.headers);
+      // AnimeFire: o manifesto chega como `/m.jpg` e falha no open do demuxer
+      // (dur=0 + "Failed to open"). O proxy local re-serve como `.mpd` e aplica
+      // a altura escolhida (`dashHeight`; null = adaptativo). Falha do proxy
+      // cai para a URL direta — nunca pior que o comportamento anterior.
+      var playUrl = src.url;
+      if (widget.provider == AnimeSource.animeFire) {
+        try {
+          playUrl = (await _dashProxy.serveManifest(
+            manifestUrl: src.url,
+            height: src.dashHeight,
+            headers: src.headers,
+          ))
+              .toString();
+          debugPrint('[Player] Dash proxy: ${src.quality} -> $playUrl');
+        } catch (e) {
+          debugPrint('[Player] Dash proxy failed, direct fallback: $e');
+        }
+      }
       await _player.open(
-        Media(src.url, httpHeaders: headers),
+        Media(playUrl, httpHeaders: headers),
         play: true,
       );
       if (!mounted) return;
@@ -796,6 +820,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   void dispose() {
     _exitImmersive();
     WidgetsBinding.instance.removeObserver(this);
+    _dashProxy.close();
     _positionSub?.cancel();
     _durationSub?.cancel();
     _completedSub?.cancel();

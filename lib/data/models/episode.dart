@@ -27,6 +27,12 @@ class Episode {
   final String? title;
   final String? description;
 
+  /// Season number as reported by the provider (AnimeFire numbers episodes
+  /// per season; `number` carries the absolute number mapped via
+  /// `seasons[].first_episode_number`). Null when the provider has no
+  /// season concept — matching then falls back to `number` only.
+  final int? season;
+
   /// The provider this episode was listed from. When set, video resolution
   /// dispatches to this source instead of the parent anime's source (episodes
   /// can be merged from multiple providers).
@@ -42,6 +48,7 @@ class Episode {
     this.thumbnail,
     this.title,
     this.description,
+    this.season,
     this.source,
     this.owner,
   });
@@ -52,9 +59,16 @@ class VideoSource {
   final String quality;
   final Map<String, String> headers;
 
+  /// Desired DASH Representation height (e.g. 720). Null = adaptive manifest.
+  /// Set by providers whose single manifest carries every quality (AnimeFire);
+  /// the player resolves it through the local MPD proxy. Ignored by direct
+  /// mp4/hls sources.
+  final int? dashHeight;
+
   VideoSource({
     required this.url,
     required this.quality,
     this.headers = const {},
+    this.dashHeight,
   });
 }

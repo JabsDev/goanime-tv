@@ -22,6 +22,7 @@ void main() {
     expect(qualityScore('Full HD'), 1080);
     expect(qualityScore('HD 720'), 720);
     expect(qualityScore('Auto'), 0);
+    expect(qualityScore('Auto · dublado'), 0);
     expect(qualityScore(''), 0);
   });
 

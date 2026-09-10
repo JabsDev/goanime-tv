@@ -347,6 +347,14 @@ class AniListService {
       'name': user.name,
       'avatar': user.avatar,
     });
+    // Cura perfis presos no placeholder ('__anilist_pending__' — login
+    // concluído antes do rename existir): espelha token/user no perfil.
+    ProfileService.instance.updateCurrentProfileAnilist(
+      token: token,
+      userId: user.id,
+      userName: user.name,
+      avatar: user.avatar,
+    );
     return user;
   }
 

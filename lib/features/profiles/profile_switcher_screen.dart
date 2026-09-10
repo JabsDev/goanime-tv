@@ -313,8 +313,8 @@ class _ProfileSwitcherScreenState extends State<ProfileSwitcherScreen> {
     // On success: saveToken escreve no perfil atual (popula token+user).
     // On fail: remove placeholder e volta ao perfil anterior.
     final previousId = ProfileService.instance.currentProfile?.id;
-    final placeholder =
-        ProfileService.instance.createLocalProfile('__anilist_pending__');
+    final placeholder = ProfileService.instance
+        .createLocalProfile(kAnilistPlaceholderProfileName);
     await ProfileService.instance.switchProfile(placeholder.id);
     if (!mounted) return;
 

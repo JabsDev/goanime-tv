@@ -1,5 +1,11 @@
 enum ProfileType { local, anilist }
 
+/// Nome temporário do perfil criado durante o login AniList
+/// (profile_switcher_screen)._startAnilistLogin renomeia para o username real
+/// em updateCurrentAnilist; se o app fechar no meio, refreshUser cura na
+/// próxima abertura.
+const kAnilistPlaceholderProfileName = '__anilist_pending__';
+
 /// Versão do esquema de dados persistidos. Qualquer mudança de formato
 /// incrementa este valor e adiciona uma migração no mesmo PR (I-4).
 const int kSchemaVersion = 1;
@@ -58,6 +64,7 @@ class Profile {
 
   Profile copyWith({
     String? displayName,
+    ProfileType? type,
     String? anilistToken,
     int? anilistUserId,
     String? anilistUserName,
@@ -67,7 +74,7 @@ class Profile {
     return Profile(
       id: id,
       displayName: displayName ?? this.displayName,
-      type: type,
+      type: type ?? this.type,
       createdAt: createdAt,
       anilistToken: clearAnilist ? null : (anilistToken ?? this.anilistToken),
       anilistUserId:
