@@ -65,10 +65,16 @@ class VideoSource {
   /// mp4/hls sources.
   final int? dashHeight;
 
+  /// Audio track as reported by the provider ("dublado"/"legendado" on
+  /// AnimeFire). Null when the provider has no audio concept — the UI then
+  /// skips the audio step and shows qualities directly.
+  final String? audio;
+
   VideoSource({
     required this.url,
     required this.quality,
     this.headers = const {},
     this.dashHeight,
+    this.audio,
   });
 }

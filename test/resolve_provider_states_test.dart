@@ -501,17 +501,18 @@ void main() {
       expect(data, hasLength(7));
       for (final s in data) {
         expect(s.quality, isNot(contains('/')));
+        expect(s.quality, isNot(contains('·')));
       }
-      final byQuality = {for (final s in data) s.quality: s};
-      expect(byQuality.keys,
-          containsAll(['Auto · dublado', 'Auto · legendado']));
-      expect(byQuality['1080p · dublado']?.dashHeight, 1080);
-      expect(byQuality['720p · legendado']?.dashHeight, 720);
-      expect(byQuality['Auto · dublado']?.dashHeight, isNull);
+      VideoSource by(String quality, String audio) => data.firstWhere(
+          (s) => s.quality == quality && s.audio == audio);
+      expect(by('Auto', 'dublado').dashHeight, isNull);
+      expect(by('Auto', 'legendado').dashHeight, isNull);
+      expect(by('1080p', 'dublado').dashHeight, 1080);
+      expect(by('720p', 'legendado').dashHeight, 720);
       // Mesma URL do manifesto em todas as entradas do mesmo áudio.
       expect(
           data
-              .where((s) => s.quality.endsWith('dublado'))
+              .where((s) => s.audio == 'dublado')
               .map((s) => s.url)
               .toSet(),
           hasLength(1));
@@ -531,8 +532,9 @@ void main() {
         Episode(number: '3', url: 'https://api.animefire.io/episode/s2e1'),
       );
       final data = (vs as Success<List<VideoSource>>).data;
-      expect(data.map((s) => s.quality),
-          containsAll(['480p · dublado', '480p · legendado']));
+      expect(data.map((s) => s.quality), everyElement('480p'));
+      expect(
+          data.map((s) => s.audio), containsAll(['dublado', 'legendado']));
       expect(data.any((s) => s.quality.startsWith('Auto')), isFalse);
     });
 
@@ -553,7 +555,8 @@ void main() {
       final data = (vs as Success<List<VideoSource>>).data;
       expect(data, hasLength(1));
       expect(data.single.url, 'https://akumast.net/i/dub/m.jpg');
-      expect(data.single.quality, '480p · dublado');
+      expect(data.single.quality, '480p');
+      expect(data.single.audio, 'dublado');
       expect(data.single.dashHeight, 480);
     });
   });

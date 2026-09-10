@@ -1106,6 +1106,10 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   Set<AnimeSource> _matchedUnavailable = {};
   AnimeSource? _selectedProvider;
 
+  /// Áudio escolhido no passo intermediário (lowercase, ex. "dublado").
+  /// Null = ainda não escolheu (ou a fonte só tem um áudio — passo pulado).
+  String? _selectedAudio;
+
   /// Latency (ms) per resolved provider. Absent = still measuring; -1 = timeout.
   final Map<AnimeSource, int> _pings = {};
 
@@ -1163,6 +1167,8 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
       _error = null;
       _matchedUnavailable = resolution.matchedUnavailable;
       if (resolution.providers.isNotEmpty) {
+        // Troca de fonte invalida o áudio escolhido (era de outra lista).
+        if (nextBest != _selectedProvider) _selectedAudio = null;
         _providers = resolution.providers;
         _selectedProvider = nextBest;
         _loading = false;
@@ -1196,9 +1202,11 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     return ms < 0 ? SourcePingService.unknownPing : '$ms ms';
   }
 
-  void _navigateToPlayer(AnimeSource provider, int qualityIndex) {
-    final sources = _providers?[provider] ?? const <VideoSource>[];
-    if (sources.isEmpty) return;
+  void _navigateToPlayer(AnimeSource provider, int qualityIndex,
+      {List<VideoSource>? visibleSources}) {
+    final sources =
+        visibleSources ?? _providers?[provider] ?? const <VideoSource>[];
+    if (sources.isEmpty || qualityIndex >= sources.length) return;
     Navigator.pop(context);
     // AnimeFire serve DASH que o mpv embarcado não demuxa; abre no player
     // ExoPlayer dedicado. Demais fontes seguem no PlayerScreen (mpv).
@@ -1462,8 +1470,32 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     );
   }
 
-  /// Level 1 of the picker: the available providers. When a provider is
-  /// selected (default = best priority), show its qualities directly.
+  /// Áudios distintos da fonte (lowercase), dublado primeiro.
+  List<String> _audiosFor(List<VideoSource> sources) {
+    final set = <String>{};
+    for (final s in sources) {
+      final a = s.audio?.trim().toLowerCase();
+      if (a != null && a.isNotEmpty) set.add(a);
+    }
+    final list = set.toList();
+    list.sort((a, b) {
+      int rank(String v) => v == 'dublado'
+          ? 0
+          : v == 'legendado'
+              ? 1
+              : 2;
+      final r = rank(a).compareTo(rank(b));
+      return r != 0 ? r : a.compareTo(b);
+    });
+    return list;
+  }
+
+  String _audioLabel(String audio) {
+    if (audio.isEmpty) return audio;
+    return audio[0].toUpperCase() + audio.substring(1);
+  }
+
+  /// Picker em 3 níveis: Fonte → Áudio (só quando há >1) → Qualidade.
   Widget _buildProviderSelector() {
     final providers = _providers!;
     final selected = _selectedProvider;
@@ -1476,26 +1508,77 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           ping: _pingLabel(e.key),
           isSelected: selected == e.key,
           onTap: () {
-            setState(() => _selectedProvider = e.key);
+            setState(() {
+              _selectedProvider = e.key;
+              _selectedAudio = null;
+            });
           },
         ),
       );
     }).toList();
 
-    final qualityList = selected == null
-        ? const <Widget>[]
-        : <Widget>[
-            ...providers[selected]!.asMap().entries.map((q) {
-              final idx = q.key;
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: _QualityItem(
-                  quality: q.value.quality,
-                  onTap: () => _navigateToPlayer(selected, idx),
-                ),
-              );
-            }),
-          ];
+    List<Widget> audioSection(List<VideoSource> sources) {
+      final audios = _audiosFor(sources);
+      // Passo pulado: 0-1 áudio — qualidade direto, sem card redundante.
+      if (audios.length <= 1) return const [];
+      return [
+        const Divider(color: ThemeConstants.surfaceLight),
+        const Text(
+          'Áudio',
+          style: TextStyle(
+            color: ThemeConstants.textSecondary,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...audios.map((a) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: _QualityItem(
+                quality: _audioLabel(a),
+                onTap: () => setState(() => _selectedAudio = a),
+                selected: _selectedAudio == a,
+              ),
+            )),
+      ];
+    }
+
+    List<Widget> qualitySection(List<VideoSource> sources) {
+      final audios = _audiosFor(sources);
+      // Com >1 áudio e nada escolhido, a qualidade espera o áudio.
+      if (audios.length > 1 && _selectedAudio == null) {
+        return const [];
+      }
+      final visible = audios.length <= 1
+          ? sources
+          : sources
+              .where((s) => s.audio?.trim().toLowerCase() == _selectedAudio)
+              .toList();
+      if (visible.isEmpty) return const [];
+      return [
+        const Divider(color: ThemeConstants.surfaceLight),
+        const Text(
+          'Qualidade',
+          style: TextStyle(
+            color: ThemeConstants.textSecondary,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...visible.asMap().entries.map((q) {
+          final idx = q.key;
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: _QualityItem(
+              quality: q.value.quality,
+              onTap: () =>
+                  _navigateToPlayer(selected!, idx, visibleSources: visible),
+            ),
+          );
+        }),
+      ];
+    }
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1514,17 +1597,8 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           ...providerList
         else ...[
           ...providerList,
-          const Divider(color: ThemeConstants.surfaceLight),
-          const Text(
-            'Qualidade',
-            style: TextStyle(
-              color: ThemeConstants.textSecondary,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          ...qualityList,
+          ...audioSection(providers[selected]!),
+          ...qualitySection(providers[selected]!),
         ],
       ],
     );
@@ -1538,7 +1612,11 @@ class _QualityItem extends StatefulWidget {
   final String quality;
   final VoidCallback onTap;
 
-  const _QualityItem({required this.quality, required this.onTap});
+  /// Marca visual de escolhido (passo de áudio). Null/false = sem marca.
+  final bool selected;
+
+  const _QualityItem(
+      {required this.quality, required this.onTap, this.selected = false});
 
   @override
   State<_QualityItem> createState() => _QualityItemState();
@@ -1609,8 +1687,8 @@ class _QualityItemState extends State<_QualityItem> {
                     ),
                   ),
                   Icon(
-                    Icons.play_arrow,
-                    color: _isFocused
+                    widget.selected ? Icons.check_circle : Icons.play_arrow,
+                    color: _isFocused || widget.selected
                         ? ThemeConstants.primary
                         : ThemeConstants.textSecondary,
                     size: 26,

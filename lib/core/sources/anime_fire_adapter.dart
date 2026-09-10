@@ -278,19 +278,23 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
                 .toSet()
                 .toList()
             : const <String>[];
-        final suffix =
-            (raw.length > 1 && audio.isNotEmpty) ? ' · $audio' : '';
+        // Áudio vira dimensão própria (o diálogo mostra o card
+        // Dublado/Legendado antes das resoluções); o rótulo carrega só a
+        // resolução. Mantém mesmo com stream único para o passo de áudio
+        // aparecer também quando só há um áudio disponível.
+        final track = audio.isNotEmpty ? audio : null;
         void add(String label, int? dashHeight) {
           final key = '$url|$dashHeight|$audio';
           if (!seen.add(key)) return;
           sources.add(VideoSource(
             url: url,
-            quality: '$label$suffix',
+            quality: label,
             headers: {
               'User-Agent': AppConstants.userAgent,
               'Referer': '$_siteBase/',
             },
             dashHeight: dashHeight,
+            audio: track,
           ));
         }
 
