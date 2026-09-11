@@ -62,7 +62,14 @@ abstract class AnimeSourceAdapter {
   /// Resolves the playable [VideoSource]s of episode [episodeNumber] on a page
   /// previously matched by [resolveAnime]. Returns an empty list when this
   /// provider doesn't have that episode.
-  Future<List<VideoSource>> resolveVideo(Anime match, int episodeNumber) async {
+  ///
+  /// [catalog] is the catalog (AniList) anime the user opened — its name may
+  /// carry the season ("4th Season") when the catalog splits seasons into
+  /// separate entries while the provider serves them on one combined page.
+  /// Adapters with combined pages (AnimeFire) use it to map the
+  /// season-relative number to the provider's absolute one.
+  Future<List<VideoSource>> resolveVideo(Anime match, int episodeNumber,
+      {Anime? catalog}) async {
     final eps = await getEpisodes(match);
     Episode? target;
     switch (eps) {

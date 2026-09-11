@@ -222,6 +222,64 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
     }
   }
 
+  /// Season number from a catalog title ("X 4th Season" → 4,
+  /// "X Season 2" → 2). Null when the title carries no season — the
+  /// catalog entry then covers the series from S1 (relative == absolute).
+  static int? seasonFromCatalogName(String name) {
+    final lower = name.toLowerCase();
+    var m =
+        RegExp(r'(\d+)\s*(?:st|nd|rd|th)?\s*season\b').firstMatch(lower);
+    if (m != null) return int.tryParse(m.group(1)!);
+    m = RegExp(r'\bseason\s*(\d+)\b').firstMatch(lower);
+    if (m != null) return int.tryParse(m.group(1)!);
+    return null;
+  }
+
+  /// Season-aware resolve: the catalog (AniList) splits seasons into separate
+  /// entries ("... 4th Season", grid 1..21) while AnimeFire serves them on one
+  /// combined page with absolute numbers (S4E21 == abs 93). Matching the raw
+  /// [episodeNumber] would land on S1E21. When [catalog] names a season, the
+  /// number is season-relative: take the Nth episode of that season.
+  /// Falls back to absolute matching (base behavior) when there's no season
+  /// hint or the season isn't on the page.
+  @override
+  Future<List<VideoSource>> resolveVideo(Anime match, int episodeNumber,
+      {Anime? catalog}) async {
+    final eps = await getEpisodes(match);
+    Episode? target;
+    switch (eps) {
+      case Success(:final data):
+        final season =
+            catalog == null ? null : seasonFromCatalogName(catalog.name);
+        if (season != null) {
+          final inSeason =
+              data.where((e) => e.season == season).toList();
+          if (episodeNumber >= 1 && episodeNumber <= inSeason.length) {
+            target = inSeason[episodeNumber - 1];
+          }
+        }
+        target ??= () {
+          for (final e in data) {
+            if (int.tryParse(e.number) == episodeNumber) return e;
+          }
+          return null;
+        }();
+      case Failure():
+      case Loading():
+        return const [];
+    }
+    if (target == null) return const [];
+
+    final vs = await getVideoSources(target, anime: match);
+    switch (vs) {
+      case Success(:final data):
+        return data;
+      case Failure():
+      case Loading():
+        return const [];
+    }
+  }
+
   @override
   Future<ScraperResult<List<VideoSource>>> getVideoSources(
     Episode episode, {

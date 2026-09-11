@@ -137,10 +137,10 @@ class _SlowAdapter extends AnimeSourceAdapter {
   }
 
   @override
-  Future<List<VideoSource>> resolveVideo(
-      Anime match, int episodeNumber) async {
+  Future<List<VideoSource>> resolveVideo(Anime match, int episodeNumber,
+      {Anime? catalog}) async {
     await Future.delayed(delay);
-    return super.resolveVideo(match, episodeNumber);
+    return super.resolveVideo(match, episodeNumber, catalog: catalog);
   }
 
   @override
@@ -479,6 +479,61 @@ void main() {
       );
       expect(sources.map((s) => s.url),
           contains('https://akumast.net/i/dub/m.jpg'));
+    });
+
+    test('seasonFromCatalogName extrai a temporada do título', () {
+      expect(
+          AnimeFireAdapter.seasonFromCatalogName(
+              'Tensei Shitara Slime Datta Ken 4th Season'),
+          4);
+      expect(
+          AnimeFireAdapter.seasonFromCatalogName(
+              'That Time I Got Reincarnated as a Slime Season 2'),
+          2);
+      expect(AnimeFireAdapter.seasonFromCatalogName('Black Clover 2nd Season'),
+          2);
+      expect(AnimeFireAdapter.seasonFromCatalogName('Black Clover'), isNull);
+      expect(
+          AnimeFireAdapter.seasonFromCatalogName(
+              'That Time I Got Reincarnated as a Slime'),
+          isNull);
+    });
+
+    test('catálogo "2nd Season" EP1 → S2E1 (não S1E1)', () async {
+      const s1e1Json = '{"data":{"id":"s1e1","title":"E1","audio":"Dublado",'
+          '"season":1,"number":1,"streams":[{"audio":"legendado",'
+          '"is_mtl":false,"is_offline":false,'
+          '"url":"https://akumast.net/i/s1e1/m.jpg","qualities":["360p"],'
+          '"chapters":[],"thumbnails":null}]}}';
+      final adapter = seasonAdapter(
+        {
+          's1e1': s1e1Json,
+          's2e1': dashEpisodeJson(
+              qualitiesDub: const ['480p'], qualitiesLeg: const ['480p']),
+        },
+        seasonAnimeJson,
+      );
+      final match = Anime(
+          name: 'Black Clover',
+          url: 'https://animefire.io/anime/bc789',
+          source: AnimeSource.animeFire);
+      // Sem hint de temporada: absoluto 1 == S1E1.
+      final abs = await adapter.resolveVideo(match, 1);
+      expect(abs.map((s) => s.url),
+          contains('https://akumast.net/i/s1e1/m.jpg'));
+      // Com hint: relativo 1 da S2 == S2E1.
+      final rel = await adapter.resolveVideo(
+        match,
+        1,
+        catalog: Anime(
+            name: 'Black Clover 2nd Season',
+            url: '',
+            source: AnimeSource.anilist),
+      );
+      expect(rel.map((s) => s.url),
+          contains('https://akumast.net/i/dub/m.jpg'));
+      expect(rel.map((s) => s.url),
+          isNot(contains('https://akumast.net/i/s1e1/m.jpg')));
     });
 
     test('getVideoSources multi-quality → Auto + 1 fonte por qualidade',

@@ -320,7 +320,8 @@ class AnimeRepository {
         }
 
         // 3. Resolve the stream(s) of episode N on that page.
-        final sources = await step(() => adapter.resolveVideo(match, episodeNumber));
+        final sources = await step(() =>
+            adapter.resolveVideo(match, episodeNumber, catalog: anime));
         if (sources.isEmpty) {
           // Page exists but no video resolved (Blogger SPA, or the episode just
           // isn't indexable here). The persisted match is kept so the next tap
