@@ -102,6 +102,36 @@ class _FastAdapter extends AnimeSourceAdapter {
   }
 }
 
+/// Adapter que explode no match: prova que throw/timeout cai em `errored`
+/// (visível, com retry) em vez de sumir em silêncio de todos os conjuntos.
+class _ThrowingAdapter extends AnimeSourceAdapter {
+  @override
+  AnimeSource get source => AnimeSource.goyabu;
+
+  @override
+  Future<ScraperResult<List<Anime>>> search(String query) async {
+    throw StateError('boom');
+  }
+
+  @override
+  Future<ScraperResult<List<Episode>>> getEpisodes(Anime anime) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<ScraperResult<List<VideoSource>>> getVideoSources(
+    Episode episode, {
+    Anime? anime,
+  }) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<AvailabilityReport> checkAvailability(String animeName) async {
+    return AvailabilityReport(source: source, animeName: animeName);
+  }
+}
+
 /// Slow adapter: page match and video extraction take [delay] each, proving the
 /// partial gate returns before a source like this finishes.
 class _SlowAdapter extends AnimeSourceAdapter {
@@ -175,6 +205,17 @@ void main() {
     expect(res.providers, isEmpty);
     expect(res.notFound, isEmpty);
     expect(res.matchedUnavailable, contains(AnimeSource.animeFire));
+  });
+
+  test('throw no resolve → errored (não some em silêncio)', () async {
+    final repo = AnimeRepository(adapters: [_ThrowingAdapter()]);
+    final res = await repo.resolveProvidersForEpisode(_anime(id: 24), 1);
+
+    expect(res.providers, isEmpty);
+    expect(res.matchedUnavailable, isEmpty);
+    expect(res.notFound, isEmpty);
+    expect(res.errored, contains(AnimeSource.goyabu));
+    expect(res.complete, isTrue);
   });
 
   test('página não achada → notFound', () async {

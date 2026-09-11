@@ -1104,6 +1104,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   String? _error;
   Map<AnimeSource, List<VideoSource>>? _providers;
   Set<AnimeSource> _matchedUnavailable = {};
+  Set<AnimeSource> _errored = {};
   AnimeSource? _selectedProvider;
 
   /// Áudio escolhido no passo intermediário (lowercase, ex. "dublado").
@@ -1166,6 +1167,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     setState(() {
       _error = null;
       _matchedUnavailable = resolution.matchedUnavailable;
+      _errored = resolution.errored;
       if (resolution.providers.isNotEmpty) {
         // Troca de fonte invalida o áudio escolhido (era de outra lista).
         if (nextBest != _selectedProvider) _selectedAudio = null;
@@ -1379,6 +1381,8 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   ///    airing info) → "ainda não lançado" with the predicted date;
   ///  - at least one page matched but its extractor failed (e.g. Blogger SPA)
   ///    → the episode exists, the video just isn't supported;
+  ///  - providers threw/timed out and nothing else delivered → network
+  ///    failure with retry (instead of silence);
   ///  - no page matched at all → generic not found.
   Widget _buildEmptyProviders() {
     final notAired = notAiredMessage(
@@ -1386,6 +1390,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
       anime: widget.anime,
     );
     final unavailable = _matchedUnavailable.isNotEmpty;
+    final failed = _errored.isNotEmpty && !unavailable;
     return Padding(
       padding: const EdgeInsets.all(8),
       child: Column(
@@ -1405,7 +1410,9 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
                 ? 'Episódio ainda não lançado'
                 : unavailable
                     ? 'Episódio sem vídeo disponível'
-                    : 'Nenhuma fonte disponível',
+                    : failed
+                        ? 'Falha ao buscar fontes'
+                        : 'Nenhuma fonte disponível',
             style: const TextStyle(
                 color: Colors.white,
                 fontSize: 20,
@@ -1419,10 +1426,14 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
                         'vídeo não é suportado por ela neste momento (player '
                         'de vídeo sem stream recuperável). Pode ser que outra '
                         'fonte sirva o episódio.'
-                    : 'Nenhuma fonte resolveu um stream para o Ep '
-                        '${widget.episode.number} deste anime agora. '
-                        'Possíveis motivos: Cloudflare, fonte fora do ar ou o '
-                        'episódio ainda não foi indexado.'),
+                    : failed
+                        ? 'As fontes falharam com erro de rede ou tempo '
+                            'esgotado e nenhuma entregou vídeo. Toque em '
+                            'tentar novamente.'
+                        : 'Nenhuma fonte resolveu um stream para o Ep '
+                            '${widget.episode.number} deste anime agora. '
+                            'Possíveis motivos: Cloudflare, fonte fora do ar ou o '
+                            'episódio ainda não foi indexado.'),
             style: const TextStyle(
               color: ThemeConstants.textSecondary,
               fontSize: 14,
@@ -1454,6 +1465,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
                     _loading = true;
                     _providers = null;
                     _matchedUnavailable = {};
+                    _errored = {};
                   });
                   _resolveProviders();
                 },

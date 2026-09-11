@@ -23,6 +23,11 @@ class EpisodeResolution {
   final Set<AnimeSource> matchedUnavailable;
   final Set<AnimeSource> notFound;
 
+  /// Providers that threw or timed out (8s step budget). Unlike the other
+  /// sets this is transient — a retry may succeed — so the dialog offers
+  /// "try again" instead of silence when nothing else delivered.
+  final Set<AnimeSource> errored;
+
   /// True when every implemented provider has already been asked (cache hit or
   /// the full fan-out finished). During a progressive (`partial`) resolution
   /// the UI uses this to keep a loading state until the last provider lands —
@@ -33,6 +38,7 @@ class EpisodeResolution {
     required this.providers,
     required this.matchedUnavailable,
     required this.notFound,
+    this.errored = const {},
     this.complete = true,
   });
 }
@@ -219,6 +225,7 @@ class AnimeRepository {
         providers: cached,
         matchedUnavailable: const {},
         notFound: const {},
+        errored: const {},
         complete: true,
       );
       // BUGFIX (fontes não carregam na 2ª abertura): o cache hit retornava antes
@@ -233,6 +240,7 @@ class AnimeRepository {
     final results = <AnimeSource, List<VideoSource>>{};
     final matchedUnavailable = <AnimeSource>{};
     final notFound = <AnimeSource>{};
+    final errored = <AnimeSource>{};
     final adapters = _adapters.where((a) => a.implemented).toList();
     final done = <AnimeSource>{};
 
@@ -247,6 +255,7 @@ class AnimeRepository {
         providers: ordered,
         matchedUnavailable: {...matchedUnavailable},
         notFound: {...notFound},
+        errored: {...errored},
         complete: done.length == adapters.length,
       );
     }
@@ -331,6 +340,9 @@ class AnimeRepository {
         }
         results[src] = sources;
       } catch (e) {
+        // Throw/timeout: classifica em vez de sumir — o diálogo mostra
+        // "falhou, tente de novo" em vez de silêncio.
+        errored.add(src);
         debugPrint(
             '[Repo] resolve ep $episodeNumber on $src failed: $e');
       } finally {
