@@ -335,6 +335,12 @@ class DooPlayAdapter extends AnimeSourceAdapter {
       var api = _playerApiRe.firstMatch(blob ?? '')?.group(1);
       if (api == null || api.isEmpty) {
         api = '$baseUrl/wp-json/dooplayer/v2/';
+      } else {
+        // O blob é JSON cru: `player_api` vem com escapes (`\/`). Sem
+        // unescape, o `\` vira `/` no Uri.parse e o host esvazia
+        // (`https:////host//wp-json...` → "No host specified"). Visto ao
+        // vivo no animesonlinehdk.
+        api = api.replaceAll(r'\/', '/');
       }
       final apiBase = api.startsWith('http') ? api : '$baseUrl$api';
       final apiUrl = Uri.parse('$apiBase$post/$type/$nume');

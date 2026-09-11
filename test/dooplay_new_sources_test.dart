@@ -165,6 +165,37 @@ void main() {
       expect(eps.first.url, 'https://animesonlinehdk.com/episodes/naruto-1x1/');
     });
 
+    test('player_api com escapes JSON (\\/) monta URL válida', () async {
+      // Ao vivo o HDK serve `"player_api":"https:\/\/...\/v2\/"`; sem
+      // unescape o `\` vira `/` no Uri.parse e o host esvazia
+      // (`https:////host//wp-json...` → "No host specified").
+      const direct = 'https://cdn.example.com/naruto/01.mp4';
+      var wpJsonHits = 0;
+      final adapter = DooPlayAdapter(
+        source: AnimeSource.animesOnlineHdk,
+        client: MockClient((req) async {
+          if (req.url.path == '/episodes/naruto-1x1/') {
+            return _ok(_hdkEpisode);
+          }
+          if (req.url.host == 'animesonlinehdk.com' &&
+              req.url.path == '/wp-json/dooplayer/v2/20915/tv/1') {
+            wpJsonHits++;
+            return _json('{"embed_url":"$direct","type":"mp4"}');
+          }
+          if (req.url.path.endsWith('.mp4')) return _probe();
+          return http.Response('nf', 404);
+        }),
+      );
+      final result = await adapter.getVideoSources(
+        Episode(number: '1', url: 'https://animesonlinehdk.com/episodes/naruto-1x1/'),
+        anime: Anime(name: 'Naruto', url: 'https://animesonlinehdk.com/tvshows/naruto/'),
+      );
+      expect(result, isA<Success<List<VideoSource>>>());
+      expect(
+          (result as Success<List<VideoSource>>).data.single.url, direct);
+      expect(wpJsonHits, 1);
+    });
+
     test('getVideoSources wp_json → blogger embed → graceful Failure', () async {
       final adapter = DooPlayAdapter(
         source: AnimeSource.animesOnlineHdk,

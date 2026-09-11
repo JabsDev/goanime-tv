@@ -65,6 +65,24 @@ void main() {
     expect(pick.name, 'One Piece');
   });
 
+  test('hentai candidate never wins when the query has no hentai', () {
+    final cands = <Anime>[
+      Anime(
+        name: 'Naruto Hentai',
+        url: 'https://animeplayer.com.br/anime/naruto-hentai',
+        source: AnimeSource.animePlayer,
+      ),
+      Anime(
+        name: 'Naruto',
+        url: 'https://animeplayer.com.br/anime/naruto',
+        source: AnimeSource.animePlayer,
+      ),
+    ];
+    final pick = AnimeSourceAdapter.bestMatch(
+        'Naruto', cands, AnimeSource.animePlayer);
+    expect(pick.name, 'Naruto');
+  });
+
   test('other sources (non-AnimeFire) still resolve a plain exact match',
       () {
     final cands = <Anime>[

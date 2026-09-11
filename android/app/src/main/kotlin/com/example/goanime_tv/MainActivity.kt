@@ -13,6 +13,7 @@ class MainActivity : FlutterActivity() {
         // update vive enquanto a Activity existe.
         updaterChannel = UpdaterChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         updaterChannel?.register()
+        CodecsChannel(flutterEngine.dartExecutor.binaryMessenger).register()
     }
 
     // A instalação via ACTION_INSTALL_PACKAGE devolve o resultado aqui

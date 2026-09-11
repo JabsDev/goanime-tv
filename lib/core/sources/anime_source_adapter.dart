@@ -113,7 +113,17 @@ abstract class AnimeSourceAdapter {
       'gaiden',
       'episode-of',
     ];
-    const nameSideTokens = ['film', 'movie', 'ova', 'special', 'gaiden', 'recap'];
+    const nameSideTokens = [
+      'film',
+      'movie',
+      'ova',
+      'special',
+      'gaiden',
+      'recap',
+      // Visto ao vivo: animePlayer devolve "Naruto Hentai" em 1º para a
+      // busca "Naruto" e o match grudava no hentai.
+      'hentai',
+    ];
     int score(Anime a) {
       final t = normalize(a.name);
       final u = a.url.toLowerCase();

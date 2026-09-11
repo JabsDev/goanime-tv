@@ -34,6 +34,11 @@ class DashManifestProxy {
   final _docs = <String, String>{};
   var _counter = 0;
 
+  /// Codecs das Representations de vídeo do último manifesto servido
+  /// (ex. `{'av01.0.08M.08'}`). Vazio quando o MPD não declara `codecs`
+  /// — o chamador trata como desconhecido (fail-open, tenta tocar).
+  Set<String> lastVideoCodecs = const {};
+
   /// Fetches [manifestUrl], rewrites it ([rewriteManifest]) and serves it as
   /// `/af-<n>.mpd`. [height] selects the video Representation (matched by its
   /// `height` attribute); null serves the full adaptive manifest.
@@ -49,6 +54,7 @@ class DashManifestProxy {
     if (res.statusCode != 200) {
       throw HttpException('Manifest fetch failed: ${res.statusCode}');
     }
+    lastVideoCodecs = videoCodecs(mpd: res.body);
     final doc = rewriteManifest(mpd: res.body, base: uri, height: height);
     final server = _server ??= await _serve();
     final path = '/af-${_counter++}.mpd';
@@ -143,6 +149,27 @@ class DashManifestProxy {
     buf.write(out.substring(cursor));
     return buf.toString();
   }
+
+  /// Codecs das Representations de vídeo (`mimeType="video..."`) do MPD.
+  /// Só o que o proxy precisa saber: se tudo é `av01`, um aparelho sem
+  /// decoder AV1 toca som sobre tela preta — o player avisa em vez disso.
+  @visibleForTesting
+  static Set<String> videoCodecs({required String mpd}) {
+    final out = <String>{};
+    final repRe = RegExp(r'<Representation\b[^>]*>', dotAll: true);
+    for (final m in repRe.allMatches(mpd)) {
+      final tag = m.group(0)!;
+      if (!tag.contains('mimeType="video')) continue;
+      final c =
+          RegExp(r'codecs="([^"]+)"').firstMatch(tag)?.group(1);
+      if (c != null && c.isNotEmpty) out.add(c);
+    }
+    return out;
+  }
+
+  /// True quando o manifesto declara vídeo e é tudo AV1.
+  static bool isAv1Only(Set<String> codecs) =>
+      codecs.isNotEmpty && codecs.every((c) => c.startsWith('av01'));
 
   static String _absolutize(String mpd, Uri base) {
     final origin = base.origin;

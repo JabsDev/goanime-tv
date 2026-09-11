@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/local_storage.dart';
+import '../../core/utils/device_codecs.dart';
 import '../../core/utils/quality_picker.dart';
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
@@ -196,6 +197,22 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
         debugPrint('[ExoDash] Dash proxy: ${src.quality} -> $playUrl');
       } catch (e) {
         debugPrint('[ExoDash] Dash proxy failed, direct fallback: $e');
+      }
+      // AV1-only num aparelho sem decoder = som sobre tela preta (visto no
+      // box Amlogic do projetor: só o AAC aloca, nenhum decoder de vídeo).
+      // Avisa e sugere outra fonte H.264 em vez de tocar às cegas.
+      if (DashManifestProxy.isAv1Only(_dashProxy.lastVideoCodecs) &&
+          !await DeviceCodecs.supportsAv1()) {
+        _loadTimeout?.cancel();
+        if (!mounted) return;
+        debugPrint('[ExoDash] AV1-only sem decoder — aviso em vez de tela preta');
+        setState(() {
+          _error = 'Este aparelho não decodifica AV1 (ficaria tela preta '
+              'com som). Volte e escolha outra Fonte — Goyabu ou Animes '
+              'Online servem este episódio em H.264.';
+          _isLoading = false;
+        });
+        return;
       }
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(playUrl),

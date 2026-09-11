@@ -100,6 +100,58 @@ void main() {
     }
   });
 
+  group('videoCodecs (tela preta AV1 no projetor)', () {
+    const av1Mpd = '''<?xml version="1.0"?>
+<MPD type="static">
+  <Period>
+    <AdaptationSet id="1" contentType="video">
+      <Representation id="V480" mimeType="video/mp4" codecs="av01.0.04M.08" width="854" height="480" bandwidth="850003">
+      </Representation>
+      <Representation id="V1080" mimeType="video/mp4" codecs="av01.0.08M.08" width="1920" height="1080" bandwidth="3431186">
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="2" contentType="audio">
+      <Representation id="A" mimeType="audio/mp4" codecs="mp4a.40.2" bandwidth="131785">
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>''';
+
+    test('manifesto AV1-only (S4E21 real) → codecs av01, sem o áudio', () {
+      final codecs = DashManifestProxy.videoCodecs(mpd: av1Mpd);
+      expect(codecs, {'av01.0.04M.08', 'av01.0.08M.08'});
+      expect(DashManifestProxy.isAv1Only(codecs), isTrue);
+    });
+
+    test('H.264 não é AV1-only', () {
+      const avcMpd = '''<MPD><Period>
+<AdaptationSet contentType="video">
+<Representation mimeType="video/mp4" codecs="avc1.64001f" width="1280" height="720"></Representation>
+</AdaptationSet></Period></MPD>''';
+      final codecs = DashManifestProxy.videoCodecs(mpd: avcMpd);
+      expect(codecs, {'avc1.64001f'});
+      expect(DashManifestProxy.isAv1Only(codecs), isFalse);
+    });
+
+    test('sem codecs declarados → vazio (fail-open, tenta tocar)', () {
+      final codecs = DashManifestProxy.videoCodecs(mpd: _mpd);
+      expect(codecs, isEmpty);
+      expect(DashManifestProxy.isAv1Only(codecs), isFalse);
+    });
+
+    test('serveManifest preenche lastVideoCodecs', () async {
+      final proxy = DashManifestProxy(
+        client: MockClient((_) async => http.Response(av1Mpd, 200)),
+      );
+      try {
+        await proxy.serveManifest(manifestUrl: 'https://akumast.net/i/X/m.jpg');
+        expect(proxy.lastVideoCodecs, contains('av01.0.08M.08'));
+      } finally {
+        await proxy.close();
+      }
+    });
+  });
+
   test('fetch 404 propaga para o chamador cair no fallback direto', () async {
     final proxy = DashManifestProxy(
       client: MockClient((_) async => http.Response('nope', 404)),
