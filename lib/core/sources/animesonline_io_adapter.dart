@@ -43,8 +43,13 @@ class AnimesOnlineIoAdapter extends AnimeSourceAdapter {
 
   @override
   AnimeSource get source => AnimeSource.animesOnlineIo;
+
+  /// Desligada no fan-out: busca/episódios/desembaralho funcionam, mas o
+  /// file final do Google Video dá 403 fora do fluxo mediado pelo site
+  /// (IP-bound + service worker; provado no datacenter E no residencial).
+  /// Mantida + testada para religar se o gate cair.
   @override
-  bool get implemented => true;
+  bool get implemented => false;
 
   @override
   Future<ScraperResult<List<Anime>>> search(String query) async {
