@@ -87,6 +87,8 @@ class Anime {
         return 'Animes Orion';
       case AnimeSource.animesHd:
         return 'AnimesHD';
+      case AnimeSource.animesOnlineIo:
+        return 'Animes Online IO';
     }
   }
 }
@@ -107,6 +109,7 @@ enum AnimeSource {
   animesOnlineHdk,
   animesOrion,
   animesHd,
+  animesOnlineIo,
 }
 
 extension AnimeSourcePriority on AnimeSource {
@@ -125,7 +128,8 @@ extension AnimeSourcePriority on AnimeSource {
       this == AnimeSource.animePlay ||
       this == AnimeSource.animesOnlineHdk ||
       this == AnimeSource.animesOrion ||
-      this == AnimeSource.animesHd;
+       this == AnimeSource.animesHd ||
+       this == AnimeSource.animesOnlineIo;
 
   /// Ordering priority for display/selection: lower = higher priority.
   /// PT-BR sources with reliable playback come first; AllAnime (EN, currently
@@ -160,8 +164,10 @@ extension AnimeSourcePriority on AnimeSource {
         return 12;
       case AnimeSource.animePlayer:
         return 13;
-      case AnimeSource.allAnime:
+      case AnimeSource.animesOnlineIo:
         return 14;
+      case AnimeSource.allAnime:
+        return 15;
     }
   }
 }

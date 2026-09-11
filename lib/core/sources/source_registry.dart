@@ -3,6 +3,7 @@ import '../../data/models/anime.dart';
 import '../scraper/scraper_result.dart';
 import '../sources/anime_source_adapter.dart';
 import '../sources/anime_fire_adapter.dart';
+import '../sources/animesonline_io_adapter.dart';
 import '../sources/all_anime_adapter.dart';
 import '../sources/goyabu_adapter.dart';
 import '../sources/dooplay_adapter.dart';
@@ -29,6 +30,7 @@ class SourceRegistry {
     DooPlayAdapter(source: AnimeSource.animesOrion),
     DooPlayAdapter(source: AnimeSource.animesHd),
     AnimePlayerAdapter(),
+    AnimesOnlineIoAdapter(),
     AllAnimeAdapter(),
   ];
 
@@ -47,6 +49,7 @@ class SourceRegistry {
       AnimeSource.animesOrion,
       AnimeSource.animesHd,
       AnimeSource.animePlayer,
+      AnimeSource.animesOnlineIo,
     ];
   }
 
@@ -74,14 +77,16 @@ class SourceRegistry {
         return 9;
       case AnimeSource.animePlayer:
         return 10;
-      case AnimeSource.allAnime:
+      case AnimeSource.animesOnlineIo:
         return 11;
-      case AnimeSource.betterAnime:
+      case AnimeSource.allAnime:
         return 12;
-      case AnimeSource.animesRoll:
+      case AnimeSource.betterAnime:
         return 13;
-      case AnimeSource.anilist:
+      case AnimeSource.animesRoll:
         return 14;
+      case AnimeSource.anilist:
+        return 15;
     }
   }
 
@@ -91,8 +96,9 @@ class SourceRegistry {
              source == AnimeSource.goyabu && a is GoyabuAdapter ||
              source == AnimeSource.animePlayer && a is AnimePlayerAdapter ||
              source == AnimeSource.allAnime && a is AllAnimeAdapter ||
-             a is DooPlayAdapter && a.source == source ||
-             a is AnimesOnlineAdapter && a.source == source,
+              a is DooPlayAdapter && a.source == source ||
+              a is AnimesOnlineAdapter && a.source == source ||
+              a is AnimesOnlineIoAdapter && a.source == source,
       orElse: () => _adapters.first,
     );
   }
