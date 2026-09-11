@@ -149,10 +149,21 @@ class AnimePlayerAdapter extends AnimeSourceAdapter {
     }
   }
 
-  int? _episodeNumber(String url) {
-    final m = RegExp(r'episodio[\s-]*(\d+)').firstMatch(url);
-    return m == null ? null : int.tryParse(m.group(1)!);
+  /// Episode number from the URL slug. Current scheme is `-SxE`
+  /// (`naruto-1x1` → 1); the legacy `-episodio-N` form is kept as fallback.
+  /// Multi-season slugs (`2x1`) collapse to the in-season number — same
+  /// limitation as matching by number everywhere else; previously EVERYTHING
+  /// collapsed to `0` and no episode ever matched.
+  @visibleForTesting
+  int? episodeNumber(String url) {
+    var m = RegExp(r'episodio[\s-]*(\d+)').firstMatch(url);
+    if (m != null) return int.tryParse(m.group(1)!);
+    m = RegExp(r'(\d+)x(\d+)/?$').firstMatch(url);
+    if (m != null) return int.tryParse(m.group(2)!);
+    return null;
   }
+
+  int? _episodeNumber(String url) => episodeNumber(url);
 
   @override
   Future<ScraperResult<List<VideoSource>>> getVideoSources(
