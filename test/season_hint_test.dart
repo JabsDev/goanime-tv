@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:goanime_tv/core/sources/anime_source_adapter.dart';
 import 'package:goanime_tv/core/utils/text_utils.dart';
+import 'package:goanime_tv/data/models/anime.dart';
 
 /// Shared season-hint contract (revisao-critica §2.3 item 10): every adapter
 /// extracts the season from the SAME neutral owner ([TextUtils.seasonOf]) and
@@ -58,6 +59,19 @@ void main() {
           AnimeSourceAdapter.seasonOfCandidateUrl(
               'https://site.cc/anime/naruto-2?x=1'),
           2);
+      // Keyword-anchored tails (exact — `season`/`temporada` required).
+      expect(
+          AnimeSourceAdapter.seasonOfCandidateUrl(
+              'https://animesonline.cloud/anime/tensei-shitara-slime-datta-ken-4th-season'),
+          4);
+      expect(
+          AnimeSourceAdapter.seasonOfCandidateUrl(
+              'https://site.cc/anime/naruto-season-2'),
+          2);
+      expect(
+          AnimeSourceAdapter.seasonOfCandidateUrl(
+              'https://site.cc/anime/naruto-temporada-2'),
+          2);
     });
 
     test('non-season tails never match', () {
@@ -78,6 +92,45 @@ void main() {
       // 3+ digit tails are IDs/years, not seasons.
       expect(AnimeSourceAdapter.seasonOfCandidateUrl(
           'https://site.cc/anime/naruto-2024'), isNull);
+    });
+  });
+
+  group('AnimeSourceAdapter.pinSeasonPage', () {
+    List<Anime> cands() => [
+          Anime(
+              name: 'Tensei shitara Slime Datta Ken 4',
+              url: 'https://goyabu.io/anime/tensei-shitara-slime-datta-ken',
+              source: AnimeSource.goyabu),
+          Anime(
+              name: 'Tensei shitara Slime Datta Ken 4 S4 page',
+              url: 'https://goyabu.io/anime/tensei-shitara-slime-datta-ken-4',
+              source: AnimeSource.goyabu),
+        ];
+
+    test('entry URL season pins the same-season page (name has no hint)',
+        () {
+      // The base card matches the query EXACTLY — without pinning it would
+      // win and every EP would resolve off-season.
+      final pick = AnimeSourceAdapter.pinSeasonPage(
+        'Tensei shitara Slime Datta Ken 4',
+        cands(),
+        AnimeSource.goyabu,
+        'https://goyabu.io/anime/tensei-shitara-slime-datta-ken-4',
+      );
+      expect(pick.url,
+          'https://goyabu.io/anime/tensei-shitara-slime-datta-ken-4');
+    });
+
+    test('entry without URL season falls back to plain bestMatch', () {
+      final pick = AnimeSourceAdapter.pinSeasonPage(
+        'Tensei shitara Slime Datta Ken 4',
+        cands(),
+        AnimeSource.goyabu,
+        'https://goyabu.io/anime/tensei-shitara-slime-datta-ken',
+      );
+      // Exact-name base card wins — legacy behavior preserved.
+      expect(pick.url,
+          'https://goyabu.io/anime/tensei-shitara-slime-datta-ken');
     });
   });
 }

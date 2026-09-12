@@ -182,6 +182,8 @@ void main() {
       expect(eps.length, 19);
       expect(eps.map((e) => e.number), contains('19'));
       expect(eps.map((e) => e.number), isNot(contains('21')));
+      // Split page grounds the season: every row knows it is S4.
+      expect(eps.map((e) => e.season).toSet(), {4});
     });
 
     test('resolveVideo(S4, 21) → [] (matchedUnavailable honesto)', () async {
@@ -194,6 +196,32 @@ void main() {
           await s4Adapter().resolveVideo(s4Match(), 19, catalog: s4Catalog());
       expect(sources.map((s) => s.url),
           contains('https://api.anivideo.fun/videohls.php?d=ep50818.m3u8'));
+    });
+
+    // resolveAnime season-pinning: the S4 entry NAME ("…Ken 4") carries no
+    // season signal (trailing number is not a season by design), but its URL
+    // does — the S4 page must win over the exact-name base page.
+    test('resolveAnime pins the S4 page from the entry URL season', () async {
+      const searchHtml = '''
+<html><body>
+<article class="boxAN">
+  <a href="https://goyabu.io/anime/tensei-shitara-slime-datta-ken">
+    <img class="cover" src="x.jpg" alt="Tensei shitara Slime Datta Ken 4">
+  </a>
+</article>
+<article class="boxAN">
+  <a href="https://goyabu.io/anime/tensei-shitara-slime-datta-ken-4">
+    <img class="cover" src="x.jpg" alt="Tensei shitara Slime Datta Ken 4 S4">
+  </a>
+</article>
+</body></html>
+''';
+      final adapter = GoyabuAdapter(
+        client: MockClient((req) async => http.Response(searchHtml, 200)),
+      );
+      final pinned = await adapter.resolveAnime(s4Match());
+      expect(pinned?.url,
+          'https://goyabu.io/anime/tensei-shitara-slime-datta-ken-4');
     });
   });
 

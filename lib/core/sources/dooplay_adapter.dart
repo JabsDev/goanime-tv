@@ -267,8 +267,13 @@ class DooPlayAdapter extends AnimeSourceAdapter {
     Episode? target;
     switch (eps) {
       case Success(:final data):
+        // Catalog first; split season pages ground the season in the page
+        // URL (`…-ken-4`) even when the entry NAME carries none (provider
+        // entries while AniList is down). Combined series pages have no
+        // tail season → null → legacy behavior, unchanged.
         final hint =
-            catalog == null ? null : TextUtils.seasonOf(catalog.name);
+            (catalog == null ? null : TextUtils.seasonOf(catalog.name)) ??
+                AnimeSourceAdapter.seasonOfCandidateUrl(match.url);
         if (hint != null) {
           final inSeason = data
               .where((e) => e.season == hint)

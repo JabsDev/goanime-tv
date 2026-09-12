@@ -693,5 +693,32 @@ void main() {
       expect(await adapter.resolveVideo(match, 3, catalog: catalog),
           isNotEmpty);
     });
+
+    test('grade fallback rotula temporadas (AniList fora → absolutos)',
+        () async {
+      // Entry sem episodes (AniList 403): a grade vem do provider combinado
+      // (absolutos 1..4) e cada linha carrega seu T — "EP 1 · T1" nunca lê
+      // como S4E21.
+      final adapter = seasonAdapter(const {}, seasonAnimeJson);
+      final repo = AnimeRepository(adapters: [adapter]);
+      final grid = await repo.getCatalogEpisodes(Anime(
+          name: 'Black Clover Sem Enriquecimento',
+          url: 'https://animefire.io/anime/bc789',
+          source: AnimeSource.animeFire));
+      expect(grid.map((e) => e.number).toList(), [1, 2, 3, 4]);
+      expect(grid.map((e) => e.seasonLabel).toList(), ['T1', 'T1', 'T2', 'T2']);
+    });
+
+    test('grade saudável (AniList ok) não tem badges', () async {
+      final adapter = seasonAdapter(const {}, seasonAnimeJson);
+      final repo = AnimeRepository(adapters: [adapter]);
+      final grid = await repo.getCatalogEpisodes(Anime(
+          name: 'Black Clover Saudável',
+          url: 'https://animefire.io/anime/bc789',
+          source: AnimeSource.animeFire,
+          episodes: 2));
+      expect(grid.map((e) => e.number).toList(), [1, 2]);
+      expect(grid.map((e) => e.seasonLabel).toList(), [isNull, isNull]);
+    });
   });
 }

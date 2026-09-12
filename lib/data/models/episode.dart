@@ -9,11 +9,19 @@ class CatalogEpisode {
   final String? thumbnail;
   final String? description;
 
+  /// Season badge for provider-fallback grids (AniList down): "T4" when the
+  /// row came from a combined provider page whose episodes carry an
+  /// unambiguous season (AnimeFire absolute numbers). Null on healthy
+  /// AniList grids (relative 1..N needs no badge) and whenever the season
+  /// is ambiguous — the badge only ever states provider-grounded truth.
+  final String? seasonLabel;
+
   const CatalogEpisode({
     required this.number,
     this.title,
     this.thumbnail,
     this.description,
+    this.seasonLabel,
   });
 }
 

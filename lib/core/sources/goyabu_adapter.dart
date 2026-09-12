@@ -166,6 +166,9 @@ class GoyabuAdapter extends AnimeSourceAdapter {
       }
 
       final episodes = <Episode>[];
+      // Split season pages (`…-ken-4`) ground the season in the page URL —
+      // episode links are bare `/$id`, so this is the only season signal.
+      final pageSeason = AnimeSourceAdapter.seasonOfCandidateUrl(anime.url);
       for (final raw in decoded) {
         if (raw is! Map) continue;
         final id = raw['id']?.toString() ?? '';
@@ -178,6 +181,7 @@ class GoyabuAdapter extends AnimeSourceAdapter {
           title: raw['episode_name']?.toString(),
           source: source,
           owner: anime,
+          season: pageSeason,
         ));
       }
       if (episodes.isEmpty) {

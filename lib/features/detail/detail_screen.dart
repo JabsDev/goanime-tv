@@ -845,8 +845,12 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                 color: Colors.black.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(4),
               ),
+              // Provider-fallback grids (AniList down) on combined pages are
+              // absolute: "EP 21 · T1" reads as S1, never as S4E21.
               child: Text(
-                'EP ${widget.episode.number}',
+                widget.episode.seasonLabel == null
+                    ? 'EP ${widget.episode.number}'
+                    : 'EP ${widget.episode.number} · ${widget.episode.seasonLabel}',
                 style: const TextStyle(
                   color: ThemeConstants.white,
                   fontSize: 12,
@@ -1280,7 +1284,9 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Episódio ${widget.episode.number}',
+                        widget.episode.seasonLabel == null
+                            ? 'Episódio ${widget.episode.number}'
+                            : 'Episódio ${widget.episode.number} · ${widget.episode.seasonLabel}',
                         style: const TextStyle(
                           color: ThemeConstants.textSecondary,
                           fontSize: 14,

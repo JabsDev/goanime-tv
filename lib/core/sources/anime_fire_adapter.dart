@@ -247,8 +247,12 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
     Episode? target;
     switch (eps) {
       case Success(:final data):
+        // Catalog first; split season pages ground the season in the page
+        // URL even when the entry NAME carries none. Opaque /anime/<id>
+        // URLs carry no season → null → legacy absolute behavior.
         final season =
-            catalog == null ? null : seasonFromCatalogName(catalog.name);
+            (catalog == null ? null : seasonFromCatalogName(catalog.name)) ??
+                AnimeSourceAdapter.seasonOfCandidateUrl(match.url);
         if (season != null) {
           final inSeason = data.where((e) => e.season == season).toList()
             ..sort((a, b) =>

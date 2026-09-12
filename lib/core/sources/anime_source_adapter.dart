@@ -41,6 +41,28 @@ abstract class AnimeSourceAdapter {
   /// Check availability with detailed diagnosis
   Future<AvailabilityReport> checkAvailability(String animeName);
 
+  /// Season pinning: when [entryUrl] itself carries a season tail
+  /// (`…-ken-4` → 4, `…-4th-season` → 4, e.g. a split S4 entry whose NAME
+  /// has no season signal), candidates on that same season page win over the
+  /// base page — otherwise a season entry silently re-pins S1 and every
+  /// episode resolves off-season. Single same-season candidate → it;
+  /// several → [bestMatch] among them; none (or no URL season) → plain
+  /// [bestMatch] over all, exactly as before.
+  static Anime pinSeasonPage(String query, List<Anime> candidates,
+      AnimeSource source, String entryUrl) {
+    final entrySeason = seasonOfCandidateUrl(entryUrl);
+    if (entrySeason != null) {
+      final sameSeason = candidates
+          .where((a) => seasonOfCandidateUrl(a.url) == entrySeason)
+          .toList();
+      if (sameSeason.length == 1) return sameSeason.single;
+      if (sameSeason.length > 1) {
+        return bestMatch(query, sameSeason, source);
+      }
+    }
+    return bestMatch(query, candidates, source);
+  }
+
   /// Locates this provider's own page for the catalog [animeRef] (a provider
   /// `Anime` whose `url` points at the video on this source). Runs one
   /// search-by-name; result is meant to be cached/persisted by the caller so
@@ -52,7 +74,7 @@ abstract class AnimeSourceAdapter {
         if (candidates.isEmpty) return null;
         final valid = candidates.where((a) => a.url.isNotEmpty).toList();
         if (valid.isEmpty) return null;
-        return bestMatch(animeRef.name, valid, source);
+        return pinSeasonPage(animeRef.name, valid, source, animeRef.url);
       case Failure():
       case Loading():
         return null;
@@ -206,7 +228,14 @@ abstract class AnimeSourceAdapter {
       path = path.substring(0, path.length - 1);
     }
     final tail = path.split('/').last;
-    final m = RegExp(r'-(\d{1,2})$').firstMatch(tail);
+    // Keyword-anchored tails first: `…-4th-season`, `…-season-4`,
+    // `…-temporada-4` (the `season`/`temporada` keyword makes these exact —
+    // no false-positive risk like bare digits).
+    var m = RegExp(r'-(\d{1,2})(?:st|nd|rd|th)?-season$').firstMatch(tail) ??
+        RegExp(r'-season-(\d{1,2})$').firstMatch(tail) ??
+        RegExp(r'-temporada-(\d{1,2})$').firstMatch(tail);
+    if (m != null) return int.tryParse(m.group(1)!);
+    m = RegExp(r'-(\d{1,2})$').firstMatch(tail);
     if (m == null) return null;
     const nonSeason = {
       'hd', 'online', 'dublado', 'legendado', 'ova', 'movie', 'filme',

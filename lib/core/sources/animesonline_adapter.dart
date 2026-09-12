@@ -78,7 +78,10 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
               .where((a) => a.url.isNotEmpty && _overlaps(q, a.name))
               .toList();
           if (valid.isEmpty) continue;
-          return AnimeSourceAdapter.bestMatch(q, valid, source);
+          // Same-season pinning when the entry URL carries a season
+          // (`…-4th-season` split pages); otherwise plain bestMatch.
+          return AnimeSourceAdapter.pinSeasonPage(
+              q, valid, source, animeRef.url);
         case Failure():
         case Loading():
           continue;

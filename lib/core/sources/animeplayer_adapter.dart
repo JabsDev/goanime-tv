@@ -207,8 +207,11 @@ class AnimePlayerAdapter extends AnimeSourceAdapter {
     Episode? target;
     switch (eps) {
       case Success(:final data):
+        // Catalog first; split season pages ground the season in the page
+        // URL even when the entry NAME carries none. No tail season → legacy.
         final hint =
-            catalog == null ? null : TextUtils.seasonOf(catalog.name);
+            (catalog == null ? null : TextUtils.seasonOf(catalog.name)) ??
+                AnimeSourceAdapter.seasonOfCandidateUrl(match.url);
         if (hint != null) {
           final inSeason = data
               .where((e) => e.season == hint)

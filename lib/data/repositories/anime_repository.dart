@@ -93,8 +93,16 @@ class AnimeRepository {
     }
 
     // Canonical total: AniList count → provider count → digits present in v2.
+    // Provider-fallback grids (AniList down) on combined pages are ABSOLUTE
+    // (AnimeFire 1..94 mixes S1..S4); season labels keep "EP 21" from reading
+    // as S4E21. Only unambiguous number→season mappings label rows.
     var total = anime.episodes ?? 0;
-    if (total <= 0) total = await _episodeCountFromProviders(anime);
+    var seasonLabels = const <int, String>{};
+    if (total <= 0) {
+      final fallback = await _countAndSeasonsFromProviders(anime);
+      total = fallback.total;
+      seasonLabels = fallback.seasonLabels;
+    }
     if (total <= 0) {
       for (final e in v2) {
         final n = int.tryParse(e.number);
@@ -123,6 +131,7 @@ class AnimeRepository {
           title: byNumber[i]?.title,
           thumbnail: byNumber[i]?.thumbnail,
           description: byNumber[i]?.description,
+          seasonLabel: seasonLabels[i],
         ),
     ];
 
@@ -136,7 +145,13 @@ class AnimeRepository {
   /// episode number, not the list length: a partial/paginated provider page
   /// must not shrink the grid. Best effort — no provider is guaranteed to
   /// respond.
-  Future<int> _episodeCountFromProviders(Anime anime) async {
+  ///
+  /// Also returns season labels for rows whose number maps to exactly ONE
+  /// season on that page (AnimeFire absolute 1..94 → T1..T4). Collapsed
+  /// numbers (DooPlay combined: four season-21s) stay unlabeled rather than
+  /// guess — no badge beats a wrong badge.
+  Future<({int total, Map<int, String> seasonLabels})>
+      _countAndSeasonsFromProviders(Anime anime) async {
     for (final adapter in _adapters) {
       if (!adapter.implemented) continue;
       try {
@@ -151,13 +166,28 @@ class AnimeRepository {
         switch (eps) {
           case Success(data: final data):
             var max = 0;
+            final seasonsByNumber = <int, Set<int?>>{};
             for (final e in data) {
               final n = int.tryParse(e.number) ??
                   episodeNumberFromUrl(e.url) ??
                   0;
               if (n > max) max = n;
+              if (n > 0) {
+                seasonsByNumber.putIfAbsent(n, () => {}).add(e.season);
+              }
             }
-            if (max > 0) return max;
+            if (max <= 0) continue;
+            final labels = <int, String>{};
+            for (final entry in seasonsByNumber.entries) {
+              final seasons = entry.value.whereType<int>().toList();
+              // Unambiguous only: exactly one distinct season AND no
+              // season-less episode sharing the number.
+              if (seasons.length == 1 &&
+                  entry.value.length == 1) {
+                labels[entry.key] = 'T${seasons.single}';
+              }
+            }
+            return (total: max, seasonLabels: labels);
           case Failure():
           case Loading():
             break;
@@ -166,7 +196,7 @@ class AnimeRepository {
         continue;
       }
     }
-    return 0;
+    return (total: 0, seasonLabels: const <int, String>{});
   }
 
   /// Page-level health probe for a persisted provider match: true when the

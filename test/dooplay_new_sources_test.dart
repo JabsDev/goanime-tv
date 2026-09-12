@@ -578,5 +578,26 @@ void main() {
       expect(legacy.map((s) => s.url),
           contains('https://cdn.example.com/slime/s2x21.mp4'));
     });
+
+    test('secondary hint: split page URL seasons a hint-less catalog',
+        () async {
+      // Provider entry without season in the NAME (AniList down) on a split
+      // `…-4` page: the page URL grounds season 4 → S4E21, not first-21.
+      final splitMatch = Anime(
+        name: 'Slime Sem Temporada No Nome',
+        url: 'https://betteranime.io/animes/tensei-shitara-slime-datta-ken-4/',
+        source: AnimeSource.betterAnime,
+      );
+      final sources = await slimeAdapter().resolveVideo(
+        splitMatch,
+        21,
+        catalog: Anime(
+            name: 'Slime Sem Temporada No Nome',
+            url: '',
+            source: AnimeSource.anilist),
+      );
+      expect(sources.map((s) => s.url),
+          contains('https://cdn.example.com/slime/s4x21.mp4'));
+    });
   });
 }
