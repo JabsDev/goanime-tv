@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/anilist/anilist_service.dart';
@@ -182,9 +184,12 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
       barrierDismissible: true,
       builder: (ctx) => AlertDialog(
         backgroundColor: ThemeConstants.surface,
+        insetPadding:
+            const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Continuar de onde parou?',
-            style: TextStyle(color: Colors.white)),
+            style: TextStyle(color: Colors.white),
+            overflow: TextOverflow.ellipsis),
         content: Text(
           'O episódio ${_episodes[index].number} parou em $time. '
           'Deseja continuar de onde parou ou recomeçar?',
@@ -367,10 +372,11 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
               left: 16,
               right: 16,
               bottom: 16,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  ClipRRect(
+              child: LayoutBuilder(
+                builder: (ctx, constraints) {
+                  final narrow =
+                      MediaQuery.sizeOf(ctx).width < 600;
+                  final poster = ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: widget.anime.imageUrl.isNotEmpty
                         ? CachedImage(
@@ -393,9 +399,8 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
                             child: const Icon(Icons.movie,
                                 color: ThemeConstants.textSecondary),
                           ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
+                  );
+                  final titleCol = Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
@@ -427,35 +432,105 @@ class _DetailScreenState extends State<DetailScreen> with RouteAware {
                               const SizedBox(width: 12),
                             ],
                             if (widget.anime.episodes != null)
-                              Text(
-                                '${widget.anime.episodes} eps',
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  color: ThemeConstants.textSecondary,
+                              Flexible(
+                                child: Text(
+                                  '${widget.anime.episodes} eps',
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    color: ThemeConstants.textSecondary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                            if (widget.anime.episodes != null) const SizedBox(width: 12),
+                            if (widget.anime.episodes != null)
+                              const SizedBox(width: 12),
                           ],
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  if (widget.anime.status != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: Text(
-                        widget.anime.status!.replaceAll('_', ' '),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: widget.anime.status == 'FINISHED'
-                              ? Colors.green
-                              : Colors.orange,
+                  );
+                  final status = widget.anime.status != null
+                      ? Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Text(
+                            widget.anime.status!.replaceAll('_', ' '),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: widget.anime.status == 'FINISHED'
+                                  ? Colors.green
+                                  : Colors.orange,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        )
+                      : const SizedBox.shrink();
+                  if (!narrow) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        poster,
+                        const SizedBox(width: 16),
+                        titleCol,
+                        const SizedBox(width: 8),
+                        status,
+                      ],
+                    );
+                  }
+                  // Celular retrato: poster acima, título abaixo (sem Row lado a lado).
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      poster,
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.anime.name,
+                        style: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.bold,
+                          color: ThemeConstants.white,
                         ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                ],
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          if (widget.anime.averageScore != null) ...[
+                            const Icon(Icons.star,
+                                color: Colors.amber, size: 16),
+                            const SizedBox(width: 4),
+                            Text(
+                              (widget.anime.averageScore! / 10)
+                                  .toStringAsFixed(1),
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.amber,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                          ],
+                          if (widget.anime.episodes != null)
+                            Flexible(
+                              child: Text(
+                                '${widget.anime.episodes} eps',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: ThemeConstants.textSecondary,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          if (widget.anime.status != null) ...[
+                            const SizedBox(width: 10),
+                            Flexible(child: status),
+                          ],
+                        ],
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ],
@@ -1241,16 +1316,17 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context);
     return Dialog(
       backgroundColor: ThemeConstants.surface,
-      insetPadding: const EdgeInsets.all(32),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: 520,
+          maxWidth: math.min(560, screen.width - 48),
           // B9: muitos providers × qualidades estouravam a altura do dialog
           // na TV (960x540 log.) e cortavam os itens na borda inferior.
-          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+          maxHeight: screen.height * 0.85,
         ),
         padding: const EdgeInsets.all(28),
         child: SingleChildScrollView(

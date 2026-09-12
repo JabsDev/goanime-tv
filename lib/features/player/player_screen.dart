@@ -13,6 +13,7 @@ import '../../core/aniskip/aniskip_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/utils/quality_picker.dart';
+import '../../core/device/device_type.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import 'dash_manifest_proxy.dart';
 import 'resume_seek_tracker.dart';
@@ -142,6 +143,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    DeviceType.lockLandscapeForPlayer();
     _enterImmersive();
     _player = Player();
     _videoController = VideoController(_player);
@@ -818,6 +820,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   @override
   void dispose() {
+    DeviceType.restoreAfterPlayer();
     _exitImmersive();
     WidgetsBinding.instance.removeObserver(this);
     _dashProxy.close();
@@ -1259,12 +1262,16 @@ class _PlayerScreenState extends State<PlayerScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: ThemeConstants.surface,
+        insetPadding:
+            const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         title: const Text('Selecionar Qualidade',
-            style: TextStyle(color: Colors.white)),
+            style: TextStyle(color: Colors.white),
+            overflow: TextOverflow.ellipsis),
         content: ConstrainedBox(
           constraints: BoxConstraints(
             // B9: muitas resoluções estouravam o AlertDialog na TV (540dp).
             maxHeight: MediaQuery.sizeOf(ctx).height * 0.7,
+            maxWidth: 512,
           ),
           child: SingleChildScrollView(
             child: Column(

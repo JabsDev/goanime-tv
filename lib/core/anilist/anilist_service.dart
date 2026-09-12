@@ -17,7 +17,7 @@ import '../utils/text_utils.dart';
 /// Categorized AniList connectivity status. Drives the Home banner: instead of
 /// a single generic error, the UI tells the user whether we're offline, being
 /// rate-limited, IP-blocked by Cloudflare, session-expired or facing a 5xx.
-enum AniListStatus { ok, offline, ipBlocked, rateLimited, authError, serverError }
+enum AniListStatus { ok, offline, ipBlocked, rateLimited, authError, serverError, serviceSuspended }
 
 /// Ponytail: Manages AniList API requests and authentication state.
 class AniListService {
@@ -86,6 +86,13 @@ class AniListService {
       return;
     }
     if (statusCode == 403 || body.contains('1020')) {
+      // Global API suspension ("temporarily disabled...") is NOT an IP
+      // block: retrying in minutes won't help and the message must not blame
+      // the user's network. Cloudflare 1020 / custom block text stays ipBlocked.
+      if (body.contains('temporarily disabled')) {
+        lastErrorStatus = AniListStatus.serviceSuspended;
+        return;
+      }
       lastErrorStatus = AniListStatus.ipBlocked;
       return;
     }

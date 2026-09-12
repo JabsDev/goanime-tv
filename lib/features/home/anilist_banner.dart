@@ -37,6 +37,11 @@ class AniListStatusBanner extends StatelessWidget {
       'AniList indisponível no momento',
       'Tente novamente em instantes',
     ),
+    AniListStatus.serviceSuspended: (
+      Icons.pause_circle_outline,
+      'API do AniList suspensa temporariamente',
+      'Busca e episódios via providers; sincronização volta sozinha',
+    ),
   };
 
   @override

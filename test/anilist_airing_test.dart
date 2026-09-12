@@ -71,4 +71,23 @@ void main() {
     expect(result, isEmpty);
     expect(AniListService.lastErrorStatus, AniListStatus.serverError);
   });
+
+  test('403 suspensão global → serviceSuspended (não ipBlocked)', () async {
+    AniListService.httpOverride = MockClient(
+      (req) async => http.Response(
+          '{"errors":[{"message":"The AniList API has been temporarily '
+          'disabled due to severe stability issues.","status":403}]}',
+          403),
+    );
+    expect(await AniListService.getAiringTomorrow(), isEmpty);
+    expect(AniListService.lastErrorStatus, AniListStatus.serviceSuspended);
+  });
+
+  test('403 Cloudflare 1020 continua ipBlocked', () async {
+    AniListService.httpOverride = MockClient(
+      (req) async => http.Response('error code: 1020', 403),
+    );
+    expect(await AniListService.getAiringTomorrow(), isEmpty);
+    expect(AniListService.lastErrorStatus, AniListStatus.ipBlocked);
+  });
 }

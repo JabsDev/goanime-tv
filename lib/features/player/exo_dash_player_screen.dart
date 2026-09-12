@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../core/anilist/anilist_service.dart';
+import '../../core/device/device_type.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/local_storage.dart';
 import '../../core/utils/device_codecs.dart';
@@ -93,6 +94,7 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    DeviceType.lockLandscapeForPlayer();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _initPlayer();
   }
@@ -499,11 +501,15 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: ThemeConstants.surface,
+        insetPadding:
+            const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         title: const Text('Selecionar Qualidade',
-            style: TextStyle(color: Colors.white)),
+            style: TextStyle(color: Colors.white),
+            overflow: TextOverflow.ellipsis),
         content: ConstrainedBox(
           constraints: BoxConstraints(
             maxHeight: MediaQuery.sizeOf(ctx).height * 0.7,
+            maxWidth: 512,
           ),
           child: SingleChildScrollView(
             child: Column(
@@ -565,6 +571,7 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    DeviceType.restoreAfterPlayer();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _pollTimer?.cancel();
     _controlsTimer?.cancel();

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
+import 'core/device/device_type.dart';
 import 'core/profile/profile_service.dart';
 import 'core/storage/local_storage.dart';
 import 'core/storage/settings_service.dart';
@@ -12,6 +13,7 @@ void main() async {
   // ponytail: esconde botões de navegação do Android durante todo o uso do app
   // (immersive sticky: reaparecem temporariamente com swipe, depois somem).
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  await DeviceType.applyStartupPolicy();
   // ponytail: cap explícito do imageCache. Default Flutter é 1000 imagens / 100MB;
   // em TV stick 1GB heap estoura. 60MB/250 é conservador para qualquer hardware.
   PaintingBinding.instance.imageCache.maximumSizeBytes = 60 << 20;
