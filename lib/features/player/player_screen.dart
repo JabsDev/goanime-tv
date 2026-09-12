@@ -278,6 +278,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       final native = _player.platform;
       if (native is NativePlayer) {
         await native.setProperty('hls-bitrate', 'highest');
+        await native.setProperty('dash-bitrate', 'highest');
       }
       final headers = <String, String>{};
       if (src.headers.isNotEmpty) headers.addAll(src.headers);
@@ -297,6 +298,19 @@ class _PlayerScreenState extends State<PlayerScreen>
           debugPrint('[Player] Dash proxy: ${src.quality} -> $playUrl');
         } catch (e) {
           debugPrint('[Player] Dash proxy failed, direct fallback: $e');
+        }
+        // AV1-only sem decoder de hardware (fallback vindo do ExoDash):
+        // força decodificação via software (dav1d/ffmpeg do mpv). Lento,
+        // mas funciona — mpv com hwdec=auto nem sempre tenta o fallback
+        // sozinho no AV1. Só aqui: H.264 segue com hardware.
+        if (DashManifestProxy.isAv1Only(_dashProxy.lastVideoCodecs) &&
+            native is NativePlayer) {
+          try {
+            await native.setProperty('hwdec', 'no');
+            debugPrint('[Player] AV1-only: hwdec=no (software)');
+          } catch (e) {
+            debugPrint('[Player] hwdec=no falhou: $e');
+          }
         }
       }
       await _player.open(

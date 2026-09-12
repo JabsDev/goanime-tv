@@ -15,6 +15,7 @@ import '../../data/models/episode.dart';
 import '../../data/repositories/anime_repository.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import 'dash_manifest_proxy.dart';
+import 'player_screen.dart';
 
 /// ExoPlayer screen, used exclusively for AnimeFire DASH streams.
 ///
@@ -200,20 +201,15 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       } catch (e) {
         debugPrint('[ExoDash] Dash proxy failed, direct fallback: $e');
       }
-      // AV1-only num aparelho sem decoder = som sobre tela preta (visto no
-      // box Amlogic do projetor: só o AAC aloca, nenhum decoder de vídeo).
-      // Avisa e sugere outra fonte H.264 em vez de tocar às cegas.
+      // AV1-only num aparelho sem decoder de hardware = som sobre tela
+      // preta no ExoPlayer. Fallback automático e silencioso via software
+      // (mpv/dav1d, parte na fixa mais baixa): o usuário só vê o loading.
       if (DashManifestProxy.isAv1Only(_dashProxy.lastVideoCodecs) &&
           !await DeviceCodecs.supportsAv1()) {
         _loadTimeout?.cancel();
         if (!mounted) return;
-        debugPrint('[ExoDash] AV1-only sem decoder — aviso em vez de tela preta');
-        setState(() {
-          _error = 'Este aparelho não decodifica AV1 (ficaria tela preta '
-              'com som). Volte e escolha outra Fonte — Goyabu ou Animes '
-              'Online servem este episódio em H.264.';
-          _isLoading = false;
-        });
+        debugPrint('[ExoDash] AV1-only sem HW — fallback software automático');
+        _openSoftwareFallback();
         return;
       }
       final controller = VideoPlayerController.networkUrl(
@@ -645,6 +641,28 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
             if (_controlsVisible && ready) _buildControlsOverlay(),
             if (_showNextOverlay) _buildNextOverlay(),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Fallback AV1 via software: reabre as mesmas fontes no PlayerScreen
+  /// (mpv/ffmpeg+dav1d decodifica sem hardware) partindo da fixa mais baixa.
+  void _openSoftwareFallback() {
+    if (_sources.isEmpty) return;
+    final start = lowestQualityIndex(_sources);
+    debugPrint('[ExoDash] Fallback software via mpv a partir de '
+        '${_sources[start].quality}');
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PlayerScreen(
+          anime: widget.anime,
+          provider: widget.provider,
+          episodeList: widget.episodeList,
+          episodeIndex: widget.episodeIndex,
+          initialSources: _sources,
+          initialIndex: start,
         ),
       ),
     );

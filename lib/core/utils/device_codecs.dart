@@ -4,8 +4,9 @@ import 'package:flutter/services.dart';
 /// Capacidades de decodificação do aparelho (via canal nativo Android).
 ///
 /// Uso atual: o AnimeFire serve episódios só em AV1; num box sem decoder
-/// AV1 o ExoPlayer toca o áudio sobre tela preta. O player consulta
-/// [supportsAv1] e mostra um aviso honesto em vez da tela preta.
+/// AV1 de hardware o ExoPlayer toca o áudio sobre tela preta. O player
+/// consulta [supportsAv1] e oferece o fallback via software (mpv) em vez
+/// da tela preta.
 ///
 /// Fail-open: qualquer erro/canal ausente (testes, desktop) assume suporte —
 /// melhor tentar tocar do que barrar à toa.
