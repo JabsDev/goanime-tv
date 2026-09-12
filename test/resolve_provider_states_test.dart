@@ -709,6 +709,20 @@ void main() {
       expect(grid.map((e) => e.seasonLabel).toList(), ['T1', 'T1', 'T2', 'T2']);
     });
 
+    test('grade fallback S4 (Slime) é relativa 1..2 sem T1 primeiro', () async {
+      // Reproduz a imagem: entry "…4th Season" sem episodes (RELEASING).
+      // Antes: grade absoluta 1..4 com "EP 1 · T1" primeiro. Depois: 1..2
+      // relativos à S4, sem badge — EP 1 abre S4E1, nunca S1E1.
+      final adapter = seasonAdapter(const {}, seasonAnimeJson);
+      final repo = AnimeRepository(adapters: [adapter]);
+      final grid = await repo.getCatalogEpisodes(Anime(
+          name: 'Tensei Shitara Slime Datta Ken 2nd Season',
+          url: 'https://animefire.io/anime/bc789',
+          source: AnimeSource.animeFire));
+      expect(grid.map((e) => e.number).toList(), [1, 2]);
+      expect(grid.every((e) => e.seasonLabel == null), isTrue);
+    });
+
     test('grade saudável (AniList ok) não tem badges', () async {
       final adapter = seasonAdapter(const {}, seasonAnimeJson);
       final repo = AnimeRepository(adapters: [adapter]);

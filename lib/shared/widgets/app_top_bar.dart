@@ -23,8 +23,10 @@ class AppTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.of(context).padding.top + 16;
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+    final hPad = isNarrow ? 16.0 : 32.0;
     return Container(
-      padding: EdgeInsets.only(left: 32, right: 32, top: top, bottom: 16),
+      padding: EdgeInsets.only(left: hPad, right: hPad, top: top, bottom: 16),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -55,8 +57,8 @@ class AppTopBar extends StatelessWidget {
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 26,
+              style: TextStyle(
+                fontSize: isNarrow ? 20 : 26,
                 fontWeight: FontWeight.bold,
                 color: ThemeConstants.white,
               ),

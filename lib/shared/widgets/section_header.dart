@@ -17,8 +17,10 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = SettingsService.instance;
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+    final hPad = isNarrow ? 16.0 : 32.0;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 24, 32, 12),
+      padding: EdgeInsets.fromLTRB(hPad, 24, hPad, 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [

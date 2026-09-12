@@ -25,11 +25,12 @@ class UpdateAvailableDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = release.versionLabel ?? release.tagName;
+    final maxW = MediaQuery.sizeOf(context).width - 48;
     return Dialog(
       backgroundColor: ThemeConstants.surface,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 48, vertical: 24),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: Container(
-        width: 640,
+        width: maxW < 560 ? maxW : 560,
         constraints: const BoxConstraints(maxHeight: 440),
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -73,7 +74,9 @@ class UpdateAvailableDialog extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 20),
-            Row(
+            Wrap(
+              spacing: 16,
+              runSpacing: 12,
               children: [
                 TVButton(
                   label: 'Atualizar agora',
@@ -82,7 +85,6 @@ class UpdateAvailableDialog extends StatelessWidget {
                   width: 220,
                   autofocus: true,
                 ),
-                const SizedBox(width: 16),
                 TVButton(
                   label: 'Agora não',
                   isPrimary: false,

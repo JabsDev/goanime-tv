@@ -41,22 +41,30 @@ class _ProfileSwitcherScreenState extends State<ProfileSwitcherScreen> {
     final profiles = ProfileService.instance.profiles;
     // Primeira execução: não há perfis ainda → apresentação de boas-vindas.
     final isFirstRun = widget.showOnBoot && profiles.isEmpty;
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
     return Scaffold(
       backgroundColor: ThemeConstants.background,
       body: SafeArea(
         child: Stack(
           children: [
             Center(
+              child: SingleChildScrollView(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 12),
+                  Padding(
+                    padding: EdgeInsets.only(
+                        left: isNarrow ? 24 : 32,
+                        right: isNarrow ? 24 : 32,
+                        bottom: 12),
                     child: Text(
                       'Bem-vindo ao GoAnime TV',
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 34,
+                        fontSize: isNarrow ? 26 : 34,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -114,6 +122,7 @@ class _ProfileSwitcherScreenState extends State<ProfileSwitcherScreen> {
                     ),
                   ],
                 ],
+              ),
               ),
             ),
             if (!widget.showOnBoot)
@@ -204,8 +213,10 @@ class _ProfileSwitcherScreenState extends State<ProfileSwitcherScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 16,
+              runSpacing: 12,
               children: [
                 TVButton(
                   label: 'Conta local',

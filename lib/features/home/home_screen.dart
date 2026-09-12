@@ -213,10 +213,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ponytail: topbar virou o PRIMEIRO item do ListView de _buildContent, então
   // rola junto com o conteúdo e nunca mais sobrepõe cards/sections ao scrolar.
+  // Retrato (<600dp): sem relógio, paddings compactos, Buscar icon-only,
+  // perfil só avatar — evita sobreposição vista no screenshot vertical.
   Widget _buildTopBar() {
     final top = MediaQuery.of(context).padding.top + 16;
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+    final hPad = isNarrow ? 16.0 : 32.0;
     return Container(
-      padding: EdgeInsets.only(left: 32, right: 32, top: top, bottom: 16),
+      padding: EdgeInsets.only(left: hPad, right: hPad, top: top, bottom: 16),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -236,44 +240,72 @@ class _HomeScreenState extends State<HomeScreen> {
                     color: ThemeConstants.primary.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.play_circle_filled,
-                      color: ThemeConstants.primary, size: 32),
+                  child: Icon(Icons.play_circle_filled,
+                      color: ThemeConstants.primary,
+                      size: isNarrow ? 26 : 32),
                 ),
-                const SizedBox(width: 12),
-                const Text(
-                  'GoAnime TV',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: ThemeConstants.white,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'GoAnime TV',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: isNarrow ? 20 : 26,
+                      fontWeight: FontWeight.bold,
+                      color: ThemeConstants.white,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          const _ClockWidget(),
-          Expanded(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+          if (!isNarrow) const _ClockWidget(),
+          if (!isNarrow)
+            Expanded(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  _FocusableNavItem(
+                    icon: Icons.search,
+                    label: 'Buscar',
+                    autofocus: true,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SearchScreen()),
+                    ),
+                  ),
+                  const SizedBox(width: 24),
+                  // ponytail: botão único de perfil — reflete o perfil ATIVO
+                  // (avatar letra inicial p/ local, foto p/ anilist) + nome.
+                  _ProfileButton(
+                    profile: ProfileService.instance.currentProfile,
+                    onTap: _showProfileMenu,
+                  ),
+                ],
+              ),
+            )
+          else
+            Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 _FocusableNavItem(
                   icon: Icons.search,
                   label: 'Buscar',
-                  autofocus: true,
+                  compact: true,
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const SearchScreen()),
                   ),
                 ),
-                const SizedBox(width: 24),
-                // ponytail: botão único de perfil — reflete o perfil ATIVO
-                // (avatar letra inicial p/ local, foto p/ anilist) + nome.
+                const SizedBox(width: 8),
                 _ProfileButton(
                   profile: ProfileService.instance.currentProfile,
+                  compact: true,
                   onTap: _showProfileMenu,
-                ),              ],
+                ),
+              ],
             ),
-          ),
         ],
       ),
     );
@@ -468,6 +500,7 @@ class _HomeScreenState extends State<HomeScreen> {
         String title, List<dynamic> items, double h, Widget Function(dynamic) cardBuilder,
         {String? subtitle, double buffer = 48}) {
       if (items.isEmpty) return const [];
+      final hPad = isTv ? 32.0 : 16.0;
       return [
         SectionHeader(title: title, subtitle: subtitle),
         SizedBox(
@@ -478,7 +511,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: ListView.builder(
             clipBehavior: Clip.none,
             scrollDirection: Axis.horizontal,
-            padding: EdgeInsets.fromLTRB(32, buffer / 2, 32, buffer / 2),
+            padding: EdgeInsets.fromLTRB(hPad, buffer / 2, hPad, buffer / 2),
             itemCount: items.length > 20 ? 20 : items.length,
             itemBuilder: (_, i) => Padding(
               padding: const EdgeInsets.only(right: 18),
@@ -496,18 +529,20 @@ class _HomeScreenState extends State<HomeScreen> {
         // Fase 6: status AniList (offline/rate-limit/Cloudflare/auth) — só
         // aparece quando o último erro foi diferente de ok.
         if (AniListService.lastErrorStatus != AniListStatus.ok)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(32, 16, 32, 0),
-            child: AniListStatusBanner(),
+          Padding(
+            padding: EdgeInsets.fromLTRB(isTv ? 32 : 16, 16, isTv ? 32 : 16, 0),
+            child: const AniListStatusBanner(),
           ),
         if (!_anilistLoggedIn)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+            padding: EdgeInsets.symmetric(
+                horizontal: isTv ? 32 : 16, vertical: 16),
             child: AnilistBanner(onTap: _showAnilistLogin),
           ),
         if (_anilistLoggedIn && _anilistUser != null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+            padding: EdgeInsets.symmetric(
+                horizontal: isTv ? 32 : 16, vertical: 12),
             child: Row(
               children: [
                 if (_anilistUser!.avatar != null)
@@ -629,6 +664,8 @@ class _HomeScreenState extends State<HomeScreen> {
   // projetor que o card vertical genérico. Fonte: lista AniList do usuário.
   List<Widget> _buildWatchingSection(List<AniListEntry> entries, double screenWidth) {
     if (entries.isEmpty) return const [];
+    final isNarrow = screenWidth <= 600;
+    final hPad = isNarrow ? 16.0 : 32.0;
     final bannerWidth = screenWidth > 600 ? ThemeConstants.bannerWidthTv : 260.0;
     final bannerHeight = bannerWidth * 0.62;
 
@@ -642,7 +679,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: ListView.builder(
           clipBehavior: Clip.none,
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(32, 40, 32, 40),
+          padding: EdgeInsets.fromLTRB(hPad, 40, hPad, 40),
           itemCount: entries.length,
           itemBuilder: (_, i) => Padding(
             padding: const EdgeInsets.only(right: 24),
@@ -660,6 +697,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildAnilistGroup(AniListGroup group, double screenWidth) {
     if (group.entries.isEmpty) return const SizedBox.shrink();
+    final hPad = screenWidth > 600 ? 32.0 : 16.0;
     final w = screenWidth > 600 ? ThemeConstants.cardWidthTv : 120.0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -670,7 +708,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: ListView.builder(
             clipBehavior: Clip.none,
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(32, 24, 32, 24),
+            padding: EdgeInsets.fromLTRB(hPad, 24, hPad, 24),
             itemCount: group.entries.length > 20 ? 20 : group.entries.length,
             itemBuilder: (_, i) {
               final entry = group.entries[i];
@@ -830,11 +868,13 @@ class _ClockWidgetState extends State<_ClockWidget> {
 
 // ponytail: nav item sem Focus invisível (igual ao QualityDialog bug). Herda o
 // padrão AnimatedContainer do FocusableCard para battlefield consistency.
+// compact=true (retrato): só ícone, sem label — economiza ~60dp no estreito.
 class _FocusableNavItem extends StatefulWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final bool autofocus;
+  final bool compact;
 
   const _FocusableNavItem({
     required this.icon,
@@ -844,6 +884,7 @@ class _FocusableNavItem extends StatefulWidget {
     // antes era montada sem nenhum item focado → primeira tecla "acordava" o
     // traversal e o screenshot saía sem indicador).
     this.autofocus = false,
+    this.compact = false,
   });
 
   @override
@@ -902,20 +943,22 @@ class _FocusableNavItemState extends State<_FocusableNavItem> {
                     color: _isFocused
                         ? ThemeConstants.primary
                         : ThemeConstants.white,
-                    size: 30,
+                    size: widget.compact ? 26 : 30,
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    widget.label,
-                    style: TextStyle(
-                      color: _isFocused
-                          ? ThemeConstants.primary
-                          : ThemeConstants.white,
-                      fontSize: 16,
-                      fontWeight:
-                          _isFocused ? FontWeight.bold : FontWeight.normal,
+                  if (!widget.compact) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      widget.label,
+                      style: TextStyle(
+                        color: _isFocused
+                            ? ThemeConstants.primary
+                            : ThemeConstants.white,
+                        fontSize: 16,
+                        fontWeight:
+                            _isFocused ? FontWeight.bold : FontWeight.normal,
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -929,10 +972,12 @@ class _FocusableNavItemState extends State<_FocusableNavItem> {
 class _ProfileButton extends StatefulWidget {
   final Profile? profile;
   final VoidCallback onTap;
+  final bool compact;
 
   const _ProfileButton({
     required this.profile,
     required this.onTap,
+    this.compact = false,
   });
 
   @override
@@ -987,19 +1032,21 @@ class _ProfileButtonState extends State<_ProfileButton> {
                       radius: 18,
                       child: Icon(Icons.person, size: 20, color: Colors.white),
                     ),
-                  const SizedBox(width: 10),
-                  Text(
-                    widget.profile?.displayName ?? 'Perfil',
-                    style: TextStyle(
-                      color: _isFocused
-                          ? ThemeConstants.primary
-                          : ThemeConstants.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                  if (!widget.compact) ...[
+                    const SizedBox(width: 10),
+                    Text(
+                      widget.profile?.displayName ?? 'Perfil',
+                      style: TextStyle(
+                        color: _isFocused
+                            ? ThemeConstants.primary
+                            : ThemeConstants.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  ],
                 ],
               ),
             ),

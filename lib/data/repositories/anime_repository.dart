@@ -9,6 +9,7 @@ import '../../core/sources/anime_source_adapter.dart';
 import '../../core/sources/source_registry.dart';
 import '../../core/storage/provider_match_store.dart';
 import '../../core/utils/episode_number.dart';
+import '../../core/utils/text_utils.dart';
 import '../models/anime.dart';
 import '../models/anilist_models.dart';
 import '../models/episode.dart';
@@ -146,12 +147,21 @@ class AnimeRepository {
   /// must not shrink the grid. Best effort — no provider is guaranteed to
   /// respond.
   ///
+  /// Season-aware (Slime S4: entry "…4th Season" mostrava "EP 1 · T1"):
+  /// quando o catálogo nomeia uma temporada e o provider carrega `season`,
+  /// a grade é RELATIVA à temporada (S4 1..22, sem badge) — nunca absoluta
+  /// 1..94 com T1 primeiro. Só cai no absoluto com labels quando nenhum
+  /// provider entrega a temporada pedida.
+  ///
   /// Also returns season labels for rows whose number maps to exactly ONE
   /// season on that page (AnimeFire absolute 1..94 → T1..T4). Collapsed
   /// numbers (DooPlay combined: four season-21s) stay unlabeled rather than
   /// guess — no badge beats a wrong badge.
   Future<({int total, Map<int, String> seasonLabels})>
       _countAndSeasonsFromProviders(Anime anime) async {
+    final hint = TextUtils.seasonOf(anime.name) ??
+        AnimeSourceAdapter.seasonOfCandidateUrl(anime.url);
+    ({int total, Map<int, String> seasonLabels})? absoluteFallback;
     for (final adapter in _adapters) {
       if (!adapter.implemented) continue;
       try {
@@ -165,6 +175,26 @@ class AnimeRepository {
         final eps = await adapter.getEpisodes(target);
         switch (eps) {
           case Success(data: final data):
+            if (hint != null) {
+              final inSeasonNums = <int>[];
+              for (final e in data) {
+                if (e.season != hint) continue;
+                final n = int.tryParse(e.number) ??
+                    episodeNumberFromUrl(e.url);
+                if (n != null && n > 0) inSeasonNums.add(n);
+              }
+              if (inSeasonNums.isNotEmpty) {
+                inSeasonNums.sort();
+                // Absoluto (AnimeFire S4 73..94) vs relativo (DooPlay/Goyabu
+                // S4 1..22): min > 1 indica offset absoluto.
+                final sMin = inSeasonNums.first;
+                final sMax = inSeasonNums.last;
+                final sTotal = sMin > 1 ? sMax - sMin + 1 : sMax;
+                if (sTotal > 0) {
+                  return (total: sTotal, seasonLabels: const <int, String>{});
+                }
+              }
+            }
             var max = 0;
             final seasonsByNumber = <int, Set<int?>>{};
             for (final e in data) {
@@ -177,17 +207,33 @@ class AnimeRepository {
               }
             }
             if (max <= 0) continue;
-            final labels = <int, String>{};
-            for (final entry in seasonsByNumber.entries) {
-              final seasons = entry.value.whereType<int>().toList();
-              // Unambiguous only: exactly one distinct season AND no
-              // season-less episode sharing the number.
-              if (seasons.length == 1 &&
-                  entry.value.length == 1) {
-                labels[entry.key] = 'T${seasons.single}';
+            if (hint == null) {
+              final labels = <int, String>{};
+              for (final entry in seasonsByNumber.entries) {
+                final seasons = entry.value.whereType<int>().toList();
+                // Unambiguous only: exactly one distinct season AND no
+                // season-less episode sharing the number.
+                if (seasons.length == 1 &&
+                    entry.value.length == 1) {
+                  labels[entry.key] = 'T${seasons.single}';
+                }
               }
+              return (total: max, seasonLabels: labels);
             }
-            return (total: max, seasonLabels: labels);
+            // Hinted but this provider has no season data: keep as fallback
+            // while later providers (ordered by priority) may still deliver
+            // the season-relative grid.
+            if (absoluteFallback == null) {
+              final labels = <int, String>{};
+              for (final entry in seasonsByNumber.entries) {
+                final seasons = entry.value.whereType<int>().toList();
+                if (seasons.length == 1 &&
+                    entry.value.length == 1) {
+                  labels[entry.key] = 'T${seasons.single}';
+                }
+              }
+              absoluteFallback = (total: max, seasonLabels: labels);
+            }
           case Failure():
           case Loading():
             break;
@@ -196,6 +242,7 @@ class AnimeRepository {
         continue;
       }
     }
+    if (absoluteFallback != null) return absoluteFallback;
     return (total: 0, seasonLabels: const <int, String>{});
   }
 

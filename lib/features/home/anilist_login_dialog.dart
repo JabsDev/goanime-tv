@@ -33,7 +33,7 @@ class _AnilistLoginDialogState extends State<AnilistLoginDialog> {
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: ThemeConstants.surface,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: SingleChildScrollView(
