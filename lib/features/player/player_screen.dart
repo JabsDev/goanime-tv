@@ -312,6 +312,16 @@ class _PlayerScreenState extends State<PlayerScreen>
             debugPrint('[Player] hwdec=no falhou: $e');
           }
         }
+        // O mpv embarcado já rejeitou manifesto AnimeFire ("Failed to
+        // recognize file format"): força o demuxer DASH em vez de contar
+        // com a detecção por extensão/content-type.
+        if (native is NativePlayer) {
+          try {
+            await native.setProperty('demuxer-lavf-format', 'dash');
+          } catch (e) {
+            debugPrint('[Player] demuxer-lavf-format=dash falhou: $e');
+          }
+        }
       }
       await _player.open(
         Media(playUrl, httpHeaders: headers),

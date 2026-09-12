@@ -647,11 +647,14 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
   }
 
   /// Fallback AV1 via software: reabre as mesmas fontes no PlayerScreen
-  /// (mpv/ffmpeg+dav1d decodifica sem hardware) partindo da fixa mais baixa.
+  /// (mpv/ffmpeg+dav1d decodifica sem hardware) na qualidade que o usuário
+  /// escolheu — sem trocar para 480p por conta própria.
   void _openSoftwareFallback() {
     if (_sources.isEmpty) return;
-    final start = lowestQualityIndex(_sources);
-    debugPrint('[ExoDash] Fallback software via mpv a partir de '
+    final start = _selectedQualityIndex < _sources.length
+        ? _selectedQualityIndex
+        : 0;
+    debugPrint('[ExoDash] Fallback software via mpv em '
         '${_sources[start].quality}');
     Navigator.pushReplacement(
       context,

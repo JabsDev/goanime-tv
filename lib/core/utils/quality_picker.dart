@@ -40,24 +40,3 @@ int qualityScore(String quality) {
   if (q.contains('hd')) return 720;
   return 0;
 }
-
-/// Índice da qualidade fixa mais baixa — ponto de partida do fallback via
-/// software (mpv/dav1d) em aparelhos sem decoder AV1: 480p software tem
-/// chance real; 1080p adaptativo trava. Prefere fontes com `dashHeight`
-/// (representação filtrada no proxy); `Auto` adaptativo só quando não há
-/// fixa (evita o mpv subir sozinho para 1080p).
-int lowestQualityIndex(List<VideoSource> sources) {
-  if (sources.isEmpty) return 0;
-  var pool = sources.where((s) => s.dashHeight != null).toList();
-  if (pool.isEmpty) pool = sources;
-  var best = sources.indexOf(pool.first);
-  var bestScore = qualityScore(pool.first.quality);
-  for (final s in pool.skip(1)) {
-    final score = qualityScore(s.quality);
-    if (score < bestScore) {
-      bestScore = score;
-      best = sources.indexOf(s);
-    }
-  }
-  return best;
-}

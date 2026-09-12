@@ -45,19 +45,4 @@ void main() {
     expect(mapped, 2);
     expect(ordered[mapped], chosen);
   });
-
-  test('lowestQualityIndex prefere a fixa mais baixa, ignora Auto', () {
-    final s = [
-      VideoSource(url: 'http://x/auto', quality: 'Auto'),
-      VideoSource(url: 'http://x/1080', quality: '1080p', dashHeight: 1080),
-      VideoSource(url: 'http://x/480', quality: '480p', dashHeight: 480),
-      VideoSource(url: 'http://x/720', quality: '720p', dashHeight: 720),
-    ];
-    expect(lowestQualityIndex(s), 2); // 480p fixa, não Auto
-  });
-
-  test('lowestQualityIndex sem fixa cai no menor score geral', () {
-    expect(lowestQualityIndex(srcs(['1080p', 'Auto', '720p'])), 1);
-    expect(lowestQualityIndex([]), 0);
-  });
 }
