@@ -21,9 +21,8 @@ int bestQualityIndex(List<VideoSource> sources) {
   return best;
 }
 
-/// Ordena estável com a melhor qualidade primeiro — útil para o auto-avanço
-/// do player (que percorre índices crescentes quando uma fonte morre) partir
-/// da melhor e não da primeira que o scraper retornou.
+/// Ordena estável com a melhor qualidade primeiro — o auto-next (sem escolha
+/// explícita) abre direto na melhor em vez de exigir mais um tap no diálogo.
 List<VideoSource> sortBestFirst(List<VideoSource> sources) {
   final list = [...sources];
   list.sort(

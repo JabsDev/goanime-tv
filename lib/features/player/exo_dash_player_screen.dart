@@ -75,7 +75,6 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
   bool _restoreAttempted = false;
   bool _anilistPushedForThisEp = false;
   bool _forceReresolve = false;
-  bool _autoAdvancing = false;
   DateTime? _lastProgressSave;
 
   bool _showNextOverlay = false;
@@ -143,9 +142,16 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
         return;
       }
       if (startIndex >= sources.length) startIndex = 0;
+      // O índice explícito vindo do diálogo é remapeado para a ordem nova
+      // (por identidade; após re-resolve do retry, por qualidade+url — o
+      // retry repete a MESMA qualidade, nunca pula para outra sozinho).
       final chosen = sources[startIndex];
       final ordered = sortBestFirst(sources);
-      final mapped = ordered.indexWhere((s) => identical(s, chosen));
+      var mapped = ordered.indexWhere((s) => identical(s, chosen));
+      mapped = mapped >= 0
+          ? mapped
+          : ordered.indexWhere(
+              (s) => s.quality == chosen.quality && s.url == chosen.url);
       startIndex = mapped >= 0 ? mapped : 0;
       setState(() => _sources = ordered);
       await _playSource(startIndex);
@@ -162,7 +168,6 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
     if (index >= _sources.length) return;
     final src = _sources[index];
     debugPrint('[ExoDash] Attempting source $index: ${src.url} (${src.quality})');
-    _autoAdvancing = false;
     await _disposeController();
     if (!mounted) return;
     setState(() {
@@ -179,14 +184,11 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
     _loadTimeout = Timer(const Duration(seconds: 20), () {
       if (!mounted) return;
       debugPrint('[ExoDash] Loading timeout for source $index');
-      if (_selectedQualityIndex < _sources.length - 1) {
-        _advanceSource();
-      } else if (mounted) {
-        setState(() {
-          _error = 'O servidor não está respondendo. Tente novamente.';
-          _isLoading = false;
-        });
-      }
+      // Sem auto-avanço: a qualidade escolhida é mantida até o erro.
+      setState(() {
+        _error = 'O servidor não está respondendo. Tente novamente.';
+        _isLoading = false;
+      });
     });
     try {
       var playUrl = src.url;
@@ -203,7 +205,7 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       }
       // AV1-only num aparelho sem decoder de hardware = som sobre tela
       // preta no ExoPlayer. Fallback automático e silencioso via software
-      // (mpv/dav1d, parte na fixa mais baixa): o usuário só vê o loading.
+      // (mpv/dav1d, na qualidade escolhida): o usuário só vê o loading.
       if (DashManifestProxy.isAv1Only(_dashProxy.lastVideoCodecs) &&
           !await DeviceCodecs.supportsAv1()) {
         _loadTimeout?.cancel();
@@ -238,22 +240,12 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       _loadTimeout?.cancel();
       debugPrint('[ExoDash] Error source $index: $e');
       if (!mounted) return;
-      if (index < _sources.length - 1) {
-        await _playSource(index + 1);
-      } else {
-        setState(() {
-          _error = 'Erro ao reproduzir: $e';
-          _isLoading = false;
-        });
-      }
+      // Sem auto-avanço: erra NA qualidade escolhida.
+      setState(() {
+        _error = 'Erro ao reproduzir: $e';
+        _isLoading = false;
+      });
     }
-  }
-
-  void _advanceSource() {
-    if (_autoAdvancing) return;
-    if (_selectedQualityIndex >= _sources.length - 1) return;
-    _autoAdvancing = true;
-    _playSource(_selectedQualityIndex + 1);
   }
 
   void _startPolling() {
@@ -264,14 +256,12 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       if (c.value.hasError) {
         debugPrint('[ExoDash] Controller error: ${c.value.errorDescription}');
         _pollTimer?.cancel();
+        // Sem auto-avanço: erra NA qualidade escolhida.
         if (!_videoReady) {
-          _advanceSource();
-          if (_autoAdvancing == false && _selectedQualityIndex >= _sources.length - 1) {
-            setState(() {
-              _error = 'Não foi possível reproduzir esta fonte. Tente outra.';
-              _isLoading = false;
-            });
-          }
+          setState(() {
+            _error = 'Não foi possível reproduzir esta fonte. Tente outra.';
+            _isLoading = false;
+          });
         }
         return;
       }

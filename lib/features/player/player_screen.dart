@@ -103,11 +103,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   // Antes o botão "Tentar novamente" só rejogava widget.initialSources mortas.
   bool _forceReresolve = false;
 
-  // B12: guarda de auto-avanço deduplicado — timeout de load, completed com
-  // arquivo vazio e erro de stream podem disparar em sequência; sem o flag,
-  // o mesmo índice morto avança duas vezes e PULA uma fonte boa.
-  bool _autoAdvancing = false;
-
   // D-pad-focusable control buttons (back/quality/visibility/replay/play/forward).
   late final FocusNode _backNode = FocusNode();
   late final FocusNode _qualityNode = FocusNode();
@@ -212,12 +207,17 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
       if (startIndex >= sources.length) startIndex = 0;
       // Fase 3: auto-seleciona a melhor qualidade quando o usuário não fez
-      // escolha explícita (retry/auto-next). Ordena best-first para o
-      // auto-avanço de fontes mortas caminhar da melhor para a pior. O índice
-      // explícito vindo do diálogo é remapeado para a ordem nova.
+      // escolha explícita (auto-next). O índice explícito vindo do diálogo é
+      // remapeado para a ordem nova (por identidade; após re-resolve do
+      // retry, por qualidade+url — o retry repete a MESMA qualidade, nunca
+      // pula para outra sozinho).
       final chosen = sources[startIndex];
       final ordered = sortBestFirst(sources);
-      final mapped = ordered.indexWhere((s) => identical(s, chosen));
+      var mapped = ordered.indexWhere((s) => identical(s, chosen));
+      mapped = mapped >= 0
+          ? mapped
+          : ordered.indexWhere(
+              (s) => s.quality == chosen.quality && s.url == chosen.url);
       startIndex = mapped >= 0 ? mapped : 0;
       debugPrint('[Player] Resolved ${widget.provider} sources: '
           '${ordered.map((s) => '${s.quality}:${Uri.parse(s.url).host}').join(' | ')}');
@@ -236,7 +236,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (index >= _sources.length) return;
     final src = _sources[index];
     debugPrint('[Player] Attempting source $index: ${src.url} (${src.quality})');
-    _autoAdvancing = false;
     setState(() {
       _selectedQualityIndex = index;
       _isLoading = true;
@@ -261,15 +260,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     _loadTimeout = Timer(const Duration(seconds: 20), () {
       if (!mounted) return;
       debugPrint('[Player] Loading timeout for source $index');
-      // ponytail: timeout = source morta (404/vazio). Auto-avança em vez de só mostrar erro.
-      if (_selectedQualityIndex < _sources.length - 1) {
-        _advanceSource();
-      } else {
-        setState(() {
-          _error = 'O servidor não está respondendo. Tente novamente.';
-          _isLoading = false;
-        });
-      }
+      // Sem auto-avanço: a qualidade escolhida é mantida até o erro — se o
+      // usuário pediu 1080p, o erro é em 1080p, nunca descendo sozinho.
+      setState(() {
+        _error = 'O servidor não está respondendo. Tente novamente.';
+        _isLoading = false;
+      });
     });
     try {
       await _player.stop();
@@ -407,18 +403,19 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (!mounted) return;
       debugPrint('[Player] Completed event (ready: $_videoReady, dur: ${_durationSec}s, pos: ${_positionSec}s)');
       // ponytail: completed com dur=0 = arquivo vazio/404 (visto em AnimeFire 720p hd/3.mp4).
-      // Antes o early-return só jogava pro timeout. Auto-avança agora.
       if (!_videoReady) {
         // completed ESPÚRIO: mpv emite EOF imediatamente após open() em fontes
         // AnimeFire mp4 mesmo com o vídeo tocando (Playing=true já observado).
-        // Avançar nesse caso joga o player para a PRÓXIMA qualidade e, por
-        // encadeamento, termina sempre na última (menor). Só avança quando a
-        // fonte nunca chegou a reproduzir — o timeout de load é o backstop.
+        // Sem auto-avanço: ignora o espúrio ou erra NA qualidade escolhida.
         if (_gotPlayback) {
           debugPrint('[Player] Ignoring spurious completed (source is playing)');
           return;
         }
-        _advanceSource();
+        _loadTimeout?.cancel();
+        setState(() {
+          _error = 'O servidor não está respondendo. Tente novamente.';
+          _isLoading = false;
+        });
         return;
       }
       if (_positionSec / _durationSec > 0.8) {
@@ -437,12 +434,9 @@ class _PlayerScreenState extends State<PlayerScreen>
         debugPrint('[Player] Ignoring non-fatal error event (video still playing)');
         return;
       }
-      // B12: erro fatal (vídeo nunca ficou pronto) = fonte morta — tenta a
-      // próxima qualidade automaticamente antes de desistir e mostrar erro.
-      if (!_videoReady) {
-        _advanceSource();
-        return;
-      }
+      // Sem auto-avanço: qualquer erro com o vídeo não-pronto erra NA
+      // qualidade escolhida — sem descer sozinho para a próxima.
+      _loadTimeout?.cancel();
       setState(() {
         _error = _friendlyError(e);
         _isLoading = false;
@@ -450,7 +444,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     });
   }
 
-  /// B12: compõe mensagem de erro com contexto (qualidade + host da fonte) em
+  /// Compõe mensagem de erro com contexto (qualidade + host da fonte) em
   /// vez do vago "Verifique o vídeo." — o usuário sabe o que falhou.
   String _friendlyError(Object e) {
     final detail = e.toString();
@@ -472,16 +466,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     return 'Não foi possível reproduzir'
         '${sourceLabel.isEmpty ? '' : ' $sourceLabel'}. '
         'A fonte pode estar fora do ar. Tente novamente ou escolha outra.';
-  }
-
-  /// B12: avança para a próxima fonte quando a atual está morta (timeout,
-  /// arquivo vazio no completed, ou erro de stream) — deduplicado pelo flag
-  /// [_autoAdvancing] para não pular fontes quando eventos disparam juntos.
-  void _advanceSource() {
-    if (_autoAdvancing) return;
-    if (_selectedQualityIndex >= _sources.length - 1) return;
-    _autoAdvancing = true;
-    _playSource(_selectedQualityIndex + 1);
   }
 
   /// Fase 4: pré-busca do próximo episódio. Dispara assim que o vídeo fica
