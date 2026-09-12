@@ -655,5 +655,43 @@ void main() {
       expect(data.single.audio, 'dublado');
       expect(data.single.dashHeight, 480);
     });
+
+    test('gap na API: S2 sem E2 → resolveVideo(S2,2) → [] (não S2E3)',
+        () async {
+      // S2 published E1 (abs 3) and E3 (abs 5); per-season E2 is missing.
+      // Positional match would silently serve S2E3; number matching yields [].
+      const gapAnimeJson = '{"data":{"seasons":['
+          '{"number":1,"first_episode_number":1},'
+          '{"number":2,"first_episode_number":3}],'
+          '"episodes":['
+          '{"id":"s1e1","title":"E1","audio":"Dublado","season":1,"number":1},'
+          '{"id":"s1e2","title":"E2","audio":"Dublado","season":1,"number":2},'
+          '{"id":"s2e1","title":"E3","audio":"Dublado","season":2,"number":1},'
+          '{"id":"s2e3","title":"E5","audio":"Dublado","season":2,"number":3}'
+          ']}}';
+      final adapter = seasonAdapter(
+        {
+          's2e1': dashEpisodeJson(
+              qualitiesDub: const ['480p'], qualitiesLeg: const ['480p']),
+          's2e3': dashEpisodeJson(
+              qualitiesDub: const ['480p'], qualitiesLeg: const ['480p']),
+        },
+        gapAnimeJson,
+      );
+      final match = Anime(
+          name: 'Black Clover',
+          url: 'https://animefire.io/anime/bc789',
+          source: AnimeSource.animeFire);
+      final catalog = Anime(
+          name: 'Black Clover 2nd Season',
+          url: '',
+          source: AnimeSource.anilist);
+      expect(await adapter.resolveVideo(match, 2, catalog: catalog), isEmpty);
+      // Neighbours still resolve: S2E1 (abs 3) and S2E3 (abs 5).
+      expect(await adapter.resolveVideo(match, 1, catalog: catalog),
+          isNotEmpty);
+      expect(await adapter.resolveVideo(match, 3, catalog: catalog),
+          isNotEmpty);
+    });
   });
 }

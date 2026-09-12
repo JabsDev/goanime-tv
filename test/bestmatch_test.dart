@@ -101,4 +101,85 @@ void main() {
         AnimeSourceAdapter.bestMatch('One Piece', cands, AnimeSource.goyabu);
     expect(pick.name, 'One Piece');
   });
+
+  // Slime S4 (relatorio-slime-s4e21 §4b): base (S1) vs `…-4` tied 59×59 for
+  // the S4 query — the season bonus must pin the season page, deterministically.
+  List<Anime> _slimeCandidates() => [
+        Anime(
+          name: 'Tensei Shitara Slime Datta Ken',
+          url: 'https://goyabu.io/anime/tensei-shitara-slime-datta-ken',
+          source: AnimeSource.goyabu,
+        ),
+        Anime(
+          name: 'Tensei Shitara Slime Datta Ken 3',
+          url: 'https://goyabu.io/anime/tensei-shitara-slime-datta-ken-3',
+          source: AnimeSource.goyabu,
+        ),
+        Anime(
+          name: 'Tensei Shitara Slime Datta Ken 4',
+          url: 'https://goyabu.io/anime/tensei-shitara-slime-datta-ken-4',
+          source: AnimeSource.goyabu,
+        ),
+      ];
+
+  test('Slime 4th Season query pins the …-4 page (was 59×59 tie)', () {
+    final pick = AnimeSourceAdapter.bestMatch(
+      'Tensei Shitara Slime Datta Ken 4th Season',
+      _slimeCandidates(),
+      AnimeSource.goyabu,
+    );
+    expect(pick.url,
+        'https://goyabu.io/anime/tensei-shitara-slime-datta-ken-4');
+  });
+
+  test('Slime 3rd Season query pins the …-3 page', () {
+    final pick = AnimeSourceAdapter.bestMatch(
+      'Tensei Shitara Slime Datta Ken 3rd Season',
+      _slimeCandidates(),
+      AnimeSource.goyabu,
+    );
+    expect(pick.url,
+        'https://goyabu.io/anime/tensei-shitara-slime-datta-ken-3');
+  });
+
+  test('Slime query without season keeps legacy behaviour (base wins)', () {
+    final pick = AnimeSourceAdapter.bestMatch(
+      'Tensei Shitara Slime Datta Ken',
+      _slimeCandidates(),
+      AnimeSource.goyabu,
+    );
+    expect(pick.url,
+        'https://goyabu.io/anime/tensei-shitara-slime-datta-ken');
+  });
+
+  test('season tiebreak is deterministic (3 runs, any input order)', () {
+    const query = 'Tensei Shitara Slime Datta Ken 4th Season';
+    for (var i = 0; i < 3; i++) {
+      final cands = _slimeCandidates()..shuffle();
+      final pick =
+          AnimeSourceAdapter.bestMatch(query, cands, AnimeSource.goyabu);
+      expect(pick.url,
+          'https://goyabu.io/anime/tensei-shitara-slime-datta-ken-4');
+    }
+  });
+
+  test('season bonus never outranks an exact title match', () {
+    // Query without season hint: a season-suffixed page must not steal an
+    // exact base-title match (scores unchanged when hint is null).
+    final cands = <Anime>[
+      Anime(
+        name: 'Naruto',
+        url: 'https://goyabu.io/anime/naruto-2',
+        source: AnimeSource.goyabu,
+      ),
+      Anime(
+        name: 'Naruto',
+        url: 'https://goyabu.io/anime/naruto',
+        source: AnimeSource.goyabu,
+      ),
+    ];
+    final pick =
+        AnimeSourceAdapter.bestMatch('Naruto', cands, AnimeSource.goyabu);
+    expect(pick.url, 'https://goyabu.io/anime/naruto');
+  });
 }

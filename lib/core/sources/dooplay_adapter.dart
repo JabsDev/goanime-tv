@@ -170,19 +170,15 @@ class DooPlayAdapter extends AnimeSourceAdapter {
           source: source,
         ));
       }
-      final list = hrefs.toList()
-        ..sort((a, b) {
-          final na = _episodeNumber(a);
-          final nb = _episodeNumber(b);
-          if (na == null || nb == null) return 0;
-          return na.compareTo(nb);
-        });
+      final list = hrefs.toList()..sort(_compareEpisodeUrls);
       final episodes = list.map((url) {
+        final sn = seasonEpisode(url);
         return Episode(
-          number: (_episodeNumber(url) ?? 0).toString(),
+          number: (sn.$2 ?? 0).toString(),
           url: url,
           source: source,
           owner: anime,
+          season: sn.$1,
         );
       }).toList();
       return ScraperResult.success(episodes);
@@ -196,15 +192,123 @@ class DooPlayAdapter extends AnimeSourceAdapter {
     }
   }
 
-  /// Episode number from an episode URL. Handles both naming schemes used by
-  /// the DooPlay family: `...-episodio-<n>/` (BetterAnime, AnimesHD) and
-  /// `...-<s>x<n>/` (HDK, Animes Orion, where `<s>` is the season).
-  int? _episodeNumber(String url) {
-    final classic = RegExp(r'episodio[\s-]*(\d+)').firstMatch(url);
-    if (classic != null) return int.tryParse(classic.group(1)!);
-    final season = RegExp(r'-(\d+)x(\d+)/?$').firstMatch(url);
-    if (season != null) return int.tryParse(season.group(2)!);
-    return null;
+  /// Total comparator for episode URLs: (season nulls-last, number,
+  /// url-tiebreak). Never returns 0 for distinct URLs — the old
+  /// `return 0 on null` violated the comparator contract and made multi-season
+  /// order non-deterministic. `null` season sorts LAST (unknown ≠ S1).
+  static int _compareEpisodeUrls(String a, String b) {
+    final sa = seasonEpisode(a);
+    final sb = seasonEpisode(b);
+    if (sa.$1 == null && sb.$1 != null) return 1;
+    if (sa.$1 != null && sb.$1 == null) return -1;
+    if (sa.$1 != null && sb.$1 != null && sa.$1 != sb.$1) {
+      return sa.$1!.compareTo(sb.$1!);
+    }
+    if (sa.$2 != sb.$2) return (sa.$2 ?? 0).compareTo(sb.$2 ?? 0);
+    return a.compareTo(b);
+  }
+
+  /// (season, number) from an episode URL. Precedence is fixed (first match
+  /// wins); the path is matched case-insensitively with `/`, `?`, `#`
+  /// suffixes stripped before matching:
+  ///
+  ///  1. `…-<S>-<M>-episodio-<N>` (e.g. Temporada 2.5 slug `…-2-5-episodio-N`)
+  ///     → `(null, N)` + log. Specials `x.5` can't be expressed as an int
+  ///     season, so they stay out of season-aware resolve by design.
+  ///  2. `…-<S>-episodio-<N>` (BetterAnime combined page) → `(S, N)`.
+  ///  3. `…-<S>x<N>` (HDK/Orion) → `(S, N)`.
+  ///  4. `…-episodio-<N>` without prefix → `(null, N)` (S1/single season).
+  ///
+  /// `episodio-<N>-parte-<P>` keeps the FIRST number (N); the `parte` suffix
+  /// is logged as ambiguous, never used as the episode number.
+  /// Never matches: pure IDs (`/15859/`), resolutions (`-720p`), years.
+  @visibleForTesting
+  static (int?, int?) seasonEpisode(String url) {
+    var path = url.split('?').first.split('#').first;
+    while (path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    final lower = path.toLowerCase();
+    if (RegExp(r'-(\d+)-(\d+)-episodio-(\d+)$').firstMatch(lower)
+        case final m?) {
+      debugPrint('[SeasonResolve] DooPlay special x.5 slug (season=null): $url');
+      return (null, int.tryParse(m.group(3)!));
+    }
+    if (RegExp(r'-(\d{1,2})-episodio-(\d+)(?:-parte-\d+)?$').firstMatch(lower)
+        case final m?) {
+      return (int.tryParse(m.group(1)!), int.tryParse(m.group(2)!));
+    }
+    if (RegExp(r'-(\d{1,2})x(\d{1,4})$').firstMatch(lower) case final m?) {
+      return (int.tryParse(m.group(1)!), int.tryParse(m.group(2)!));
+    }
+    final classic =
+        RegExp(r'episodio[\s-]*(\d+)', caseSensitive: false).firstMatch(path);
+    if (classic != null) {
+      if (lower.contains('-parte-')) {
+        debugPrint('[SeasonResolve] DooPlay parte-suffix, keeping N: $url');
+      }
+      return (null, int.tryParse(classic.group(1)!));
+    }
+    return (null, null);
+  }
+
+  /// Season-aware resolve: when [catalog] names a season (AniList splits
+  /// seasons into entries, e.g. "…4th Season") and the page holds that
+  /// season, the number is season-relative — match by number-IN-season via
+  /// [firstWhere], never by position. When the hint points at a season but
+  /// the page is COMBINED (≥2 distinct seasons) and the episode isn't in the
+  /// hinted season, return [] instead of silently falling back to S1 (that
+  /// fallback WAS the bug: S4E21 → S1E21). Absolute fallback only for
+  /// season-unknown catalogs or single-season pages, with a tagged log.
+  @override
+  Future<List<VideoSource>> resolveVideo(Anime match, int episodeNumber,
+      {Anime? catalog}) async {
+    final eps = await getEpisodes(match);
+    Episode? target;
+    switch (eps) {
+      case Success(:final data):
+        final hint =
+            catalog == null ? null : TextUtils.seasonOf(catalog.name);
+        if (hint != null) {
+          final inSeason = data
+              .where((e) => e.season == hint)
+              .toList()
+            ..sort((a, b) =>
+                (int.tryParse(a.number) ?? 0)
+                    .compareTo(int.tryParse(b.number) ?? 0));
+          for (final e in inSeason) {
+            if (int.tryParse(e.number) == episodeNumber) {
+              target = e;
+              break;
+            }
+          }
+          if (target == null) {
+            final seasons =
+                data.map((e) => e.season).whereType<int>().toSet();
+            if (seasons.length >= 2) return const [];
+            debugPrint('[SeasonResolve] DooPlay fallback absoluto '
+                'ep=$episodeNumber hint=$hint url=${match.url}');
+          }
+        }
+        target ??= () {
+          for (final e in data) {
+            if (int.tryParse(e.number) == episodeNumber) return e;
+          }
+          return null;
+        }();
+      case Failure():
+      case Loading():
+        return const [];
+    }
+    if (target == null) return const [];
+    final vs = await getVideoSources(target, anime: match);
+    switch (vs) {
+      case Success(:final data):
+        return data;
+      case Failure():
+      case Loading():
+        return const [];
+    }
   }
 
   @override

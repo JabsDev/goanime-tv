@@ -135,6 +135,34 @@ class TextUtils {
     return cleaned;
   }
 
+  /// Season number from a catalog/provider title ("X 4th Season" → 4,
+  /// "X Season 2" → 2, "X S4" / "X T4" → 4, "X Temporada 4" / "X 4ª
+  /// Temporada" → 4). Null when the title carries no season signal — the
+  /// entry then covers the series from S1. Neutral owner (no adapter
+  /// imports): [AnimeFireAdapter.seasonFromCatalogName] and the DooPlay
+  /// family both delegate here so one change can't silently break the other.
+  ///
+  /// Deliberately NO generic trailing-number (`…Ken 4` → null): bare
+  /// trailing integers are usually something else (`86`, `Filme 2`, years).
+  /// Allowlist-only if that case is ever needed.
+  static int? seasonOf(String name) {
+    final lower = name.toLowerCase();
+    var m =
+        RegExp(r'(\d{1,2})\s*(?:st|nd|rd|th)?\s*season\b').firstMatch(lower);
+    if (m != null) return int.tryParse(m.group(1)!);
+    m = RegExp(r'\bseason\s*(\d{1,2})\b').firstMatch(lower);
+    if (m != null) return int.tryParse(m.group(1)!);
+    m = RegExp(r'\btemporada\s*(\d{1,2})\b').firstMatch(lower);
+    if (m != null) return int.tryParse(m.group(1)!);
+    m = RegExp(r'\b(\d{1,2})\s*[ªa]\s*temporada\b').firstMatch(lower);
+    if (m != null) return int.tryParse(m.group(1)!);
+    // "Slime S4" / "Slime T4": standalone single-letter token only
+    // ((?:^|\s) guard) so "first 2" / "ghost 2" never match via the "t".
+    m = RegExp(r'(?:^|\s)[st]\s?(\d{1,2})\b').firstMatch(lower);
+    if (m != null) return int.tryParse(m.group(1)!);
+    return null;
+  }
+
   /// Extracts the season segment from a SuperFlix episode URL.
   static String? extractSuperFlixSeason(String url, String? tmdbId) {
     if (tmdbId == null) return null;

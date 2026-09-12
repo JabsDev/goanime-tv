@@ -16,6 +16,14 @@ import 'dooplay_v2_extractor.dart';
 /// and `animeplay.cloud` (`admin_ajax` transport). Search and episode listing
 /// are HTML scraping; video resolves through [DooPlayV2Extractor] (Layer A)
 /// with the CDN probe fallback (Layer B) as last resort.
+///
+/// Season layout (probe 12/09/2026, Slime S4): SPLIT pages — one URL per
+/// season (`…/anime/…-4th-season`, block `se-t se-o'>4`), episodes numbered
+/// in-season via `data-episode-number`. No combined-page season collapse, so
+/// the default number match is correct once [AnimeSourceAdapter.bestMatch]
+/// pins the season page (season bonus). The EN-first [resolveAnime] searches
+/// by English title, but [resolveVideo] keeps using `catalog.name` (romaji
+/// with "Season") as the season hint — search language never leaks into it.
 class AnimesOnlineAdapter extends AnimeSourceAdapter {
   final AnimeSource _source;
   final http.Client? _client;
@@ -178,8 +186,11 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
       list.sort((a, b) {
         final na = int.tryParse(a.number);
         final nb = int.tryParse(b.number);
-        if (na == null || nb == null) return 0;
-        return na.compareTo(nb);
+        if (na == null && nb == null) return a.url.compareTo(b.url);
+        if (na == null) return 1;
+        if (nb == null) return -1;
+        if (na != nb) return na.compareTo(nb);
+        return a.url.compareTo(b.url);
       });
       if (list.isEmpty) {
         return ScraperResult.failure(EmptyResultError(

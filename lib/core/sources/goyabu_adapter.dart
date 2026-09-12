@@ -98,9 +98,30 @@ class GoyabuAdapter extends AnimeSourceAdapter {
     }
   }
 
+  /// Season-mismatch guard: Goyabu splits seasons into separate pages
+  /// (`…-ken-4`) with bare `/$id` episode URLs (no season signal inside), so
+  /// a wrongly pinned page resolves the wrong season's episode in silence.
+  /// When [catalog] names a season and the pinned page URL carries a
+  /// DIFFERENT season tail, log it (tagged, truncating the catalog name);
+  /// resolution itself still delegates to the default number match.
+  /// NOTE (probe 11/09/2026): the S4 page held only 19 eps (update
+  /// 21/08/2026) — E20+ depends on the site updating, not on app code.
   @override
-  Future<ScraperResult<List<Episode>>> getEpisodes(Anime anime) async {
-    if (anime.url.isEmpty) {
+  Future<List<VideoSource>> resolveVideo(Anime match, int episodeNumber,
+      {Anime? catalog}) async {
+    final hint = catalog == null ? null : TextUtils.seasonOf(catalog.name);
+    if (hint != null) {
+      final pageSeason = AnimeSourceAdapter.seasonOfCandidateUrl(match.url);
+      if (pageSeason != null && pageSeason != hint) {
+        debugPrint('[SeasonResolve] Goyabu page/ catalog mismatch '
+            'pageSeason=$pageSeason hint=$hint url=${match.url}');
+      }
+    }
+    return super.resolveVideo(match, episodeNumber, catalog: catalog);
+  }
+
+  @override
+  Future<ScraperResult<List<Episode>>> getEpisodes(Anime anime) async {    if (anime.url.isEmpty) {
       return ScraperResult.failure(EmptyResultError(
         message: 'No anime URL provided',
         source: source,

@@ -123,19 +123,15 @@ class AnimePlayerAdapter extends AnimeSourceAdapter {
           source: source,
         ));
       }
-      final list = hrefs.toList()
-        ..sort((a, b) {
-          final na = _episodeNumber(a);
-          final nb = _episodeNumber(b);
-          if (na == null || nb == null) return 0;
-          return na.compareTo(nb);
-        });
+      final list = hrefs.toList()..sort(_compareEpisodeUrls);
       final episodes = list.map((url) {
+        final sn = seasonEpisode(url);
         return Episode(
-          number: (_episodeNumber(url) ?? 0).toString(),
+          number: (sn.$2 ?? 0).toString(),
           url: url,
           source: source,
           owner: anime,
+          season: sn.$1,
         );
       }).toList();
       return ScraperResult.success(episodes);
@@ -149,21 +145,111 @@ class AnimePlayerAdapter extends AnimeSourceAdapter {
     }
   }
 
-  /// Episode number from the URL slug. Current scheme is `-SxE`
-  /// (`naruto-1x1` → 1); the legacy `-episodio-N` form is kept as fallback.
-  /// Multi-season slugs (`2x1`) collapse to the in-season number — same
-  /// limitation as matching by number everywhere else; previously EVERYTHING
-  /// collapsed to `0` and no episode ever matched.
-  @visibleForTesting
-  int? episodeNumber(String url) {
-    var m = RegExp(r'episodio[\s-]*(\d+)').firstMatch(url);
-    if (m != null) return int.tryParse(m.group(1)!);
-    m = RegExp(r'(\d+)x(\d+)/?$').firstMatch(url);
-    if (m != null) return int.tryParse(m.group(2)!);
-    return null;
+  /// Total comparator for episode URLs: (season nulls-last, number,
+  /// url-tiebreak). `null` season sorts LAST (unknown ≠ S1); never returns 0
+  /// for distinct URLs (deterministic order on combined pages).
+  static int _compareEpisodeUrls(String a, String b) {
+    final sa = seasonEpisode(a);
+    final sb = seasonEpisode(b);
+    if (sa.$1 == null && sb.$1 != null) return 1;
+    if (sa.$1 != null && sb.$1 == null) return -1;
+    if (sa.$1 != null && sb.$1 != null && sa.$1 != sb.$1) {
+      return sa.$1!.compareTo(sb.$1!);
+    }
+    if (sa.$2 != sb.$2) return (sa.$2 ?? 0).compareTo(sb.$2 ?? 0);
+    return a.compareTo(b);
   }
 
-  int? _episodeNumber(String url) => episodeNumber(url);
+  /// (season, number) from the URL slug: `-SxE` (`…-ken-4-episodio-21` no —
+  /// this site uses `naruto-1x1` → (1,1)) with legacy `-episodio-N` fallback
+  /// → (null, N). Same contract as the DooPlay helper (duplicated ~15 lines
+  /// on purpose — 2 slug formats, no shared abstraction until 3+ converge).
+  @visibleForTesting
+  static (int?, int?) seasonEpisode(String url) {
+    var path = url.split('?').first.split('#').first;
+    while (path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    final lower = path.toLowerCase();
+    if (RegExp(r'-(\d+)-(\d+)-episodio-(\d+)$').firstMatch(lower)
+        case final m?) {
+      // ponytail: specials x.5 out of int-season resolve by design.
+      debugPrint('[SeasonResolve] AnimePlayer special x.5 (season=null): $url');
+      return (null, int.tryParse(m.group(3)!));
+    }
+    if (RegExp(r'-(\d{1,2})-episodio-(\d+)(?:-parte-\d+)?$').firstMatch(lower)
+        case final m?) {
+      return (int.tryParse(m.group(1)!), int.tryParse(m.group(2)!));
+    }
+    var m = RegExp(r'-(\d{1,2})x(\d{1,4})$').firstMatch(lower);
+    if (m != null) {
+      return (int.tryParse(m.group(1)!), int.tryParse(m.group(2)!));
+    }
+    m = RegExp(r'episodio[\s-]*(\d+)', caseSensitive: false).firstMatch(path);
+    if (m != null) return (null, int.tryParse(m.group(1)!));
+    return (null, null);
+  }
+
+  /// Episode number from the URL slug. Current scheme is `-SxE`
+  /// (`naruto-1x1` → 1); the legacy `-episodio-N` form is kept as fallback.
+  /// Legacy wrapper (number only); prefer [seasonEpisode] for season-aware
+  /// resolution.
+  @visibleForTesting
+  int? episodeNumber(String url) => seasonEpisode(url).$2;
+
+  /// Season-aware resolve (same rule as DooPlay): hinted season present →
+  /// match by number-IN-season; hinted but page COMBINED without that
+  /// episode → [] (never silently S1); otherwise absolute fallback + log.
+  @override
+  Future<List<VideoSource>> resolveVideo(Anime match, int episodeNumber,
+      {Anime? catalog}) async {
+    final eps = await getEpisodes(match);
+    Episode? target;
+    switch (eps) {
+      case Success(:final data):
+        final hint =
+            catalog == null ? null : TextUtils.seasonOf(catalog.name);
+        if (hint != null) {
+          final inSeason = data
+              .where((e) => e.season == hint)
+              .toList()
+            ..sort((a, b) =>
+                (int.tryParse(a.number) ?? 0)
+                    .compareTo(int.tryParse(b.number) ?? 0));
+          for (final e in inSeason) {
+            if (int.tryParse(e.number) == episodeNumber) {
+              target = e;
+              break;
+            }
+          }
+          if (target == null) {
+            final seasons =
+                data.map((e) => e.season).whereType<int>().toSet();
+            if (seasons.length >= 2) return const [];
+            debugPrint('[SeasonResolve] AnimePlayer fallback absoluto '
+                'ep=$episodeNumber hint=$hint url=${match.url}');
+          }
+        }
+        target ??= () {
+          for (final e in data) {
+            if (int.tryParse(e.number) == episodeNumber) return e;
+          }
+          return null;
+        }();
+      case Failure():
+      case Loading():
+        return const [];
+    }
+    if (target == null) return const [];
+    final vs = await getVideoSources(target, anime: match);
+    switch (vs) {
+      case Success(:final data):
+        return data;
+      case Failure():
+      case Loading():
+        return const [];
+    }
+  }
 
   @override
   Future<ScraperResult<List<VideoSource>>> getVideoSources(

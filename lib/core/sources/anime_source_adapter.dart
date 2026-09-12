@@ -102,9 +102,18 @@ abstract class AnimeSourceAdapter {
   /// the main series. AnimeFire only grants its full-series-page bonus when the
   /// candidate's title matches the query exactly, so a spin-off sharing the
   /// "todos-os-episodios" slug can never ride that bonus to beat the series.
+  ///
+  /// Season signal: when [query] names a season ("…4th Season" → 4, via
+  /// [TextUtils.seasonOf] on the ORIGINAL query — [normalize] destroys
+  /// "4th"), the candidate whose URL tail sits in season position (`…-ken-4`
+  /// → 4) gets +30 and a wrong-season candidate gets −30; the season-less
+  /// base page gets −10 (honest S1 fallback when the season page is missing).
+  /// No query hint → scores unchanged. Final tiebreak is by URL so the order
+  /// is deterministic (no reliance on unstable sort of equal scores).
   static Anime bestMatch(
       String query, List<Anime> candidates, AnimeSource source) {
     final q = normalize(query);
+    final querySeason = TextUtils.seasonOf(query);
     const urlSideTokens = [
       'film-',
       'movie-',
@@ -162,11 +171,51 @@ abstract class AnimeSourceAdapter {
       if (u.contains('dublado') || u.contains('legendado')) {
         s -= 5;
       }
+      if (querySeason != null) {
+        final cs = seasonOfCandidateUrl(a.url);
+        if (cs == querySeason) {
+          s += 30;
+        } else if (cs != null) {
+          s -= 30;
+        } else {
+          s -= 10;
+        }
+      }
       return s;
     }
 
-    candidates.sort((a, b) => score(b).compareTo(score(a)));
+    candidates.sort((a, b) {
+      final cmp = score(b).compareTo(score(a));
+      if (cmp != 0) return cmp;
+      return a.url.compareTo(b.url);
+    });
     return candidates.first;
+  }
+
+  /// Season from a provider ANIME-page URL tail (`…-ken-4` → 4). ONLY the
+  /// last slug segment counts, and only `-<N>` (1–2 digits) in tail position:
+  /// pure IDs (`/15859/`), resolutions (`-720p`), years, and episode-style
+  /// tails never match. A tail digit preceded by a non-season token
+  /// (`hd`, `online`, `dublado`, `legendado`, `ova`, `movie`, `film`,
+  /// `special`, `episodio`) is NOT a season (`…-online-hd-2` → null).
+  /// Public (not test-only): [GoyabuAdapter] uses it in production to detect
+  /// a wrongly pinned season page.
+  static int? seasonOfCandidateUrl(String url) {
+    var path = url.split('?').first.split('#').first.toLowerCase();
+    while (path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    final tail = path.split('/').last;
+    final m = RegExp(r'-(\d{1,2})$').firstMatch(tail);
+    if (m == null) return null;
+    const nonSeason = {
+      'hd', 'online', 'dublado', 'legendado', 'ova', 'movie', 'filme',
+      'film', 'special', 'episodio', 'episode',
+    };
+    final beforeParts = tail.substring(0, m.start).split('-');
+    final before = beforeParts.isEmpty ? '' : beforeParts.last;
+    if (nonSeason.contains(before)) return null;
+    return int.tryParse(m.group(1)!);
   }
 
   static String normalize(String s) {

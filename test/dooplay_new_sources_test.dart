@@ -425,4 +425,158 @@ void main() {
       ]));
     });
   });
+
+  // Slime S4E21 (relatorio-slime-s4e21 §4a): BetterAnime serves S1..S4 on ONE
+  // combined page (`…-ken-episodio-21`, `…-ken-2-episodio-21`, …). The old
+  // `_episodeNumber` collapsed all four into number 21 and the default
+  // resolveVideo returned S1E21 for every S4 episode, silently.
+  group('DooPlay season-aware (Slime S4 combined page)', () {
+    const slimeAnime = '''
+<html><body>
+<a href="https://betteranime.io/episodios/tensei-shitara-slime-datta-ken-episodio-21/">S1E21</a>
+<a href="https://betteranime.io/episodios/tensei-shitara-slime-datta-ken-2-episodio-21/">S2E21</a>
+<a href="https://betteranime.io/episodios/tensei-shitara-slime-datta-ken-3-episodio-21/">S3E21</a>
+<a href="https://betteranime.io/episodios/tensei-shitara-slime-datta-ken-4-episodio-21/">S4E21</a>
+<a href="https://betteranime.io/episodios/tensei-shitara-slime-datta-ken-4-episodio-5/">S4E5</a>
+<a href="https://betteranime.io/episodios/tensei-shitara-slime-datta-ken-2-5-episodio-3/">S2.5E3</a>
+<a href="https://betteranime.io/episodios/tensei-shitara-slime-datta-ken-4-EPISODIO-6/?ref=x">S4E6-upper</a>
+</body></html>
+''';
+
+    String? _referer(http.BaseRequest req) {
+      for (final e in req.headers.entries) {
+        if (e.key.toLowerCase() == 'referer') return e.value;
+      }
+      return null;
+    }
+
+    /// Serves the anime page + per-episode player pages; the wp-json payload
+    /// echoes the REFERER episode's (season, number) into the mp4 URL so the
+    /// test can tell WHICH season episode was resolved.
+    DooPlayAdapter slimeAdapter() => DooPlayAdapter(
+          source: AnimeSource.betterAnime,
+          client: MockClient((req) async {
+            final path = req.url.path;
+            if (path.contains('/animes/')) return _ok(slimeAnime);
+            if (path.startsWith('/episodios/')) {
+              return _ok('''
+<html><body>
+<div id='player-option-1' class='dooplay_player_option' data-type='tv' data-post='77' data-nume='21'></div>
+<script>dtAjax = {"url":"\\/wp-admin\\/admin-ajax.php","player_api":"https:\\/\\/betteranime.io\\/wp-json\\/dooplayer\\/v2\\/","play_method":"wp_json","loading":"Loading.."};</script>
+</body></html>
+''');
+            }
+            if (path.startsWith('/wp-json/dooplayer/v2/')) {
+              final ref = _referer(req) ?? '';
+              final sn = DooPlayAdapter.seasonEpisode(ref);
+              final tag =
+                  's${sn.$1 ?? 1}x${sn.$2 ?? 0}';
+              return _json(
+                  '{"embed_url":"https://cdn.example.com/slime/$tag.mp4","type":"mp4"}');
+            }
+            if (path.endsWith('.mp4')) return _probe();
+            return http.Response('nf', 404);
+          }),
+        );
+
+    Anime slimeMatch() => Anime(
+          name: 'Slime',
+          url: 'https://betteranime.io/animes/tensei-shitara-slime-datta-ken/',
+          source: AnimeSource.betterAnime,
+        );
+    Anime slimeS4() => Anime(
+          name: 'Tensei Shitara Slime Datta Ken 4th Season',
+          url: '',
+          source: AnimeSource.anilist,
+        );
+
+    test('seasonEpisode parses (season, number) with fixed precedence', () {
+      const b = 'https://betteranime.io/episodios/';
+      expect(
+          DooPlayAdapter.seasonEpisode(
+              '${b}tensei-shitara-slime-datta-ken-4-episodio-21/'),
+          (4, 21));
+      expect(
+          DooPlayAdapter.seasonEpisode(
+              '${b}tensei-shitara-slime-datta-ken-episodio-21/'),
+          (null, 21));
+      expect(
+          DooPlayAdapter.seasonEpisode(
+              'https://animesonlinehdk.com/episodes/naruto-4x21/'),
+          (4, 21));
+      // Temporada 2.5: out of int-season resolve by design (null + log).
+      expect(
+          DooPlayAdapter.seasonEpisode(
+              '${b}tensei-shitara-slime-datta-ken-2-5-episodio-3/'),
+          (null, 3));
+      // Uppercase + query string + parte suffix.
+      expect(
+          DooPlayAdapter.seasonEpisode(
+              '${b}tensei-shitara-slime-datta-ken-4-EPISODIO-6/?ref=x'),
+          (4, 6));
+      expect(
+          DooPlayAdapter.seasonEpisode('${b}slime-episodio-21-parte-2/'),
+          (null, 21));
+      // Contra-exemplos: never a season.
+      expect(DooPlayAdapter.seasonEpisode('https://site.cc/anime/15859/'),
+          (null, null));
+      expect(
+          DooPlayAdapter.seasonEpisode(
+              'https://site.cc/episodios/naruto-720p/'),
+          (null, null));
+    });
+
+    test('getEpisodes keeps 4× number 21 with distinct seasons', () async {
+      final result = await slimeAdapter().getEpisodes(slimeMatch());
+      expect(result, isA<Success<List<Episode>>>());
+      final eps = (result as Success<List<Episode>>).data;
+      final e21 = eps.where((e) => e.number == '21').toList();
+      expect(e21.length, 4);
+      expect(e21.map((e) => e.season).toSet(), {null, 2, 3, 4});
+      // Deterministic order: seasons asc, unknown last.
+      expect(
+          eps.map((e) => (e.season, e.number)).toList(),
+          containsAllInOrder([
+            (2, '21'),
+            (3, '21'),
+            (4, '5'),
+            (4, '21'),
+          ]));
+    });
+
+    test('resolveVideo(S4, 21) → …-4-episodio-21 (was S1E21)', () async {
+      final sources =
+          await slimeAdapter().resolveVideo(slimeMatch(), 21, catalog: slimeS4());
+      expect(sources.map((s) => s.url), containsAll([
+        'https://cdn.example.com/slime/s4x21.mp4',
+      ]));
+      expect(sources.map((s) => s.url),
+          isNot(contains('https://cdn.example.com/slime/s1x21.mp4')));
+    });
+
+    test('resolveVideo(S4, 5) → …-4-episodio-5 (not only EP21)', () async {
+      final sources =
+          await slimeAdapter().resolveVideo(slimeMatch(), 5, catalog: slimeS4());
+      expect(sources.map((s) => s.url),
+          contains('https://cdn.example.com/slime/s4x5.mp4'));
+    });
+
+    test('resolveVideo(S2, 21) → S2E21; no catalog → legacy first match',
+        () async {
+      final s2 =
+          await slimeAdapter().resolveVideo(slimeMatch(), 21,
+              catalog: Anime(
+                  name: 'Tensei Shitara Slime Datta Ken 2nd Season',
+                  url: '',
+                  source: AnimeSource.anilist));
+      expect(s2.map((s) => s.url),
+          contains('https://cdn.example.com/slime/s2x21.mp4'));
+      // No hint: absolute/first match in (season, number) order — season
+      // unknown (S1 slug) sorts last, so S2E21 comes first. Deterministic,
+      // single-season pages behave exactly as before.
+      final legacy = await slimeAdapter().resolveVideo(slimeMatch(), 21);
+      expect(legacy.map((s) => s.url),
+          contains('https://cdn.example.com/slime/s2x21.mp4'));
+    });
+  });
 }

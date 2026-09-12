@@ -222,26 +222,24 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
     }
   }
 
-  /// Season number from a catalog title ("X 4th Season" → 4,
-  /// "X Season 2" → 2). Null when the title carries no season — the
+  /// Season number from a catalog title. Delegates to [TextUtils.seasonOf]
+  /// (neutral owner — DooPlay/bestMatch share it; never import this adapter
+  /// from another provider). Null when the title carries no season — the
   /// catalog entry then covers the series from S1 (relative == absolute).
-  static int? seasonFromCatalogName(String name) {
-    final lower = name.toLowerCase();
-    var m =
-        RegExp(r'(\d+)\s*(?:st|nd|rd|th)?\s*season\b').firstMatch(lower);
-    if (m != null) return int.tryParse(m.group(1)!);
-    m = RegExp(r'\bseason\s*(\d+)\b').firstMatch(lower);
-    if (m != null) return int.tryParse(m.group(1)!);
-    return null;
-  }
+  static int? seasonFromCatalogName(String name) => TextUtils.seasonOf(name);
 
   /// Season-aware resolve: the catalog (AniList) splits seasons into separate
   /// entries ("... 4th Season", grid 1..21) while AnimeFire serves them on one
   /// combined page with absolute numbers (S4E21 == abs 93). Matching the raw
   /// [episodeNumber] would land on S1E21. When [catalog] names a season, the
-  /// number is season-relative: take the Nth episode of that season.
+  /// number is season-relative: take the episode with that IN-SEASON number
+  /// (matched by number, never by position — a gap in the API must yield "not
+  /// found", not a silent shift onto the next episode).
   /// Falls back to absolute matching (base behavior) when there's no season
-  /// hint or the season isn't on the page.
+  /// hint or the season isn't on the page; the fallback is logged (tagged)
+  /// ONLY when a hint was present, so "EP futuro" is distinguishable from a
+  /// wrong match in `adb logcat`. No AniList coupling here (`nextAiringEpisode`
+  /// is enrichment, 403-prone) — future/not-found both stay `[]`.
   @override
   Future<List<VideoSource>> resolveVideo(Anime match, int episodeNumber,
       {Anime? catalog}) async {
@@ -252,10 +250,36 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
         final season =
             catalog == null ? null : seasonFromCatalogName(catalog.name);
         if (season != null) {
-          final inSeason =
-              data.where((e) => e.season == season).toList();
-          if (episodeNumber >= 1 && episodeNumber <= inSeason.length) {
-            target = inSeason[episodeNumber - 1];
+          final inSeason = data.where((e) => e.season == season).toList()
+            ..sort((a, b) =>
+                (int.tryParse(a.number) ?? 0)
+                    .compareTo(int.tryParse(b.number) ?? 0));
+          // In-season number = absolute − season start + 1 (contiguous
+          // seasons: identical to the old positional pick; with a gap in the
+          // API payload the missing EP honestly yields "not found" instead of
+          // shifting every later EP onto its neighbour).
+          final start = inSeason.isEmpty
+              ? null
+              : int.tryParse(inSeason.first.number);
+          if (start != null) {
+            for (final e in inSeason) {
+              final abs = int.tryParse(e.number);
+              if (abs != null && abs - start + 1 == episodeNumber) {
+                target = e;
+                break;
+              }
+            }
+          }
+          if (target == null) {
+            final name = catalog?.name ?? '';
+            debugPrint('[SeasonResolve] AnimeFire fallback absoluto '
+                'ep=$episodeNumber season=$season '
+                'catalog=${name.length > 40 ? '${name.substring(0, 40)}…' : name}');
+            // Hinted season on a COMBINED page (≥2 seasons) with no in-season
+            // hit: never fall back to the absolute number (that IS the
+            // S4E21→S1E21 bug) — the episode is missing/future here.
+            final seasons = data.map((e) => e.season).whereType<int>().toSet();
+            if (seasons.length >= 2) return const [];
           }
         }
         target ??= () {
