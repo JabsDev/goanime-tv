@@ -237,6 +237,52 @@ oIPfuRJd74E/p.jpg
         expect(got.headers['content-type'], contains('mpegURL'));
         expect(got.body, contains('RESOLUTION=1920x1080'));
         expect(got.body, isNot(contains('RESOLUTION=854x480')));
+        // Full-chain: variantes apontam para o loopback, nunca para o CDN
+        // (o HTTP do player não passa no CDN do aparelho sem decoder).
+        expect(got.body, contains('/af-0v0.m3u8'));
+        expect(got.body, isNot(contains('akumast.net')));
+      } finally {
+        await proxy.close();
+      }
+    });
+
+    test('full-chain: variante e segmento servidos via loopback', () async {
+      const variant = '#EXTM3U\n#EXT-X-TARGETDURATION:6\n'
+          '#EXT-X-MAP:URI="i.jpg"\n#EXTINF:6.000,\n1.jpg\n';
+      final proxy = DashManifestProxy(
+        client: MockClient((req) async {
+          final p = req.url.path;
+          if (p.endsWith('/h.jpg')) return http.Response(hls, 200);
+          // Segmentos antes da variante: moram no mesmo diretório dela.
+          if (p.endsWith('/1.jpg') || p.endsWith('/i.jpg')) {
+            return http.Response.bytes([1, 2, 3, 4], 200,
+                headers: {'content-type': 'video/mp4'});
+          }
+          if (p.contains('oIPfuRJd74E')) return http.Response(variant, 200);
+          return http.Response('nope', 404);
+        }),
+      );
+      try {
+        final master = await proxy.serveManifest(
+          manifestUrl: 'https://akumast.net/i/TOKEN/h.jpg',
+          height: 1080,
+        );
+        final masterBody = (await http.get(master)).body;
+        final variantPath = RegExp(r'(/[^\s"]+\.m3u8)').firstMatch(masterBody);
+        expect(variantPath, isNotNull);
+        final sub = await http.get(
+            Uri.parse('http://127.0.0.1:${master.port}${variantPath!.group(1)}'));
+        expect(sub.statusCode, 200);
+        // Segmentos e MAP também viram loopback (relativos ao CDN, não
+        // contra 127.0.0.1).
+        expect(sub.body, contains(RegExp(r'/af-0-s\d+\.m4s')));
+        expect(sub.body, isNot(contains('akumast.net')));
+        final segPath =
+            RegExp(r'(/[^\s"]+-s\d+\.m4s)').firstMatch(sub.body)!.group(1)!;
+        final seg = await http.get(
+            Uri.parse('http://127.0.0.1:${master.port}$segPath'));
+        expect(seg.statusCode, 200);
+        expect(seg.bodyBytes, [1, 2, 3, 4]);
       } finally {
         await proxy.close();
       }

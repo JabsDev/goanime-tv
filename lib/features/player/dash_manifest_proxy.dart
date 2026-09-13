@@ -24,6 +24,13 @@ import 'package:http/http.dart' as http;
 /// flows through loopback (cleartext to 127.0.0.1 is allowed by Android
 /// without extra config).
 ///
+/// Exception: HLS sub-resources (variant playlists + segments). The player's
+/// own HTTP client (ffmpeg/Lavf in mpv) fetches those directly, with its own
+/// UA/TLS fingerprint — and the CDN refused exactly that on-device ("Failed
+/// to open" the variant playlist while the app's fetch works). So HLS
+/// variants/segments are re-pointed at loopback and forwarded by the proxy
+/// with the app's headers: the player never touches the CDN.
+///
 /// Scope: AnimeFire only, instantiated per player screen and closed on
 /// dispose. Any fetch/rewrite failure must make the caller fall back to the
 /// direct URL (never fail playback that might have worked).
@@ -33,6 +40,7 @@ class DashManifestProxy {
   final http.Client? _client;
   HttpServer? _server;
   final _docs = <String, String>{};
+  final _upstream = <String, _Upstream>{};
   var _counter = 0;
 
   /// Codecs de vídeo do último manifesto servido (ex. `{'av01.0.08M.08'}`).
@@ -62,13 +70,80 @@ class DashManifestProxy {
     }
     lastIsHls = isHls(body: res.body);
     lastVideoCodecs = videoCodecs(body: res.body);
-    final doc = lastIsHls
-        ? rewriteHls(playlist: res.body, base: uri, height: height)
-        : rewriteManifest(mpd: res.body, base: uri, height: height);
     final server = _server ??= await _serve();
-    final path = lastIsHls ? '/af-${_counter++}.m3u8' : '/af-${_counter++}.mpd';
+    final tag = _counter++;
+    if (!lastIsHls) {
+      final doc = rewriteManifest(mpd: res.body, base: uri, height: height);
+      final path = '/af-$tag.mpd';
+      _docs[path] = doc;
+      return Uri.parse('http://127.0.0.1:${server.port}$path');
+    }
+    // HLS: absolutiza + filtra a altura (URLs do CDN), depois troca as
+    // variantes por loopback (full-chain: o player nunca toca no CDN).
+    var doc = rewriteHls(playlist: res.body, base: uri, height: height);
+    doc = _swapToLoopback(doc, tag, headers, bareAreVariants: true);
+    final path = '/af-$tag.m3u8';
     _docs[path] = doc;
     return Uri.parse('http://127.0.0.1:${server.port}$path');
+  }
+
+  /// Troca URIs absolutas do CDN por loopback, registrando o upstream para
+  /// busca sob demanda no handler. [bareAreVariants]: no master, linhas
+  /// soltas são variant playlists; nas sub-playlists, são segmentos.
+  /// `URI="..."` (EXT-X-MEDIA/KEY/MAP) é sempre sub-playlist/mídia relativa
+  /// ao contexto — registrada como variante (parse de media playlist serve
+  /// para ambas: sem STREAM-INF, só absolutiza).
+  String _swapToLoopback(
+    String doc,
+    int tag,
+    Map<String, String> headers, {
+    required bool bareAreVariants,
+  }) {
+    var v = 0;
+    var s = 0;
+    final lines = doc.split('\n');
+    final out = lines.map((line) {
+      final t = line.trimRight();
+      if (t.isEmpty) return line;
+      if (!t.startsWith('#')) {
+        if (!t.startsWith('http://') && !t.startsWith('https://')) return line;
+        // Segmentos com extensão `.m4s`: o demuxer HLS do ffmpeg (mpv)
+        // rejeita URLs sem extensão (`allowed_segment_extensions`) — sem
+        // isso, "Failed to open" mesmo com os bytes corretos. O conteúdo
+        // é fmp4, farejado pelo demuxer mov; ExoPlayer ignora a extensão.
+        final p = bareAreVariants
+            ? '/af-${tag}v${v++}.m3u8'
+            : '/af-$tag-s${s++}.m4s';
+        _upstream[p] = _Upstream(t, headers, isVariant: bareAreVariants);
+        return p;
+      }
+      return t.replaceAllMapped(
+        RegExp('URI="([^"]+)"'),
+        (m) {
+          final target = m.group(1)!;
+          if (target.startsWith('http://') || target.startsWith('https://')) {
+            // Mesmo contexto das linhas soltas: no master (EXT-X-MEDIA) é
+            // sub-playlist; na mídia (EXT-X-MAP/KEY) é bytes (init/key).
+            final p = bareAreVariants
+                ? '/af-${tag}v${v++}.m3u8'
+                : '/af-$tag-s${s++}.m4s';
+            _upstream[p] =
+                _Upstream(target, headers, isVariant: bareAreVariants);
+            return 'URI="$p"';
+          }
+          return m.group(0)!;
+        },
+      );
+    }).join('\n');
+    return out;
+  }
+
+  Future<http.Response> _fetchUpstream(_Upstream up) {
+    final uri = Uri.parse(up.url);
+    final fut = _client != null
+        ? _client.get(uri, headers: up.headers)
+        : http.get(uri, headers: up.headers);
+    return fut.timeout(const Duration(seconds: 20));
   }
 
   Future<HttpServer> _serve() async {
@@ -78,24 +153,53 @@ class DashManifestProxy {
     server.listen((req) async {
       try {
         final doc = _docs[req.uri.path];
-        if (doc == null) {
+        if (doc != null) {
+          await _serveText(req, doc);
+          return;
+        }
+        final up = _upstream[req.uri.path];
+        if (up == null) {
           req.response.statusCode = HttpStatus.notFound;
           await req.response.close();
           return;
         }
-        // Bytes + Content-Length explícito: o demuxer DASH do ffmpeg relê o
-        // manifesto e falha sobre chunked sem tamanho ("Unable to read
-        // manifest" / "Failed to recognize file format"). Nunca use
-        // String.length aqui (UTF-8 multi-byte, ex. "Português").
-        // Content-type segue a extensão: o ExoPlayer decide DASH vs HLS
-        // por ela (um `#EXTM3U` servido como `.mpd` morre no parser XML).
-        final body = utf8.encode(doc);
-        req.response.headers.contentType = req.uri.path.endsWith('.m3u8')
-            ? ContentType.parse('application/x-mpegURL')
-            : ContentType.parse('application/dash+xml');
-        req.response.headers.set('Accept-Ranges', 'bytes');
-        req.response.contentLength = body.length;
-        req.response.add(body);
+        http.Response fetched;
+        try {
+          fetched = await _fetchUpstream(up);
+        } catch (e) {
+          debugPrint('[DashProxy] upstream fetch failed ${up.url}: $e');
+          req.response.statusCode = HttpStatus.badGateway;
+          await req.response.close();
+          return;
+        }
+        if (fetched.statusCode != 200) {
+          req.response.statusCode = HttpStatus.badGateway;
+          await req.response.close();
+          return;
+        }
+        if (up.isVariant) {
+          // Sub-playlist HLS: absolutiza contra o CDN e troca os segmentos
+          // por loopback (full-chain), cacheando o resultado.
+          final tag = _tagOf(req.uri.path);
+          var sub = rewriteHls(
+              playlist: fetched.body,
+              base: Uri.parse(up.url),
+              height: null);
+          sub = _swapToLoopback(sub, tag, up.headers, bareAreVariants: false);
+          _docs[req.uri.path] = sub;
+          await _serveText(req, sub);
+          return;
+        }
+        // Segmento: repassa os bytes com o content-type do upstream.
+        final bytes = fetched.bodyBytes;
+        final ct = fetched.headers['content-type'];
+        if (ct != null) {
+          try {
+            req.response.headers.contentType = ContentType.parse(ct);
+          } catch (_) {}
+        }
+        req.response.contentLength = bytes.length;
+        req.response.add(bytes);
         await req.response.close();
       } catch (e) {
         debugPrint('[DashProxy] serve error: $e');
@@ -107,8 +211,34 @@ class DashManifestProxy {
     return server;
   }
 
+  /// Tag numérica do manifesto de origem (`/af-<tag>...`) para agrupar
+  /// variantes/segmentos da mesma sessão. -1 quando irreconhecível (as
+  /// trocas seguem funcionando, só o agrupamento degrada).
+  static int _tagOf(String path) {
+    final m = RegExp(r'/af-(\d+)').firstMatch(path);
+    return m == null ? -1 : int.tryParse(m.group(1)!) ?? -1;
+  }
+
+  Future<void> _serveText(HttpRequest req, String doc) async {
+    // Bytes + Content-Length explícito: o demuxer DASH do ffmpeg relê o
+    // manifesto e falha sobre chunked sem tamanho ("Unable to read
+    // manifest" / "Failed to recognize file format"). Nunca use
+    // String.length aqui (UTF-8 multi-byte, ex. "Português").
+    // Content-type segue a extensão: o ExoPlayer decide DASH vs HLS
+    // por ela (um `#EXTM3U` servido como `.mpd` morre no parser XML).
+    final body = utf8.encode(doc);
+    req.response.headers.contentType = req.uri.path.endsWith('.m3u8')
+        ? ContentType.parse('application/x-mpegURL')
+        : ContentType.parse('application/dash+xml');
+    req.response.headers.set('Accept-Ranges', 'bytes');
+    req.response.contentLength = body.length;
+    req.response.add(body);
+    await req.response.close();
+  }
+
   Future<void> close() async {
     _docs.clear();
+    _upstream.clear();
     try {
       await _server?.close(force: true);
     } catch (_) {}
@@ -273,4 +403,16 @@ class DashManifestProxy {
     );
     return out;
   }
+}
+
+/// Recurso do CDN a buscar sob demanda no handler loopback (full-chain
+/// HLS): [url] + [headers] do app. [isVariant]: sub-playlist (parseia como
+/// media playlist e troca os segmentos por loopback); senão, segmento
+/// repassado byte a byte.
+class _Upstream {
+  final String url;
+  final Map<String, String> headers;
+  final bool isVariant;
+
+  _Upstream(this.url, this.headers, {required this.isVariant});
 }
