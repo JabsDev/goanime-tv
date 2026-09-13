@@ -118,7 +118,7 @@ void main() {
 </MPD>''';
 
     test('manifesto AV1-only (S4E21 real) → codecs av01, sem o áudio', () {
-      final codecs = DashManifestProxy.videoCodecs(mpd: av1Mpd);
+      final codecs = DashManifestProxy.videoCodecs(body: av1Mpd);
       expect(codecs, {'av01.0.04M.08', 'av01.0.08M.08'});
       expect(DashManifestProxy.isAv1Only(codecs), isTrue);
     });
@@ -128,13 +128,13 @@ void main() {
 <AdaptationSet contentType="video">
 <Representation mimeType="video/mp4" codecs="avc1.64001f" width="1280" height="720"></Representation>
 </AdaptationSet></Period></MPD>''';
-      final codecs = DashManifestProxy.videoCodecs(mpd: avcMpd);
+      final codecs = DashManifestProxy.videoCodecs(body: avcMpd);
       expect(codecs, {'avc1.64001f'});
       expect(DashManifestProxy.isAv1Only(codecs), isFalse);
     });
 
     test('sem codecs declarados → vazio (fail-open, tenta tocar)', () {
-      final codecs = DashManifestProxy.videoCodecs(mpd: _mpd);
+      final codecs = DashManifestProxy.videoCodecs(body: _mpd);
       expect(codecs, isEmpty);
       expect(DashManifestProxy.isAv1Only(codecs), isFalse);
     });
@@ -164,5 +164,82 @@ void main() {
     } finally {
       await proxy.close();
     }
+  });
+
+  group('HLS (Slime S4E21 real: /h.jpg devolve #EXTM3U, não MPD)', () {
+    // Multivariant fiel ao akumast: 3 variantes AV1 + áudio muxado, URIs
+    // relativas (resolvem contra o manifesto do CDN, não contra 127.0.0.1).
+    const hls = '''#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-INDEPENDENT-SEGMENTS
+#EXT-X-STREAM-INF:BANDWIDTH=981788,RESOLUTION=854x480,CODECS="av01.0.04M.08,mp4a.40.2"
+oIHfuRJd74E/p.jpg
+#EXT-X-STREAM-INF:BANDWIDTH=1914092,RESOLUTION=1280x720,CODECS="av01.0.05M.08,mp4a.40.2"
+oILfuRJd74E/p.jpg
+#EXT-X-STREAM-INF:BANDWIDTH=3562971,RESOLUTION=1920x1080,CODECS="av01.0.08M.08,mp4a.40.2"
+oIPfuRJd74E/p.jpg
+''';
+    final hBase = Uri.parse('https://akumast.net/i/TOKEN/h.jpg');
+
+    test('isHls distingue #EXTM3U de MPD', () {
+      expect(DashManifestProxy.isHls(body: hls), isTrue);
+      expect(DashManifestProxy.isHls(body: _mpd), isFalse);
+    });
+
+    test('CODECS av01+mp4a → só vídeo, AV1-only', () {
+      final codecs = DashManifestProxy.videoCodecs(body: hls);
+      expect(codecs,
+          {'av01.0.04M.08', 'av01.0.05M.08', 'av01.0.08M.08'});
+      expect(DashManifestProxy.isAv1Only(codecs), isTrue);
+    });
+
+    test('HLS H.264 não é AV1-only', () {
+      const avc = '#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=1280x720,'
+          'CODECS="avc1.64001f,mp4a.40.2"\nseg/p.jpg\n';
+      final codecs = DashManifestProxy.videoCodecs(body: avc);
+      expect(codecs, {'avc1.64001f'});
+      expect(DashManifestProxy.isAv1Only(codecs), isFalse);
+    });
+
+    test('height=720 absolutiza e mantém só a variante 720', () {
+      final out = DashManifestProxy.rewriteHls(
+          playlist: hls, base: hBase, height: 720);
+      expect(out, contains('RESOLUTION=1280x720'));
+      expect(out, isNot(contains('RESOLUTION=854x480')));
+      expect(out, isNot(contains('RESOLUTION=1920x1080')));
+      // URI relativa vira CDN absoluta (nunca 127.0.0.1).
+      expect(out,
+          contains('https://akumast.net/i/TOKEN/oILfuRJd74E/p.jpg'));
+      expect(out, isNot(contains('127.0.0.1')));
+    });
+
+    test('height sem match serve a playlist cheia', () {
+      final out = DashManifestProxy.rewriteHls(
+          playlist: hls, base: hBase, height: 2160);
+      expect(out, contains('RESOLUTION=854x480'));
+      expect(out, contains('RESOLUTION=1920x1080'));
+    });
+
+    test('serveManifest expõe .m3u8 com content-type HLS', () async {
+      final proxy = DashManifestProxy(
+        client: MockClient((_) async => http.Response(hls, 200)),
+      );
+      try {
+        final uri = await proxy.serveManifest(
+          manifestUrl: 'https://akumast.net/i/TOKEN/h.jpg',
+          height: 1080,
+        );
+        expect(uri.path.endsWith('.m3u8'), isTrue);
+        expect(proxy.lastIsHls, isTrue);
+        expect(proxy.lastVideoCodecs, contains('av01.0.08M.08'));
+        final got = await http.get(uri);
+        expect(got.statusCode, 200);
+        expect(got.headers['content-type'], contains('mpegURL'));
+        expect(got.body, contains('RESOLUTION=1920x1080'));
+        expect(got.body, isNot(contains('RESOLUTION=854x480')));
+      } finally {
+        await proxy.close();
+      }
+    });
   });
 }

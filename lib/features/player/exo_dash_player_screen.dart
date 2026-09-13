@@ -240,9 +240,12 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       _loadTimeout?.cancel();
       debugPrint('[ExoDash] Error source $index: $e');
       if (!mounted) return;
-      // Sem auto-avanço: erra NA qualidade escolhida.
+      // Sem auto-avanço: erra NA qualidade escolhida, com mensagem para
+      // gente (o detalhe cru vai só para o logcat, nunca para a TV).
+      final q = _sources[index].quality;
       setState(() {
-        _error = 'Erro ao reproduzir: $e';
+        _error = 'Não foi possível reproduzir $q. '
+            'A fonte pode estar fora do ar. Tente novamente ou escolha outra.';
         _isLoading = false;
       });
     }

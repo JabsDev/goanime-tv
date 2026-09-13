@@ -310,8 +310,9 @@ class _PlayerScreenState extends State<PlayerScreen>
         }
         // O mpv embarcado já rejeitou manifesto AnimeFire ("Failed to
         // recognize file format"): força o demuxer DASH em vez de contar
-        // com a detecção por extensão/content-type.
-        if (native is NativePlayer) {
+        // com a detecção por extensão/content-type. Só no DASH — no HLS
+        // o hint quebraria o demuxer (o `.m3u8` já é farejado sozinho).
+        if (!_dashProxy.lastIsHls && native is NativePlayer) {
           try {
             await native.setProperty('demuxer-lavf-format', 'dash');
           } catch (e) {
