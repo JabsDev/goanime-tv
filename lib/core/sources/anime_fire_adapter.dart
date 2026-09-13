@@ -76,6 +76,44 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
   bool get implemented => true;
 
   @override
+  Future<Anime?> resolveAnime(Anime animeRef) async {
+    // O catálogo AnimeFire indexa pelo título em inglês ("I Want to Love You
+    // Till Your Dying Day") enquanto o AniList entrega romaji ("Kimi ga Shinu
+    // made Koi wo Shitai"): sem sinal no título, o bestMatch grudava no
+    // primeiro "Kimi Ga..." (EP10 em 360p) e persistia a página errada.
+    // Busca o inglês primeiro, cai para o nome dado. Mesmo padrão do
+    // AnimesOnlineAdapter (P12).
+    final queries = <String>{
+      if (animeRef.englishName != null && animeRef.englishName!.isNotEmpty)
+        animeRef.englishName!,
+      animeRef.name,
+    };
+    for (final q in queries) {
+      final result = await search(TextUtils.cleanSearchQuery(q));
+      switch (result) {
+        case Success(data: final candidates):
+          final valid = candidates
+              .where((a) => a.url.isNotEmpty && _overlaps(q, a.name))
+              .toList();
+          if (valid.isEmpty) continue;
+          return AnimeSourceAdapter.pinSeasonPage(
+              q, valid, source, animeRef.url);
+        case Failure():
+        case Loading():
+          continue;
+      }
+    }
+    return null;
+  }
+
+  static bool _overlaps(String query, String candidate) {
+    final q = AnimeSourceAdapter.normalize(query);
+    final c = AnimeSourceAdapter.normalize(candidate);
+    if (q == c || q.contains(c) || c.contains(q)) return true;
+    return q.split(' ').any(c.split(' ').contains);
+  }
+
+  @override
   Future<ScraperResult<List<Anime>>> search(String animeName) async {
     final q = Uri.encodeQueryComponent(
         TextUtils.cleanSearchQuery(animeName));

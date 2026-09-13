@@ -20,13 +20,12 @@ import '../utils/text_utils.dart';
 /// It does not replace the short-TTL availability/resolution caches; it
 /// complements them.
 class ProviderMatchStore {
-  /// v2 (2026-09): season-aware bestMatch (S4 queries used to tie 59×59 with
-  /// the S1 page and persist the WRONG season page). The v1 key is abandoned
-  /// so stale season-pinned matches re-resolve instead of replaying the bug
-  /// for users who already have a persisted match. Resolution caches are
-  /// short-TTL (30 min, `AppCaches.resolutions`) and need no migration — just
-  /// don't QA immediately after update without clearing them.
-  static const _prefKey = 'provider_matches_v2';
+  /// v3 (2026-09): matches grudados na página errada quando o AnimeFire
+  /// indexa pelo título em inglês e a busca ia só com o romaji
+  /// ("Kimi ga Shinu..." → "Kimi Ga Aruji...", EP10 em 360p). A v2 é
+  /// abandonada para os matches errados se re-resolverem em vez de
+  /// repetirem o 360p. Caches de resolução são TTL curto e não migram.
+  static const _prefKey = 'provider_matches_v3';
 
   static Map<String, Map<String, String>>? _cache;
 

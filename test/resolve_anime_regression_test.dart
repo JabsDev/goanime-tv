@@ -161,4 +161,40 @@ void main() {
     expect(grid.length, 1); // _FakeAdapter.getEpisodes serves 1 episode.
     expect(grid.first.number, 1);
   });
+
+  test('resolveAnime prefere o inglês quando o romaji não pontua (Kimi ga Shinu)',
+      () async {
+    // Espelha o ao vivo: a busca romaji devolve a página certa (título em
+    // inglês, score ~0) depois do "Kimi Ga..." (score parcial) — o bestMatch
+    // puro grudava no errado (EP10 em 360p). A busca inglesa acerta em cheio.
+    String payload(List<List<String>> rows) =>
+        '{"data":[${rows.map((r) => '{"id":"${r[0]}","title":"${r[1]}","audio":"Legendado"}').join(',')}]}';
+    final adapter = AnimeFireAdapter(
+      client: MockClient((req) async {
+        final q = req.url.queryParameters['q'] ?? '';
+        if (q.contains('I Want to Love')) {
+          return http.Response(
+              payload([
+                ['EfqshGOax3D', 'I Want to Love You Till Your Dying Day'],
+                ['oWjh7iVeLsj', 'Kimi Ga Aruji De Shitsuji Ga Ore De'],
+              ]),
+              200);
+        }
+        return http.Response(
+            payload([
+              ['EfqshGOax3D', 'I Want to Love You Till Your Dying Day'],
+              ['oWjh7iVeLsj', 'Kimi Ga Aruji De Shitsuji Ga Ore De'],
+            ]),
+            200);
+      }),
+    );
+    final match = await adapter.resolveAnime(Anime(
+      name: 'Kimi ga Shinu made Koi wo Shitai',
+      englishName: 'I Want to Love You Till Your Dying Day',
+      url: '',
+      source: AnimeSource.animeFire,
+    ));
+    expect(match, isNotNull);
+    expect(match!.url, 'https://animefire.io/anime/EfqshGOax3D');
+  });
 }
