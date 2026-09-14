@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
+import '../../core/subtitles/model_manager.dart';
+import '../../core/subtitles/subtitle_store.dart';
 import '../../core/updater/update_service.dart';
 import '../../core/utils/nsfw_filter.dart';
 import '../../shared/widgets/app_top_bar.dart';
@@ -173,6 +175,98 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 32),
                     const Text(
+                      'Legenda IA (offline)',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: ThemeConstants.white,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Gera legenda PT-BR no aparelho, sem nuvem: traduz a '
+                      'legenda existente (rápido) ou transcreve o áudio japonês '
+                      '(lento, uma vez por episódio, vale por 5 dias). Modelos '
+                      'baixam só no Wi-Fi.',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: ThemeConstants.textSecondary,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ValueListenableBuilder<String>(
+                      valueListenable:
+                          SettingsService.instance.sttModelListenable,
+                      builder: (context, stt, _) => Column(
+                        children: [
+                          _ModeOption(
+                            label: 'Transcrição leve (padrão)',
+                            description:
+                                'Whisper tiny-ja (78 MB) — roda no stick fraco',
+                            selected: stt == 'tiny',
+                            onTap: () => SettingsService.instance
+                                .setSttModel('tiny'),
+                          ),
+                          _ModeOption(
+                            label: 'Transcrição completa',
+                            description:
+                                'Whisper base (142 MB) — melhor japonês, aparelho forte',
+                            selected: stt == 'base',
+                            onTap: () => SettingsService.instance
+                                .setSttModel('base'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ValueListenableBuilder<String>(
+                      valueListenable:
+                          SettingsService.instance.mtEngineListenable,
+                      builder: (context, mt, _) => Column(
+                        children: [
+                          _ModeOption(
+                            label: 'Tradução leve (padrão)',
+                            description:
+                                'Marian EN→PT (120 MB) — qualquer aparelho',
+                            selected: mt == 'leve',
+                            onTap: () => SettingsService.instance
+                                .setMtEngine('leve'),
+                          ),
+                          _ModeOption(
+                            label: 'Tradução completa',
+                            description:
+                                'NLLB JA→PT direto (1.28 GB) — só aparelho forte com 2 GB livres',
+                            selected: mt == 'completa',
+                            onTap: () => SettingsService.instance
+                                .setMtEngine('completa'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _AiStorageRow(),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Modelos (HuggingFace, só Wi-Fi)',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: ThemeConstants.white,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _ModelRow(modelId: 'whisper-tiny-ja', label: 'Voz leve (tiny)'),
+                    _ModelRow(modelId: 'whisper-base', label: 'Voz completa (base)'),
+                    _ModelRow(modelId: 'silero-vad', label: 'VAD silero (opcional)'),
+                    _ModelRow(
+                        modelId: 'marian-en-pt-int8',
+                        label: 'Tradução leve (Marian)'),
+                    _ModelRow(
+                        modelId: 'nllb-600M-int8',
+                        label: 'Tradução completa (NLLB)'),
+                    const SizedBox(height: 32),
+                    const Text(
                       'Atualizações',
                       style: TextStyle(
                         fontSize: 22,
@@ -205,6 +299,186 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Linha de status + download de um modelo (D-pad: TVButton focável).
+/// Mostra Instalado/Faltando + MB do catálogo; baixa do HF só no Wi-Fi
+/// (ModelManager recusa rede metered) com resume + progresso.
+class _ModelRow extends StatefulWidget {
+  final String modelId;
+  final String label;
+  const _ModelRow({required this.modelId, required this.label});
+
+  @override
+  State<_ModelRow> createState() => _ModelRowState();
+}
+
+class _ModelRowState extends State<_ModelRow> {
+  Future<bool>? _ready;
+  double? _progress;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  void _check() {
+    setState(() {
+      _progress = null;
+      _ready = const ModelManager().isReady(widget.modelId);
+    });
+  }
+
+  Future<void> _download() async {
+    setState(() => _progress = 0);
+    try {
+      await const ModelManager().downloadModel(
+        widget.modelId,
+        onProgress: (_, p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${widget.label} pronto.')));
+    } on ModelDownloadException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) _check();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final spec = aiModelCatalog[widget.modelId]!;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: FutureBuilder<bool>(
+        future: _ready,
+        builder: (context, snap) {
+          final ready = snap.data ?? false;
+          return Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${widget.label} — ${ready ? 'instalado' : 'faltando'} '
+                      '(${spec.mb} MB)',
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 16),
+                    ),
+                    if (_progress != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: LinearProgressIndicator(
+                            value: _progress,
+                            backgroundColor: Colors.white24,
+                            valueColor: const AlwaysStoppedAnimation(
+                                ThemeConstants.primary)),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              if (!ready && _progress == null)
+                TVButton(
+                  label: 'Baixar',
+                  width: 160,
+                  onPressed: _download,
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Espaço usado por legendas IA + modelos, com botões de limpeza.
+/// D-pad: TVButton já é focável.
+class _AiStorageRow extends StatefulWidget {
+  const _AiStorageRow();
+
+  @override
+  State<_AiStorageRow> createState() => _AiStorageRowState();
+}
+
+class _AiStorageRowState extends State<_AiStorageRow> {
+  Future<(int, int)>? _usage;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  void _refresh() {
+    setState(() {
+      _usage = Future.wait([
+        SubtitleStore.usedBytes(),
+        const ModelManager().usedBytes(),
+      ]).then((v) => (v[0], v[1]));
+    });
+  }
+
+  static String _fmt(int bytes) {
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<(int, int)>(
+      future: _usage,
+      builder: (context, snap) {
+        final subs = snap.data?.$1 ?? 0;
+        final models = snap.data?.$2 ?? 0;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Espaço: legendas ${_fmt(subs)} · modelos ${_fmt(models)}',
+              style: const TextStyle(
+                fontSize: 16,
+                color: ThemeConstants.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                TVButton(
+                  label: 'Apagar legendas IA',
+                  isPrimary: false,
+                  onPressed: () async {
+                    await SubtitleStore.clearAll();
+                    _refresh();
+                  },
+                ),
+                TVButton(
+                  label: 'Apagar modelos',
+                  isPrimary: false,
+                  onPressed: () async {
+                    await const ModelManager().deleteAll();
+                    _refresh();
+                  },
+                ),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 }

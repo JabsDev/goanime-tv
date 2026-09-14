@@ -85,6 +85,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   List<VideoSource> _sources = [];
   int _selectedQualityIndex = 0;
 
+  // Legenda externa (Fase 0): índice em src.subtitleUrls, -1 = desligada.
+  // Delay em segundos, ciclo 0 → +0.5 → -0.5 (spec: ±500ms).
+  int _subIndex = -1;
+  double _subDelay = 0;
+  static const _subDelays = [0.0, 0.5, -0.5];
+
   // Proxy local de manifestos DASH (AnimeFire): re-serve o MPD com extensão
   // `.mpd` (o `/m.jpg` do CDN não abre no demuxer) e filtra a representação
   // da qualidade escolhida. Uma instância por tela, fechada no dispose.
@@ -106,6 +112,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   // D-pad-focusable control buttons (back/quality/visibility/replay/play/forward).
   late final FocusNode _backNode = FocusNode();
   late final FocusNode _qualityNode = FocusNode();
+  late final FocusNode _subNode = FocusNode();
+  late final FocusNode _delayNode = FocusNode();
   late final FocusNode _visibilityNode = FocusNode();
   late final FocusNode _replayNode = FocusNode();
   late final FocusNode _playNode = FocusNode();
@@ -114,6 +122,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   List<FocusNode> get _controlNodes => [
         _backNode,
         _qualityNode,
+        _subNode,
+        _delayNode,
         _visibilityNode,
         _replayNode,
         _playNode,
@@ -324,6 +334,11 @@ class _PlayerScreenState extends State<PlayerScreen>
         Media(playUrl, httpHeaders: headers),
         play: true,
       );
+      // Fase 0: anexa a primeira legenda externa da fonte (pronta do job IA
+      // ou candidata do provider). mpv exige setSubtitleTrack pós-open.
+      _subIndex = src.subtitleUrls.isEmpty ? -1 : 0;
+      _subDelay = 0;
+      if (_subIndex >= 0) await _applySubtitle(src);
       if (!mounted) return;
       debugPrint('[Player] Source $index opened successfully');
       _listenStreams();
@@ -1048,6 +1063,105 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ),
                     ),
                     const SizedBox(width: 8),
+                    if (_sources.isNotEmpty &&
+                        _sources[_selectedQualityIndex]
+                            .subtitleUrls
+                            .isNotEmpty)
+                      _controlButton(
+                        node: _subNode,
+                        onTap: _cycleSubtitle,
+                        child: Semantics(
+                          button: true,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: _cycleSubtitle,
+                              onLongPress: _cycleDelay,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.5),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.closed_caption,
+                                        color: Colors.white, size: 20),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      _subIndex < 0
+                                          ? 'Legenda: off'
+                                          : _sources[_selectedQualityIndex]
+                                              .subtitleUrls[_subIndex]
+                                              .label,
+                                      style: const TextStyle(
+                                          color: Colors.white, fontSize: 14),
+                                    ),
+                                    if (_aiBadge != null) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: ThemeConstants.primary,
+                                          borderRadius:
+                                              BorderRadius.circular(4),
+                                        ),
+                                        child: const Text('IA',
+                                            style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold)),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (_sources.isNotEmpty &&
+                        _sources[_selectedQualityIndex]
+                            .subtitleUrls
+                            .isNotEmpty &&
+                        _subIndex >= 0)
+                      _controlButton(
+                        node: _delayNode,
+                        onTap: _cycleDelay,
+                        child: Semantics(
+                          button: true,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: _cycleDelay,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.5),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  _subDelay == 0
+                                      ? 'Delay: 0'
+                                      : 'Delay: ${_subDelay > 0 ? '+' : ''}${(_subDelay * 1000).toInt()}ms',
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 14),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (_sources.isNotEmpty &&
+                        _sources[_selectedQualityIndex]
+                            .subtitleUrls
+                            .isNotEmpty &&
+                        _subIndex >= 0)
+                      const SizedBox(width: 8),
                     _controlButton(
                       node: _visibilityNode,
                       onTap: () {
@@ -1093,6 +1207,19 @@ class _PlayerScreenState extends State<PlayerScreen>
                   ],
                 ),
               ),
+              const Spacer(),
+              if (_aiBadge != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Center(
+                    child: Text(
+                      'Legenda gerada por IA, pode conter erros'
+                      '${_subDelay != 0 ? ' · delay ${_subDelay > 0 ? '+' : ''}${(_subDelay * 1000).toInt()}ms (segurar OK p/ ajustar)' : ''}',
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 13),
+                    ),
+                  ),
+                ),
               const Spacer(),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1264,6 +1391,55 @@ class _PlayerScreenState extends State<PlayerScreen>
         ),
       ),
     );
+  }
+
+  /// Aplica a legenda atual via mpv (`SubtitleTrack.uri` externo).
+  Future<void> _applySubtitle(VideoSource src) async {
+    try {
+      if (_subIndex < 0 || _subIndex >= src.subtitleUrls.length) {
+        await _player.setSubtitleTrack(SubtitleTrack.no());
+        return;
+      }
+      final s = src.subtitleUrls[_subIndex];
+      await _player.setSubtitleTrack(
+          SubtitleTrack.uri(s.uri, title: s.label, language: s.lang));
+      final native = _player.platform;
+      if (native is NativePlayer) {
+        await native.setProperty('sub-delay', _subDelay.toString());
+      }
+    } catch (e) {
+      debugPrint('[Player] subtitle apply failed: $e');
+    }
+  }
+
+  void _cycleSubtitle() {
+    final src = _sources[_selectedQualityIndex];
+    if (src.subtitleUrls.isEmpty) return;
+    setState(() => _subIndex = _subIndex + 1 > src.subtitleUrls.length - 1
+        ? -1
+        : _subIndex + 1);
+    _applySubtitle(src);
+    _showControls();
+  }
+
+  void _cycleDelay() {
+    if (_subIndex < 0) return;
+    final i = (_subDelays.indexOf(_subDelay) + 1) % _subDelays.length;
+    setState(() => _subDelay = _subDelays[i]);
+    _applySubtitle(_sources[_selectedQualityIndex]);
+    _showControls();
+  }
+
+  /// Badge IA sob a legenda selecionada (disclaimer fixo do estudo §7).
+  String? get _aiBadge {
+    if (_subIndex < 0 ||
+        _selectedQualityIndex >= _sources.length ||
+        _subIndex >=
+            _sources[_selectedQualityIndex].subtitleUrls.length) {
+      return null;
+    }
+    final s = _sources[_selectedQualityIndex].subtitleUrls[_subIndex];
+    return s.isAI ? 'IA · pode conter erros' : null;
   }
 
   void _showQualitySelector() {

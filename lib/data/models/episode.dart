@@ -62,6 +62,24 @@ class Episode {
   });
 }
 
+/// Referência a uma legenda externa ou embutida de um [VideoSource].
+/// Fase 0 (plumbing legenda IA offline): o player anexa [uri] como track
+/// externa (mpv `SubtitleTrack.uri` / Exo `closedCaptionFile`); `isAI`
+/// marca legenda gerada/traduzida on-device e exige o badge/disclaimer.
+class SubtitleRef {
+  final String label;
+  final String lang;
+  final String uri;
+  final bool isAI;
+
+  const SubtitleRef({
+    required this.label,
+    required this.lang,
+    required this.uri,
+    this.isAI = false,
+  });
+}
+
 class VideoSource {
   final String url;
   final String quality;
@@ -78,11 +96,27 @@ class VideoSource {
   /// skips the audio step and shows qualities directly.
   final String? audio;
 
+  /// Legendas candidatas resolvidas pelo provider (tracks embutidas ou
+  /// `.srt`/`.vtt` lado-a-lado). `subtitleUrls` é alias de leitura.
+  final List<SubtitleRef> subtitleCandidates;
+  List<SubtitleRef> get subtitleUrls => subtitleCandidates;
+
   VideoSource({
     required this.url,
     required this.quality,
     this.headers = const {},
     this.dashHeight,
     this.audio,
+    this.subtitleCandidates = const [],
   });
+
+  /// Cópia com legenda IA anexada (job concluído) sem mutar o original.
+  VideoSource withSubtitle(SubtitleRef sub) => VideoSource(
+        url: url,
+        quality: quality,
+        headers: headers,
+        dashHeight: dashHeight,
+        audio: audio,
+        subtitleCandidates: [...subtitleCandidates, sub],
+      );
 }

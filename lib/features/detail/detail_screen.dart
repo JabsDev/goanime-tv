@@ -1,9 +1,16 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/navigation/route_observer.dart';
+import '../../core/subtitles/ai_providers.dart';
+import '../../core/subtitles/srt_parser.dart';
+import '../../core/subtitles/subtitle_job_manager.dart';
+import '../../core/subtitles/subtitle_store.dart';
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
 import '../../data/repositories/anime_repository.dart';
@@ -1693,9 +1700,252 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           ...providerList,
           ...audioSection(providers[selected]!),
           ...qualitySection(providers[selected]!),
+          ...subtitleSection(providers[selected]!),
         ],
       ],
     );
+  }
+
+  /// Seção legenda IA (Fase 0/1, D-pad: reusa _QualityItem com Focus):
+  /// - hit de cache (PT-BR pronta, TTL válido) → toca com legenda + badge IA;
+  /// - candidata EN/ES → `[Traduzir p/ PT-BR com IA]` (Rota S, sem Whisper);
+  /// - sem candidata → `[Gerar legenda com IA]` (JA cru, STT L1 — Fase 2).
+  /// Throttle 24h do prune via prefs, fire-and-forget (plano §TTL).
+  List<Widget> subtitleSection(List<VideoSource> sources) {
+    _maybePrune();
+    final cands = sources.expand((s) => s.subtitleCandidates).toList();
+    final langs = cands
+        .map((c) =>
+            SrtParser.detectLang(tag: '${c.label} ${c.lang}', filename: c.uri))
+        .whereType<String>()
+        .toSet();
+    final hasEnEs = langs.contains('en') || langs.contains('es');
+    return [
+      const Divider(color: ThemeConstants.surfaceLight),
+      const Text(
+        'Legenda',
+        style: TextStyle(
+          color: ThemeConstants.textSecondary,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(height: 8),
+      FutureBuilder<File?>(
+        future: _cachedAiSub(),
+        builder: (ctx, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Text('Verificando legendas…',
+                  style: TextStyle(
+                      color: ThemeConstants.textSecondary, fontSize: 14)),
+            );
+          }
+          final cached = snap.data;
+          if (cached != null) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: _QualityItem(
+                quality: 'PT-BR (IA) — pronta',
+                onTap: () => _playWithAiSub(sources, cached),
+              ),
+            );
+          }
+          return ValueListenableBuilder<String?>(
+            valueListenable: SubtitleJobManager.instance.status,
+            builder: (ctx, st, _) {
+              if (SubtitleJobManager.instance.isBusy) {
+                return ValueListenableBuilder<double>(
+                  valueListenable: SubtitleJobManager.instance.progress,
+                  builder: (ctx, p, _) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Gerando legenda… ${(p * 100).toInt()}%',
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 15)),
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                          value: p,
+                          backgroundColor: Colors.white24,
+                          valueColor: const AlwaysStoppedAnimation(
+                              ThemeConstants.primary)),
+                      const SizedBox(height: 8),
+                      _DialogButton(
+                        label: 'Cancelar',
+                        onTap: () => SubtitleJobManager.instance
+                            .cancelCurrent(),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: _QualityItem(
+                  quality: hasEnEs
+                      ? 'Traduzir p/ PT-BR com IA'
+                      : 'Gerar legenda com IA',
+                  onTap: () => _startAiJob(sources, cands, hasEnEs),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    ];
+  }
+
+  /// Primeira tag IA válida em cache (TTL já aplicado no get).
+  Future<File?> _cachedAiSub() async {
+    for (final tag in const ['en-ai', 'es-ai', 'ja-ai']) {
+      final f = await SubtitleStore.get(
+        animeKey: widget.anime.name,
+        ep: widget.episode.number,
+        tag: tag,
+      );
+      if (f != null) return f;
+    }
+    return null;
+  }
+
+  void _playWithAiSub(List<VideoSource> sources, File srt) {
+    // Mesma visibilidade do passo qualidade (filtro de áudio), legenda
+    // anexada a todas; toca a primeira qualidade (usuário troca no player).
+    final audios = _audiosFor(sources);
+    final visible = audios.length <= 1
+        ? sources
+        : sources
+            .where((s) => s.audio?.trim().toLowerCase() == _selectedAudio)
+            .toList();
+    if (visible.isEmpty || _selectedProvider == null) return;
+    final sub = SubtitleRef(
+        label: 'PT-BR (IA)', lang: 'pt', uri: srt.path, isAI: true);
+    _navigateToPlayer(_selectedProvider!, 0,
+        visibleSources: visible.map((s) => s.withSubtitle(sub)).toList());
+  }
+
+  Future<void> _startAiJob(List<VideoSource> sources,
+      List<SubtitleRef> cands, bool hasEnEs) async {
+    if (hasEnEs) {
+      await _startTranslateJob(sources, cands);
+    } else {
+      await _startTranscribeJob(sources);
+    }
+  }
+
+  /// Rota S: baixa o .srt EN/ES e traduz off-device (sem Whisper).
+  Future<void> _startTranslateJob(
+      List<VideoSource> sources, List<SubtitleRef> cands) async {
+    final cand = cands.cast<SubtitleRef?>().firstWhere(
+          (c) =>
+              SrtParser.detectLang(
+                  tag: '${c!.label} ${c.lang}', filename: c.uri) ==
+              (cands.any((x) => (SrtParser.detectLang(
+                          tag: '${x.label} ${x.lang}',
+                          filename: x.uri)) ==
+                      'en')
+                  ? 'en'
+                  : 'es'),
+          orElse: () => null,
+        );
+    if (cand == null) return;
+    final srcLang = SrtParser.detectLang(
+        tag: '${cand.label} ${cand.lang}', filename: cand.uri)!;
+    final mt = await AiProviders.makeMtForSrc(srcLang);
+    if (mt == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Modelo de tradução não instalado. Baixe no Wi-Fi em Configurações > Legenda IA.')));
+      return;
+    }
+    final text = await _fetchSrtText(cand.uri, sources.first.headers);
+    if (text == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Não foi possível baixar a legenda fonte.')));
+      }
+      return;
+    }
+    await SubtitleJobManager.instance.enqueueTranslate(
+      animeKey: widget.anime.name,
+      ep: widget.episode.number,
+      srcSrt: text,
+      srcLang: srcLang,
+      mt: mt,
+    );
+    if (mounted) setState(() {});
+  }
+
+  /// L1/L2: JA cru → PCM → STT → MT, conforme Configurações > Legenda IA.
+  Future<void> _startTranscribeJob(List<VideoSource> sources) async {
+    if (sources.isEmpty) return;
+    final stt = await AiProviders.makeStt();
+    final mt = await AiProviders.makeMt();
+    if (stt == null || mt == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Modelo de voz/tradução não instalado. Baixe no Wi-Fi em Configurações > Legenda IA.')));
+      return;
+    }
+    // Carga SEQUENCIAL vale dentro do job (dispose antes de load); aqui só
+    // criamos os providers (sem nativo até load()).
+    final src = sources.first;
+    await SubtitleJobManager.instance.enqueueTranscribe(
+      animeKey: widget.anime.name,
+      ep: widget.episode.number,
+      videoUrl: src.url,
+      headers: src.headers,
+      sttFor: () => stt,
+      mt: mt,
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<String?> _fetchSrtText(String uri, Map<String, String> headers) async {
+    String? out;
+    try {
+      if (uri.startsWith('http')) {
+        final client = HttpClient();
+        try {
+          final req = await client.getUrl(Uri.parse(uri));
+          headers.forEach(req.headers.set);
+          final resp =
+              await req.close().timeout(const Duration(seconds: 15));
+          if (resp.statusCode != 200) return null;
+          out = await resp.transform(utf8.decoder).join().timeout(
+              const Duration(seconds: 15));
+        } finally {
+          client.close();
+        }
+      } else {
+        final f = File(uri.replaceFirst('file://', ''));
+        if (await f.exists()) out = await f.readAsString();
+      }
+    } catch (_) {
+      return null;
+    }
+    return out;
+  }
+
+  bool _pruneScheduled = false;
+
+  /// pruneExpired ao abrir o Detail, throttle 24h, fire-and-forget.
+  void _maybePrune() {
+    if (_pruneScheduled) return;
+    _pruneScheduled = true;
+    SharedPreferences.getInstance().then((prefs) {
+      final last = prefs.getInt(SubtitleStore.prunePrefsKey) ?? 0;
+      if (DateTime.now().millisecondsSinceEpoch - last <
+          const Duration(hours: 24).inMilliseconds) {
+        return;
+      }
+      SubtitleStore.pruneExpired().then((_) => prefs.setInt(
+          SubtitleStore.prunePrefsKey,
+          DateTime.now().millisecondsSinceEpoch));
+    });
   }
 }
 

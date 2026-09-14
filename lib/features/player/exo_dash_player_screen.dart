@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -79,6 +81,11 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
 
   bool _showNextOverlay = false;
   int _countdownSec = 10;
+
+  // Legenda externa (Fase 0): primeira de src.subtitleUrls, via
+  // `closedCaptionFile`. Badge IA quando a track é gerada on-device.
+  String? _subLabel;
+  bool _subIsAI = false;
 
   late final FocusNode _backNode = FocusNode();
   late final FocusNode _qualityNode = FocusNode();
@@ -179,6 +186,8 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       _restoreAttempted = false;
       _positionSec = 0;
       _durationSec = 0;
+      _subLabel = null;
+      _subIsAI = false;
     });
     _loadTimeout?.cancel();
     _loadTimeout = Timer(const Duration(seconds: 20), () {
@@ -217,6 +226,7 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(playUrl),
         httpHeaders: src.headers,
+        closedCaptionFile: _loadCaption(src),
       );
       _controller = controller;
       await controller.initialize();
@@ -249,6 +259,49 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
         _isLoading = false;
       });
     }
+  }
+
+  /// Carrega a primeira legenda de [src] (falha aberta: null sem legenda).
+  /// `.vtt` → WebVTTCaptionFile, demais → SubRipCaptionFile. Suporta
+  /// arquivo local (job IA) e URL remota (com headers da fonte).
+  Future<ClosedCaptionFile>? _loadCaption(VideoSource src) {
+    if (src.subtitleUrls.isEmpty) return null;
+    final sub = src.subtitleUrls.first;
+    _subLabel = sub.label;
+    _subIsAI = sub.isAI;
+    return _fetchCaptionText(sub.uri, src.headers).then((text) {
+      if (text == null) return SubRipCaptionFile('');
+      return sub.uri.toLowerCase().endsWith('.vtt')
+          ? WebVTTCaptionFile(text)
+          : SubRipCaptionFile(text);
+    });
+  }
+
+  Future<String?> _fetchCaptionText(
+      String uri, Map<String, String> headers) async {
+    String? out;
+    try {
+      if (uri.startsWith('http')) {
+        final client = HttpClient();
+        try {
+          final req = await client.getUrl(Uri.parse(uri));
+          headers.forEach(req.headers.set);
+          final resp = await req.close().timeout(const Duration(seconds: 10));
+          if (resp.statusCode != 200) return null;
+          out = await resp.transform(utf8.decoder).join().timeout(
+              const Duration(seconds: 10));
+        } finally {
+          client.close();
+        }
+      } else {
+        final f = File(uri.replaceFirst('file://', ''));
+        if (await f.exists()) out = await f.readAsString();
+      }
+    } catch (e) {
+      debugPrint('[ExoDash] caption load failed: $e');
+      return null;
+    }
+    return out;
   }
 
   void _startPolling() {
@@ -596,8 +649,33 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
                   child: VideoPlayer(controller),
                 ),
               ),
-            if (_isLoading && _error == null)
-              Center(
+            // Fase 0: legenda externa + badge IA (disclaimer fixo).
+            if (ready && _subLabel != null)
+              Positioned(
+                left: 24,
+                right: 24,
+                bottom: 96,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ClosedCaption(
+                        text: controller.value.caption.text,
+                        textStyle: const TextStyle(
+                            color: Colors.white, fontSize: 18)),
+                    if (_subIsAI)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Legenda gerada por IA, pode conter erros',
+                          style: TextStyle(
+                              color: Colors.white70, fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            if (_isLoading && _error == null)              Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [

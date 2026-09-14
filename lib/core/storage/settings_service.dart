@@ -16,6 +16,8 @@ class SettingsService {
   static const _kNsfwFilter = 'settings_nsfw_filter';
   static const _kOnboardingSeen = 'settings_onboarding_seen';
   static const _kAutoSkipIntro = 'settings_auto_skip_intro';
+  static const _kSttModel = 'settings_ai_stt'; // 'tiny' | 'base'
+  static const _kMtEngine = 'settings_ai_mt'; // 'leve' | 'completa'
 
   bool? _userPref;
   bool _autoLite = false;
@@ -35,6 +37,19 @@ class SettingsService {
   ValueListenable<bool> get autoSkipIntroListenable => _autoSkipIntroVN;
   bool get autoSkipIntro => _autoSkipIntro;
 
+  /// Legenda IA: STT 'tiny' (L1 padrão stick fraco) ou 'base' (opt-in forte).
+  String _sttModel = 'tiny';
+  final ValueNotifier<String> _sttModelVN = ValueNotifier<String>('tiny');
+  ValueListenable<String> get sttModelListenable => _sttModelVN;
+  String get sttModel => _sttModel;
+
+  /// Legenda IA: MT 'leve' (Marian ~120MB) ou 'completa' (NLLB ~1.28GB,
+  /// gated por aparelho+disco em AiCapability).
+  String _mtEngine = 'leve';
+  final ValueNotifier<String> _mtEngineVN = ValueNotifier<String>('leve');
+  ValueListenable<String> get mtEngineListenable => _mtEngineVN;
+  String get mtEngine => _mtEngine;
+
   Future<void> init() async {
     LocalStorage.ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
@@ -48,6 +63,10 @@ class SettingsService {
     _nsfwFilterVN.value = _nsfwFilter;
     _autoSkipIntro = prefs.getBool(_kAutoSkipIntro) ?? false;
     _autoSkipIntroVN.value = _autoSkipIntro;
+    _sttModel = prefs.getString(_kSttModel) ?? 'tiny';
+    _sttModelVN.value = _sttModel;
+    _mtEngine = prefs.getString(_kMtEngine) ?? 'leve';
+    _mtEngineVN.value = _mtEngine;
     debugPrint(
         '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value nsfw=$_nsfwFilter autoSkip=$_autoSkipIntro');
   }
@@ -97,6 +116,20 @@ class SettingsService {
     _autoSkipIntroVN.value = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kAutoSkipIntro, v);
+  }
+
+  Future<void> setSttModel(String v) async {
+    _sttModel = v == 'base' ? 'base' : 'tiny';
+    _sttModelVN.value = _sttModel;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kSttModel, _sttModel);
+  }
+
+  Future<void> setMtEngine(String v) async {
+    _mtEngine = v == 'completa' ? 'completa' : 'leve';
+    _mtEngineVN.value = _mtEngine;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kMtEngine, _mtEngine);
   }
 
   // Levers. Lê uma vez por build(), não em cada widget aninhado.
