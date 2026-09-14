@@ -55,13 +55,30 @@ class CdnResolver {
     if (cached != null) return cached.isEmpty ? null : cached;
 
     String? found;
-    for (final url in buildCandidateUrls(title, episode.toString(),
-        englishName: englishName)) {
-      if (await probeMediaUrl(Uri.parse(url), client: _client) > 0) {
-        found = url;
-        break;
-      }
+    final urls = buildCandidateUrls(title, episode.toString(),
+        englishName: englishName);
+    // ponytail: varredura em raias — o scan serial estourava o step de 8s do
+    // provider quando o acerto estava fundo na matriz (One Piece Dublado
+    // = URL #49). Primeira 206 vence e o resto nem é buscado.
+    const lanes = 8;
+    for (var i = 0; i < urls.length && found == null; i += lanes) {
+      final batch = urls.skip(i).take(lanes);
       await _throttle();
+      final results = await Future.wait(batch.map((url) async {
+        try {
+          final ok = await probeMediaUrl(Uri.parse(url), client: _client)
+              .timeout(const Duration(seconds: 4));
+          return ok > 0 ? url : null;
+        } catch (_) {
+          return null;
+        }
+      }));
+      for (final url in results) {
+        if (url != null) {
+          found = url;
+          break;
+        }
+      }
     }
     _cache[key] = found ?? '';
     return found;
@@ -81,16 +98,40 @@ class CdnResolver {
 
   /// Title variants likely to match a CDN folder: display title, without the
   /// "Dublado" suffix (the folder may rely on the /Dub/ subpath instead),
+  /// WITH the "Dublado" suffix (folders like "One Piece Dublado" carry it in
+  /// the name — verified live: 130/131/132 206 there, 404 without it),
   /// spaces removed ("OnePiece"), and the english name.
   static List<String> titleVariants(String title, {String? englishName}) {
-    final set = <String>{title.trim()};
-    final noDub = title.replaceAll(_stripDublado, '').trim();
-    if (noDub.isNotEmpty && noDub != title.trim()) set.add(noDub);
-    set.add(title.replaceAll(RegExp(r'\s+'), ''));
-    set.add(title.replaceAll(RegExp(r'\s+'), '').replaceAll(_stripDublado, ''));
+    // Alt-text dos sites vem sujo ("One Piece –", "Naruto -"): limpa
+    // pontuação solta no fim antes de derivar, senão TODAS as variantes
+    // carregam o lixo e a pasta certa nunca é tentada (visto ao vivo no
+    // animesdrive). Parênteses/anos no fim são preservados.
+    String scrub(String s) => s
+        .replaceAll(RegExp(r'[\s\-–—:;|]+$'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final base = scrub(title);
+    final set = <String>{if (base.isNotEmpty) base};
+    final noDub = base.replaceAll(_stripDublado, '').trim();
+    if (noDub.isNotEmpty && noDub != base) set.add(noDub);
+    set.add(base.replaceAll(RegExp(r'\s+'), ''));
+    set.add(base.replaceAll(RegExp(r'\s+'), '').replaceAll(_stripDublado, ''));
+    // Sufixo dublado (só quando ainda não há): cobre pastas "X Dublado".
+    void withDub(String b) {
+      final t = b.trim();
+      if (t.isEmpty || _stripDublado.hasMatch(t)) return;
+      set.add('$t Dublado');
+      set.add('$t Dublado'.replaceAll(RegExp(r'\s+'), ''));
+    }
+
+    withDub(base);
     if (englishName != null && englishName.isNotEmpty) {
-      set.add(englishName.trim());
-      set.add(englishName.replaceAll(RegExp(r'\s+'), ''));
+      final en = scrub(englishName);
+      if (en.isNotEmpty) {
+        set.add(en);
+        set.add(en.replaceAll(RegExp(r'\s+'), ''));
+        withDub(en);
+      }
     }
     set.removeWhere((v) => v.isEmpty);
     return set.toList();
