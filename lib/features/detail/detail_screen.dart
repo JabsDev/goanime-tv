@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/navigation/route_observer.dart';
 import '../../core/subtitles/ai_providers.dart';
+import '../../core/subtitles/hls_subtitle_probe.dart';
 import '../../core/subtitles/srt_parser.dart';
 import '../../core/subtitles/subtitle_job_manager.dart';
 import '../../core/subtitles/subtitle_store.dart';
@@ -1200,6 +1201,9 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   /// Latency (ms) per resolved provider. Absent = still measuring; -1 = timeout.
   final Map<AnimeSource, int> _pings = {};
 
+  /// Providers já sondados p/ legenda HLS nesta sessão do dialog.
+  final Set<AnimeSource> _subsProbed = {};
+
   @override
   void initState() {
     super.initState();
@@ -1266,10 +1270,48 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     });
     if (resolution.providers.isNotEmpty) {
       _probeLatency(resolution.providers.keys);
+      _probeHlsSubs(resolution.providers);
     }
   }
 
   String _sourceName(AnimeSource s) => s.name;
+
+  /// Sonda legendas HLS por provider (uma vez por sessão do dialog): busca
+  /// `EXT-X-MEDIA SUBTITLES` na primeira fonte `.m3u8` e anexa as tracks a
+  /// TODAS as fontes do provider (mesmo EP → mesmas legendas). Sem isto a
+  /// Rota S nunca tem candidata e o picker só oferece transcrição JA cru.
+  /// Fire-and-forget; falha aberta (sem grupo = sem seção de tradução).
+  void _probeHlsSubs(Map<AnimeSource, List<VideoSource>> providers) {
+    for (final entry in providers.entries) {
+      if (_subsProbed.contains(entry.key)) continue;
+      _subsProbed.add(entry.key);
+      VideoSource? master;
+      for (final s in entry.value) {
+        if (s.url.toLowerCase().contains('.m3u8')) {
+          master = s;
+          break;
+        }
+      }
+      if (master == null) continue;
+      final m = master;
+      HlsSubtitleProbe.probe(m.url, headers: m.headers).then((subs) {
+        if (!mounted || subs.isEmpty) return;
+        final current = _providers;
+        if (current == null || !current.containsKey(entry.key)) return;
+        setState(() {
+          _providers = Map.of(current)
+            ..[entry.key] = current[entry.key]!
+                .map((s) => subs.fold(
+                    s,
+                    (acc, sub) =>
+                        acc.subtitleCandidates.any((c) => c.uri == sub.uri)
+                            ? acc
+                            : acc.withSubtitle(sub)))
+                .toList();
+        });
+      });
+    }
+  }
 
   /// Probes latency for the resolved providers in parallel. Updates [_pings]
   /// as each measurement lands so the label appears without blocking the picker.
