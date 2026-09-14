@@ -26,18 +26,25 @@ class AiProviders {
     return true;
   }
 
+  /// Mapeamento Settings → (modelo, task). tiny traduz ja→en (rápido);
+  /// base/small transcrevem ja (melhor, depois NLLB).
+  static const _sttKinds = {
+    'tiny': ('whisper-tiny-ja', 'translate'),
+    'base': ('whisper-base', 'transcribe'),
+    'small': ('whisper-small', 'transcribe'),
+  };
+
   static Future<SttProvider?> makeStt({
     Directory? modelRootForTest,
     String? stt,
     String? modelDirForTest,
   }) async {
     final kind = stt ?? SettingsService.instance.sttModel;
-    final modelId = kind == 'base' ? 'whisper-base' : 'whisper-tiny-ja';
+    final spec = _sttKinds[kind] ?? _sttKinds['tiny']!;
     final root = await modelsRoot(forTest: modelRootForTest);
-    final dir = modelDirForTest ?? '${root.path}/$modelId';
-    if (!await _ready(dir, modelId)) return null;
-    return SherpaSttProvider(dir,
-        task: kind == 'base' ? 'transcribe' : 'translate');
+    final dir = modelDirForTest ?? '${root.path}/${spec.$1}';
+    if (!await _ready(dir, spec.$1)) return null;
+    return SherpaSttProvider(dir, task: spec.$2);
   }
 
   static Future<MtProvider?> makeMt({
@@ -65,7 +72,23 @@ class AiProviders {
     return MarianMtProvider(dir, targetPrefix: '>>por<<');
   }
 
-  /// Rota S usa EN→PT leve; L1-transcribe usa STT + MT conforme Settings.
+  /// MT p/ job transcribe (texto JA): só NLLB serve; Marian é EN→PT.
+  /// Null = sem NLLB capaz → o chamador cai p/ tiny-translate ou avisa.
+  static Future<MtProvider?> makeMtForTranscribe({
+    Directory? modelRootForTest,
+    AiCapability? cap,
+  }) async {
+    const modelId = 'nllb-600M-int8';
+    final root = await modelsRoot(forTest: modelRootForTest);
+    final dir = '${root.path}/$modelId';
+    final capability = cap ?? AiCapability.instance;
+    if (await _ready(dir, modelId) && await capability.canUseFull()) {
+      return NllbMtProvider(dir);
+    }
+    return null;
+  }
+
+  /// Rota S usa EN→PT leve; JA pede MT conforme Settings.
   static Future<MtProvider?> makeMtForSrc(String srcLang,
       {Directory? modelRootForTest,
       String? engine,

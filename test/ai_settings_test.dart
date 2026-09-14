@@ -35,6 +35,14 @@ void main() {
       await SettingsService.instance.setMtEngine('leve');
     });
 
+    test('stt small é válido e persiste', () async {
+      await SettingsService.instance.setSttModel('small');
+      expect(SettingsService.instance.sttModel, 'small');
+      await SettingsService.instance.init();
+      expect(SettingsService.instance.sttModel, 'small');
+      await SettingsService.instance.setSttModel('tiny');
+    });
+
     test('valor inválido cai no padrão', () async {
       await SettingsService.instance.setSttModel('xxx');
       await SettingsService.instance.setMtEngine('yyy');
@@ -65,6 +73,14 @@ void main() {
     test('null sem modelo instalado', () async {
       expect(await AiProviders.makeStt(modelRootForTest: root), isNull);
       expect(await AiProviders.makeMt(modelRootForTest: root), isNull);
+    });
+
+    test('stt small pronto quando arquivos existem', () async {
+      await _fakeModel('whisper-small',
+          ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']);
+      final stt =
+          await AiProviders.makeStt(modelRootForTest: root, stt: 'small');
+      expect(stt?.id, 'whisper-small');
     });
 
     test('stt tiny pronto quando arquivos existem', () async {

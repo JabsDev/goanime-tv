@@ -10,6 +10,8 @@ import 'package:path_provider/path_provider.dart';
 /// está pinado; enquanto PINAR, pula a verificação (rede = HF oficial).
 class AiModelSpec {
   final String id;
+  final String label;
+  final String hint;
   final int mb;
   final String sha256;
   final bool strongOnly;
@@ -19,6 +21,8 @@ class AiModelSpec {
 
   const AiModelSpec({
     required this.id,
+    required this.label,
+    required this.hint,
     required this.mb,
     required this.sha256,
     required this.strongOnly,
@@ -37,32 +41,49 @@ final aiModelCatalog = <String, AiModelSpec>{
   // tiny multilíngue cobre JA via translate; upgrade = exportar tiny-ja
   // fine-tuned p/ layout sherpa (encoder/decoder/tokens).
   'whisper-tiny-ja': AiModelSpec(
-      id: 'whisper-tiny-ja', mb: 50, sha256: 'PINAR', strongOnly: false,
+      id: 'whisper-tiny-ja', label: 'Voz leve (tiny)',
+      hint: '~110 MB · rápido no stick fraco · inglês com sotaque',
+      mb: 110, sha256: 'PINAR', strongOnly: false,
       repo: 'csukuangfj/sherpa-onnx-whisper-tiny',
       remoteFiles: ['tiny-encoder.int8.onnx', 'tiny-decoder.int8.onnx', 'tiny-tokens.txt'],
       files: ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']),
   'whisper-base': AiModelSpec(
-      id: 'whisper-base', mb: 150, sha256: 'PINAR', strongOnly: false,
+      id: 'whisper-base', label: 'Voz equilibrada (base)',
+      hint: '~170 MB · japonês melhor · aparelho médio+',
+      mb: 170, sha256: 'PINAR', strongOnly: false,
       repo: 'csukuangfj/sherpa-onnx-whisper-base',
       remoteFiles: ['base-encoder.int8.onnx', 'base-decoder.int8.onnx', 'base-tokens.txt'],
       files: ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']),
+  'whisper-small': AiModelSpec(
+      id: 'whisper-small', label: 'Voz superior (small)',
+      hint: '~380 MB · bem melhor em JA · só aparelho forte',
+      mb: 380, sha256: 'PINAR', strongOnly: true,
+      repo: 'csukuangfj/sherpa-onnx-whisper-small',
+      remoteFiles: ['small-encoder.int8.onnx', 'small-decoder.int8.onnx', 'small-tokens.txt'],
+      files: ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']),
   // VAD silero opcional (sem ele, janelas fixas de 30s).
   'silero-vad': AiModelSpec(
-      id: 'silero-vad', mb: 3, sha256: 'PINAR', strongOnly: false,
+      id: 'silero-vad', label: 'VAD silero (opcional)',
+      hint: '~3 MB · corta silêncios (sem ele: janelas de 30s)',
+      mb: 3, sha256: 'PINAR', strongOnly: false,
       repo: 'deepghs/silero-vad-onnx',
       remoteFiles: ['silero_vad.onnx'],
       files: ['vad.onnx']),
   // MT leve: Marian opus-mt-en-mul int8 (alvo via prefixo >>por<<).
   // decoder_start/eos lidos de generation_config.json (sem chute).
   'marian-en-pt-int8': AiModelSpec(
-      id: 'marian-en-pt-int8', mb: 120, sha256: 'PINAR', strongOnly: false,
+      id: 'marian-en-pt-int8', label: 'Tradução leve (Marian)',
+      hint: '~120 MB · EN→PT rápido · qualquer aparelho',
+      mb: 120, sha256: 'PINAR', strongOnly: false,
       repo: 'Xenova/opus-mt-en-mul',
       remoteFiles: ['onnx/encoder_model_int8.onnx', 'onnx/decoder_model_int8.onnx', 'vocab.json', 'config.json', 'generation_config.json'],
       files: ['encoder_model.onnx', 'decoder_model.onnx', 'vocab.json', 'config.json', 'generation_config.json']),
   // MT completa: NLLB int8 com decoder + decoder_with_past SEPARADOS (nunca
   // decoder_merged — crash Reshape no ORT Android, plano §L2).
   'nllb-600M-int8': AiModelSpec(
-      id: 'nllb-600M-int8', mb: 1280, sha256: 'PINAR', strongOnly: true,
+      id: 'nllb-600M-int8', label: 'Tradução completa (NLLB)',
+      hint: '~1.28 GB · JA→PT direto · só forte com 2 GB livres',
+      mb: 1280, sha256: 'PINAR', strongOnly: true,
       repo: 'Xenova/nllb-200-distilled-600M',
       remoteFiles: ['onnx/encoder_model_int8.onnx', 'onnx/decoder_model_int8.onnx', 'onnx/decoder_with_past_model_int8.onnx', 'sentencepiece.bpe.model'],
       files: ['encoder_model.onnx', 'decoder_model.onnx', 'decoder_with_past_model.onnx', 'tokenizer.model']),
@@ -137,41 +158,68 @@ class ModelManager {
     final dir = Directory('${(await modelsDir()).path}/$modelId');
     await dir.create(recursive: true);
     final dest = File('${dir.path}/$filename');
-    var start = 0;
-    if (await dest.exists()) {
-      if (expectedSha256 != 'PINAR' &&
-          sha256.convert(await dest.readAsBytes()).toString() ==
-              expectedSha256) {
-        return dest; // já íntegro
-      }
-      start = await dest.length(); // resume
+    if (await dest.exists() &&
+        expectedSha256 != 'PINAR' &&
+        sha256.convert(await dest.readAsBytes()).toString() ==
+            expectedSha256) {
+      return dest; // já íntegro
     }
+    await fetchFile(
+      dest: dest,
+      url: url,
+      onProgress: onProgress == null
+          ? null
+          : (got, total) =>
+              onProgress(total <= 0 ? 0 : got / total),
+    );
+    if (expectedSha256 != 'PINAR') {
+      final digest = sha256.convert(await dest.readAsBytes()).toString();
+      if (digest != expectedSha256) {
+        await dest.delete();
+        throw const ModelDownloadException('sha256 divergente.');
+      }
+    }
+    return dest;
+  }
+
+  /// Download genérico com resume + progresso em bytes (modelos e vídeos).
+  /// Retoma de `dest.length()` via `Range`; servidor sem 206 recomeça do 0.
+  static Future<File> fetchFile({
+    required File dest,
+    required String url,
+    Map<String, String> headers = const {},
+    void Function(int got, int total)? onProgress,
+  }) async {
+    await dest.parent.create(recursive: true);
+    var start = await dest.exists() ? await dest.length() : 0;
     final client = HttpClient();
     try {
       final req = await client.getUrl(Uri.parse(url));
+      headers.forEach(req.headers.set);
       if (start > 0) req.headers.set('Range', 'bytes=$start-');
-      final resp = await req.close();
-      if (resp.statusCode != 200 && resp.statusCode != 206) {
-        throw ModelDownloadException('HTTP ${resp.statusCode}');
+      var resp = await req.close();
+      if (resp.statusCode == 416) {
+        // Range além do fim = arquivo já completo.
+        onProgress?.call(start, start);
+        return dest;
       }
-      final total = (resp.contentLength < 0 ? 0 : resp.contentLength) + start;
-      final sink = dest.openWrite(mode: start > 0 ? FileMode.append : FileMode.write);
+      if (resp.statusCode != 200 && resp.statusCode != 206) {
+        throw ModelDownloadException('HTTP ${resp.statusCode} em $url');
+      }
+      if (resp.statusCode == 200 && start > 0) start = 0; // sem resume
+      final total =
+          (resp.contentLength < 0 ? 0 : resp.contentLength) + start;
+      final sink = dest.openWrite(
+          mode: start > 0 ? FileMode.append : FileMode.write);
       var got = start;
       try {
         await for (final chunk in resp) {
           sink.add(chunk);
           got += chunk.length;
-          if (total > 0) onProgress?.call(got / total);
+          onProgress?.call(got, total);
         }
       } finally {
         await sink.close();
-      }
-      if (expectedSha256 != 'PINAR') {
-        final digest = sha256.convert(await dest.readAsBytes()).toString();
-        if (digest != expectedSha256) {
-          await dest.delete();
-          throw const ModelDownloadException('sha256 divergente.');
-        }
       }
       return dest;
     } finally {

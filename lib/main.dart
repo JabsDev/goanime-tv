@@ -67,10 +67,13 @@ void _resumeAiJobs() {
       mtFor: (id) => id == 'nllb'
           ? NllbMtProvider('${root.path}/nllb-600M-int8')
           : MarianMtProvider('${root.path}/marian-en-pt-int8'),
-      sttFor: (id) => id == 'whisper-base'
-          ? SherpaSttProvider('${root.path}/whisper-base',
+      sttFor: (id) => id == 'whisper-small'
+          ? SherpaSttProvider('${root.path}/whisper-small',
               task: 'transcribe')
-          : SherpaSttProvider('${root.path}/whisper-tiny-ja'),
+          : id == 'whisper-base'
+              ? SherpaSttProvider('${root.path}/whisper-base',
+                  task: 'transcribe')
+              : SherpaSttProvider('${root.path}/whisper-tiny-ja'),
     );
   }).catchError((e) {
     debugPrint('[Main] resume IA ignorado: $e');

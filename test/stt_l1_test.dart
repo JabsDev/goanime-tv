@@ -85,6 +85,12 @@ class _FakeMt extends MtProvider {
   }
 }
 
+Future<File> _fakeDownload(
+    String url, Map<String, String> headers, String outPath) async {
+  await File(outPath).writeAsBytes(const [0, 1, 2, 3]);
+  return File(outPath);
+}
+
 Future<String> _fakeExtract(
     String url, Map<String, String> headers, String outPath) async {
   // 2s de silêncio PCM 16k mono (conteúdo irrelevante p/ fake).
@@ -123,7 +129,7 @@ void main() {
       final mgr = SubtitleJobManager.instance;
       await mgr.enqueueTranscribe(
         animeKey: 'haibane', ep: 1, videoUrl: 'http://x/ep1.mp4',
-        sttFor: () => _FakeStt(), mt: _FakeMt(), extract: _fakeExtract,
+        sttFor: () => _FakeStt(), mt: _FakeMt(), download: _fakeDownload, extract: _fakeExtract,
         jobsDirForTest: jobs, subsDirForTest: subs, tmpDirForTest: tmp);
       await _waitIdle(mgr);
       expect(mgr.isBusy, isFalse);
@@ -142,7 +148,7 @@ void main() {
       final mgr = SubtitleJobManager.instance;
       await mgr.enqueueTranscribe(
         animeKey: 'haibane', ep: 2, videoUrl: 'http://x/ep2.mp4',
-        sttFor: () => _FakeStt(), mt: _FakeMt(), extract: _fakeExtract,
+        sttFor: () => _FakeStt(), mt: _FakeMt(), download: _fakeDownload, extract: _fakeExtract,
         jobsDirForTest: jobs, subsDirForTest: subs, tmpDirForTest: tmp);
       await _waitIdle(mgr);
       expect(orderLog.indexOf('stt.dispose'),
@@ -159,6 +165,52 @@ void main() {
       await stt.dispose();
       expect(cues, hasLength(2));
       expect(cues[0].start, const Duration(seconds: 1));
+    });
+
+    test('fases visíveis em ordem (nunca 0% mudo)', () async {
+      final mgr = SubtitleJobManager.instance;
+      final seen = <JobPhase>[];
+      void listener() {
+        final p = mgr.state.value.phase;
+        if (seen.isEmpty || seen.last != p) seen.add(p);
+      }
+
+      mgr.state.addListener(listener);
+      await mgr.enqueueTranscribe(
+        animeKey: 'haibane', ep: 3, videoUrl: 'http://x/ep3.mp4',
+        sttFor: () => _FakeStt(), mt: _FakeMt(), download: _fakeDownload, extract: _fakeExtract,
+        jobsDirForTest: jobs, subsDirForTest: subs, tmpDirForTest: tmp);
+      await _waitIdle(mgr);
+      mgr.state.removeListener(listener);
+      final order = [
+        JobPhase.downloadingVideo,
+        JobPhase.extractingAudio,
+        JobPhase.loadingVoice,
+        JobPhase.transcribing,
+        JobPhase.loadingMt,
+        JobPhase.translating,
+        JobPhase.done,
+      ];
+      var lastIdx = -1;
+      for (final p in order) {
+        final idx = seen.indexOf(p);
+        expect(idx, greaterThan(lastIdx), reason: 'fase $p fora de ordem');
+        lastIdx = idx;
+      }
+    });
+
+    test('falha vira failed com mensagem PT-BR (não trava no 0%)', () async {
+      final mgr = SubtitleJobManager.instance;
+      await mgr.enqueueTranscribe(
+        animeKey: 'haibane', ep: 4, videoUrl: 'http://x/ep4.mp4',
+        sttFor: () => _FakeStt(), mt: _FakeMt(),
+        download: (_, __, ___) =>
+            throw const SocketException('sem rede'),
+        extract: _fakeExtract,
+        jobsDirForTest: jobs, subsDirForTest: subs, tmpDirForTest: tmp);
+      await _waitIdle(mgr);
+      expect(mgr.state.value.phase, JobPhase.failed);
+      expect(mgr.state.value.error, contains('internet'));
     });
   });
 }

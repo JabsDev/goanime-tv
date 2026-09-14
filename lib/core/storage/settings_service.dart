@@ -37,7 +37,8 @@ class SettingsService {
   ValueListenable<bool> get autoSkipIntroListenable => _autoSkipIntroVN;
   bool get autoSkipIntro => _autoSkipIntro;
 
-  /// Legenda IA: STT 'tiny' (L1 padrão stick fraco) ou 'base' (opt-in forte).
+  /// Legenda IA: STT 'tiny' (L1 padrão stick fraco), 'base' ou 'small'
+  /// (transcrevem JA, pedem NLLB). Valores inválidos caem em 'tiny'.
   String _sttModel = 'tiny';
   final ValueNotifier<String> _sttModelVN = ValueNotifier<String>('tiny');
   ValueListenable<String> get sttModelListenable => _sttModelVN;
@@ -119,7 +120,7 @@ class SettingsService {
   }
 
   Future<void> setSttModel(String v) async {
-    _sttModel = v == 'base' ? 'base' : 'tiny';
+    _sttModel = (v == 'base' || v == 'small') ? v : 'tiny';
     _sttModelVN.value = _sttModel;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kSttModel, _sttModel);

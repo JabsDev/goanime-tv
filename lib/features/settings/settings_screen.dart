@@ -211,10 +211,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _ModeOption(
                             label: 'Transcrição completa',
                             description:
-                                'Whisper base (142 MB) — melhor japonês, aparelho forte',
+                                'Whisper base (170 MB) — japonês melhor, aparelho médio+',
                             selected: stt == 'base',
                             onTap: () => SettingsService.instance
                                 .setSttModel('base'),
+                          ),
+                          _ModeOption(
+                            label: 'Transcrição superior',
+                            description:
+                                'Whisper small (380 MB) — bem melhor em JA, só aparelho forte',
+                            selected: stt == 'small',
+                            onTap: () => SettingsService.instance
+                                .setSttModel('small'),
                           ),
                         ],
                       ),

@@ -252,7 +252,12 @@ class SherpaSttProvider extends SttProvider {
       {this.task = 'translate', this.engineForTest});
 
   @override
-  String get id => task == 'transcribe' ? 'whisper-base' : 'whisper-tiny-ja';
+  String get id {
+    final base = modelDir.split('/').last;
+    if (base.contains('small')) return 'whisper-small';
+    if (task == 'transcribe') return 'whisper-base';
+    return 'whisper-tiny-ja';
+  }
 
   @override
   Future<void> load() async {
