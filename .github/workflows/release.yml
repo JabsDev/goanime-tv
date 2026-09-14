@@ -105,4 +105,5 @@ jobs:
           printf '%s\n\n---\n\nSHA256: %s\n' "$CHANGELOG" "$SHA256" > release-notes.md
           gh release create "$TAG" "$ASSET" \
             --title "$TAG" \
+            --prerelease \
             --notes-file release-notes.md
