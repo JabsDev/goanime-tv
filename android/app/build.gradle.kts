@@ -77,7 +77,16 @@ dependencies {
     // FileProvider (fallback ACTION_VIEW do updater) vem do androidx.core.
     implementation("androidx.core:core-ktx:1.13.1")
     // NLLB-600M int8 on-device (L2): ORT Android. Sem decoder_merged.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.1")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+}
+
+android {
+    packaging {
+        // libonnxruntime.so chega em 3 cópias (plugin Dart onnxruntime, este
+        // AAR e o JNI do sherpa): mesma C ABI estável, fica a primeira.
+        jniLibs.pickFirsts.add("lib/arm64-v8a/libonnxruntime.so")
+        jniLibs.pickFirsts.add("lib/armeabi-v7a/libonnxruntime.so")
+    }
 }
 
 flutter {
