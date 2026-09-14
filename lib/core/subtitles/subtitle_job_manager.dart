@@ -62,6 +62,8 @@ class SubtitleJobManager {
   final ValueNotifier<JobState> state =
       ValueNotifier<JobState>(const JobState());
 
+  JobPhase? _lastSavedPhase;
+
   void _set(JobPhase phase, double progressValue, String message,
       {String detail = '', String? error}) {
     progress.value = progressValue;
@@ -72,6 +74,53 @@ class SubtitleJobManager {
         message: message,
         detail: detail,
         error: error);
+    // Breadcrumb anti-crash: grava a fase no job file (só ao trocar de fase).
+    // Se o SO matar o app (OOM), o próximo boot lê e explica em vez de 0% mudo.
+    final cur = _current;
+    if (cur != null && _lastSavedPhase != phase) {
+      _lastSavedPhase = phase;
+      cur.save(progress: progressValue, phase: phase.name).ignore();
+    }
+  }
+
+  /// Dica de crash: job file pendente = morte no meio (kill/OOM).
+  /// Retorna a fase em português ou null se nada pendente.
+  static Future<String?> lastCrashHint({Directory? jobsDirForTest}) async {
+    final dir = await _jobsDirStatic(forTest: jobsDirForTest);
+    if (!await dir.exists()) return null;
+    await for (final e in dir.list()) {
+      if (e is! File || !e.path.endsWith('.job.json')) continue;
+      try {
+        final m = jsonDecode(await e.readAsString()) as Map;
+        final phase = m['phase'] as String? ?? '';
+        final anime = m['animeKey'] ?? '?';
+        final ep = m['ep'] ?? '?';
+        if (phase.isEmpty || phase == 'idle') continue;
+        return 'O app fechou durante ${_phaseLabel(phase)} '
+            '($anime EP$ep). Provável falta de memória — '
+            'tente o modelo de voz leve (tiny).';
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  static String _phaseLabel(String phase) {
+    switch (phase) {
+      case 'downloadingVideo':
+        return 'o download do vídeo';
+      case 'extractingAudio':
+        return 'a extração do áudio';
+      case 'loadingVoice':
+        return 'o carregamento da voz';
+      case 'transcribing':
+        return 'a transcrição';
+      case 'loadingMt':
+        return 'o carregamento da tradução';
+      case 'translating':
+        return 'a tradução';
+      default:
+        return 'a geração da legenda';
+    }
   }
 
   /// Erro técnico → frase PT-BR acionável (a tela mostra + botão Tentar).
@@ -102,7 +151,10 @@ class SubtitleJobManager {
     return 'Falhou: ${short.length > 120 ? '${short.substring(0, 120)}…' : short}';
   }
 
-  Future<Directory> _jobsDir({Directory? forTest}) async {
+  Future<Directory> _jobsDir({Directory? forTest}) =>
+      _jobsDirStatic(forTest: forTest);
+
+  static Future<Directory> _jobsDirStatic({Directory? forTest}) async {
     if (forTest != null) return forTest;
     final base = await getApplicationSupportDirectory();
     return Directory('${base.path}/subs_jobs');
@@ -173,6 +225,7 @@ class SubtitleJobManager {
   void _pump() {
     if (_current != null || _queue.isEmpty) return;
     _current = _queue.removeAt(0);
+    _lastSavedPhase = null;
     _run(_current!);
   }
 
@@ -421,6 +474,9 @@ class _Job {
   final Directory? tmpDirForTest;
   File? file;
   bool cancelled = false;
+  // Guarda anti-ressurreição: breadcrumb (_set→save) nunca recria um job
+  // já concluído/falhado (save async pode terminar depois do delete).
+  bool _deleted = false;
 
   _Job.translate({
     required this.animeKey,
@@ -467,7 +523,8 @@ class _Job {
     }
   }
 
-  Future<void> save({double? progress}) async {
+  Future<void> save({double? progress, String? phase}) async {
+    if (_deleted) return;
     file ??= File(
         '${jobsDir.path}/${SubtitleStore.sanitizeKey(animeKey)}_ep$ep.${DateTime.now().millisecondsSinceEpoch}.job.json');
     await file!.writeAsString(jsonEncode({
@@ -481,10 +538,12 @@ class _Job {
       'sttId': _sttId,
       'mtId': mt.id,
       'progress': progress ?? 0,
+      'phase': phase ?? '',
     }));
   }
 
   Future<void> delete() async {
+    _deleted = true;
     try {
       await file?.delete();
     } catch (_) {}

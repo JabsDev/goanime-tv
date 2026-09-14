@@ -14,7 +14,8 @@ final orderLog = <String>[];
 
 class _FakeEngine implements SttEngine {
   @override
-  Future<void> init(String modelDir, {required String task}) async {
+  Future<void> init(String modelDir,
+      {required String task, int threads = 2}) async {
     orderLog.add('stt.load');
   }
 
@@ -165,6 +166,37 @@ void main() {
       await stt.dispose();
       expect(cues, hasLength(2));
       expect(cues[0].start, const Duration(seconds: 1));
+    });
+
+    test('PCM fatiado: 150s geram cues com offset certo', () async {
+      final stt = SherpaSttProvider('fake', engineForTest: _FakeEngine());
+      final pcm = await File('${tmp.path}/long.pcm')
+          .writeAsBytes(Int16List(150 * 16000).buffer.asUint8List());
+      await stt.load();
+      final cues = await stt.transcribe(pcm.path);
+      await stt.dispose();
+      expect(cues.length, greaterThan(2));
+      expect(cues.first.start, const Duration(seconds: 1));
+      expect(cues.last.start.inSeconds, greaterThanOrEqualTo(120));
+    });
+
+    test('modelo incompleto falha alto (sem crash nativo)', () async {
+      final engine = SherpaSttEngine();
+      expect(() => engine.init(tmp.path, task: 'translate'),
+          throwsA(isA<StateError>()));
+    });
+
+    test('breadcrumb: job pendente vira dica de crash', () async {
+      final fakeJob = File('${jobs.path}/x_ep1.123.job.json');
+      await fakeJob.writeAsString(
+          '{"kind":"transcribe","animeKey":"haibane","ep":1,"phase":"transcribing"}');
+      final hint = await SubtitleJobManager.lastCrashHint(
+          jobsDirForTest: jobs);
+      expect(hint, contains('transcrição'));
+      expect(hint, contains('memória'));
+      await fakeJob.delete();
+      expect(await SubtitleJobManager.lastCrashHint(
+          jobsDirForTest: jobs), isNull);
     });
 
     test('fases visíveis em ordem (nunca 0% mudo)', () async {

@@ -319,6 +319,18 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
           ),
           const SizedBox(height: 24),
           _SectionTitle('3 · Gerar'),
+          FutureBuilder<String?>(
+            future: SubtitleJobManager.lastCrashHint(),
+            builder: (context, snap) {
+              if (snap.data == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(snap.data!,
+                    style: const TextStyle(
+                        color: Colors.orangeAccent, fontSize: 15)),
+              );
+            },
+          ),
           ValueListenableBuilder<JobState>(
             valueListenable: SubtitleJobManager.instance.state,
             builder: (context, st, _) => _JobCard(

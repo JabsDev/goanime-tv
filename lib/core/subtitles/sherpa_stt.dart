@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 
+import '../utils/device_capability.dart';
 import 'mt_provider.dart';
 import 'srt_parser.dart';
 
@@ -17,7 +18,8 @@ class SpeechChunk {
 
 /// Motor STT destacável (teste sem nativo). Produção = [SherpaSttEngine].
 abstract class SttEngine {
-  Future<void> init(String modelDir, {required String task});
+  Future<void> init(String modelDir,
+      {required String task, int threads = 2});
   Future<List<SpeechChunk>> segments(Float32List pcm);
   Future<String> decode(SpeechChunk chunk);
   Future<void> free();
@@ -32,9 +34,21 @@ class SherpaSttEngine implements SttEngine {
   bool _hasVad = false;
 
   @override
-  Future<void> init(String modelDir, {required String task}) async {
+  Future<void> init(String modelDir,
+      {required String task, int threads = 2}) async {
+    // Guarda anti-crash nativo: sherpa estoura sem mensagem se faltar arquivo.
+    for (final f in const [
+      'encoder.int8.onnx',
+      'decoder.int8.onnx',
+      'tokens.txt'
+    ]) {
+      if (!await File('$modelDir/$f').exists()) {
+        throw StateError('Modelo de voz incompleto (falta $f). Baixe de novo.');
+      }
+    }
     _hasVad = await File('$modelDir/vad.onnx').exists();
-    _worker = await _SttWorker.spawn(modelDir, task: task, withVad: _hasVad);
+    _worker =
+        await _SttWorker.spawn(modelDir, task: task, withVad: _hasVad, threads: threads);
   }
 
   @override
@@ -75,10 +89,12 @@ class _SttWorker {
   }
 
   static Future<_SttWorker> spawn(String modelDir,
-      {required String task, required bool withVad}) async {
+      {required String task,
+      required bool withVad,
+      int threads = 2}) async {
     final ready = ReceivePort();
     final iso = await Isolate.spawn(
-        _entry, [ready.sendPort, modelDir, task, withVad],
+        _entry, [ready.sendPort, modelDir, task, withVad, threads],
         debugName: 'stt-worker');
     final cmd = await ready.first as SendPort;
     final resp = ReceivePort();
@@ -135,6 +151,7 @@ class _SttWorker {
     final modelDir = args[1] as String;
     final task = args[2] as String;
     final withVad = args[3] as bool;
+    final threads = args[4] as int;
     sherpa.initBindings();
     final recognizer = sherpa.OfflineRecognizer(
       sherpa.OfflineRecognizerConfig(
@@ -147,7 +164,7 @@ class _SttWorker {
           ),
           tokens: '$modelDir/tokens.txt',
           modelType: 'whisper',
-          numThreads: 2,
+          numThreads: threads,
           debug: false,
         ),
       ),
@@ -262,36 +279,55 @@ class SherpaSttProvider extends SttProvider {
   @override
   Future<void> load() async {
     _engine = engineForTest ?? SherpaSttEngine();
-    await _engine!.init(modelDir, task: task);
+    final low = await DeviceCapability.isLowEnd();
+    await _engine!.init(modelDir, task: task, threads: low ? 1 : 2);
   }
 
+  /// Lê o PCM em fatias de 60s (view Int16 sem cópia + 1 Float32 por fatia).
+  /// Antes carregava o EP inteiro em Float32 (~46 MB p/ 24 min) + cópias do
+  /// engine — OOM e morte do app em aparelho fraco. Pico agora ~4 MB + sherpa.
   @override
   Future<List<SrtCue>> transcribe(String pcm16kPath,
       {void Function(double progress)? onProgress}) async {
     final engine = _engine;
     if (engine == null) throw StateError('SherpaSttProvider.load() antes');
-    final bytes = await File(pcm16kPath).readAsBytes();
-    final shorts = bytes.buffer.asInt16List();
-    final pcm = Float32List(shorts.length);
-    for (var i = 0; i < shorts.length; i++) {
-      pcm[i] = shorts[i] / 32768.0;
+    const sr = 16000;
+    const sliceSec = 60;
+    final file = File(pcm16kPath);
+    final totalBytes = await file.length();
+    final totalSamples = totalBytes ~/ 2;
+    final raf = await file.open();
+    try {
+      final cues = <SrtCue>[];
+      var done = 0;
+      while (done < totalSamples) {
+        final n = (totalSamples - done).clamp(0, sliceSec * sr);
+        final bytes = await raf.read(n * 2);
+        final shorts = bytes.buffer.asInt16List();
+        final pcm = Float32List(shorts.length);
+        for (var i = 0; i < shorts.length; i++) {
+          pcm[i] = shorts[i] / 32768.0;
+        }
+        final baseSec = done / sr;
+        for (final chunk in await engine.segments(pcm)) {
+          final text = await engine.decode(chunk);
+          if (text.trim().isEmpty) continue;
+          final start = baseSec + chunk.startSec;
+          final end = start + chunk.samples.length / sr;
+          cues.add(SrtCue(
+            index: cues.length + 1,
+            start: Duration(milliseconds: (start * 1000).toInt()),
+            end: Duration(milliseconds: (end * 1000).toInt()),
+            text: text,
+          ));
+        }
+        done += n;
+        onProgress?.call(totalSamples == 0 ? 1 : done / totalSamples);
+      }
+      return cues;
+    } finally {
+      await raf.close();
     }
-    final chunks = await engine.segments(pcm);
-    final cues = <SrtCue>[];
-    for (var i = 0; i < chunks.length; i++) {
-      final text = await engine.decode(chunks[i]);
-      onProgress?.call(chunks.isEmpty ? 1 : (i + 1) / chunks.length);
-      if (text.trim().isEmpty) continue;
-      final start = chunks[i].startSec;
-      final end = start + chunks[i].samples.length / 16000.0;
-      cues.add(SrtCue(
-        index: cues.length + 1,
-        start: Duration(milliseconds: (start * 1000).toInt()),
-        end: Duration(milliseconds: (end * 1000).toInt()),
-        text: text,
-      ));
-    }
-    return cues;
   }
 
   @override
