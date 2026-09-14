@@ -88,29 +88,44 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
         animeRef.englishName!,
       animeRef.name,
     };
+    Anime? blind;
     for (final q in queries) {
       final result = await search(TextUtils.cleanSearchQuery(q));
       switch (result) {
         case Success(data: final candidates):
-          final valid = candidates
-              .where((a) => a.url.isNotEmpty && _overlaps(q, a.name))
-              .toList();
+          final valid = candidates.where((a) => a.url.isNotEmpty).toList();
           if (valid.isEmpty) continue;
-          return AnimeSourceAdapter.pinSeasonPage(
-              q, valid, source, animeRef.url);
+          // Com sinal léxico (mesmo idioma), o bestMatch escolhe; sem nenhum
+          // (página em PT, ex. "A Luz do Futuro" para "Sparks of Tomorrow"),
+          // confia na relevância da API (#1) em vez de persistir lixo — o
+          // bestMatch no escuro rankearia pelo menor negativo. O cego só vale
+          // se nenhuma query enxergar: guarda e tenta a próxima query antes.
+          final sighted = valid
+              .where((a) =>
+                  _sighted(q, a.name) || _sighted(animeRef.name, a.name))
+              .toList();
+          if (sighted.isNotEmpty) {
+            return AnimeSourceAdapter.pinSeasonPage(
+                q, sighted, source, animeRef.url);
+          }
+          blind ??= valid.first;
         case Failure():
         case Loading():
           continue;
       }
     }
-    return null;
+    return blind;
   }
 
-  static bool _overlaps(String query, String candidate) {
+  /// Sinal léxico forte: igualdade/contenção ou 2+ tokens em comum. Um token
+  /// só é ruído ("tomorrow" em "See You Tomorrow at the Food Court" empatava
+  /// a página certa em PT, sem nenhum token) — esses casos caem no #1 da API.
+  static bool _sighted(String query, String candidate) {
     final q = AnimeSourceAdapter.normalize(query);
     final c = AnimeSourceAdapter.normalize(candidate);
+    if (q.isEmpty || c.isEmpty) return false;
     if (q == c || q.contains(c) || c.contains(q)) return true;
-    return q.split(' ').any(c.split(' ').contains);
+    return q.split(' ').toSet().intersection(c.split(' ').toSet()).length >= 2;
   }
 
   @override

@@ -20,12 +20,10 @@ import '../utils/text_utils.dart';
 /// It does not replace the short-TTL availability/resolution caches; it
 /// complements them.
 class ProviderMatchStore {
-  /// v3 (2026-09): matches grudados na página errada quando o AnimeFire
-  /// indexa pelo título em inglês e a busca ia só com o romaji
-  /// ("Kimi ga Shinu..." → "Kimi Ga Aruji...", EP10 em 360p). A v2 é
-  /// abandonada para os matches errados se re-resolverem em vez de
-  /// repetirem o 360p. Caches de resolução são TTL curto e não migram.
-  static const _prefKey = 'provider_matches_v3';
+  /// v4 (2026-09): refino do match inglês — a v3 levava o filme Slime
+  /// ("Laços Escarlates") no lugar da página combinada e desistia (null)
+  /// quando a página era em PT sem tokens em comum. Re-resolve tudo de novo.
+  static const _prefKey = 'provider_matches_v4';
 
   static Map<String, Map<String, String>>? _cache;
 

@@ -168,7 +168,12 @@ abstract class AnimeSourceAdapter {
       } else {
         final qt = q.split(' ').toSet();
         final tt = t.split(' ').toSet();
-        s += qt.intersection(tt).length * 8;
+        // Capado abaixo do tier `contains` (40): 8 tokens soltos (ex.: filme
+        // "Slime - Laços Escarlates") somavam 64 e batiam o prefixo 60 da
+        // página combinada certa. A ordem dos tiers é exato > prefixo >
+        // contém > tokens.
+        final shared = qt.intersection(tt).length * 8;
+        s += shared > 39 ? 39 : shared;
       }
       final diff = (t.length - q.length).abs();
       s -= diff ~/ 8;

@@ -197,4 +197,56 @@ void main() {
     expect(match, isNotNull);
     expect(match!.url, 'https://animefire.io/anime/EfqshGOax3D');
   });
+
+  test('tokens soltos não batem prefixo: filme não rouba a página combinada (Slime)',
+      () async {
+    // Ao vivo: 8 tokens ("Slime - Laços Escarlates") somavam 64 e batiam o
+    // prefixo 60 da página combinada S1..S4 — o S4 persistia o filme (1 ep).
+    String payload(List<List<String>> rows) =>
+        '{"data":[${rows.map((r) => '{"id":"${r[0]}","title":"${r[1]}","audio":"Legendado"}').join(',')}]}';
+    final adapter = AnimeFireAdapter(
+      client: MockClient((req) async => http.Response(
+          payload([
+            ['o7eXYR04IjL', 'That Time I Got Reincarnated as a Slime'],
+            [
+              'XEe_cENedzh',
+              'That Time I Got Reincarnated as a Slime - Laços Escarlates'
+            ],
+          ]),
+          200)),
+    );
+    final match = await adapter.resolveAnime(Anime(
+      name: 'Tensei Shitara Slime Datta Ken 4th Season',
+      englishName: 'That Time I Got Reincarnated as a Slime Season 4',
+      url: '',
+      source: AnimeSource.animeFire,
+    ));
+    expect(match, isNotNull);
+    expect(match!.url, 'https://animefire.io/anime/o7eXYR04IjL');
+  });
+
+  test('sem sinal léxico (página em PT), confia no #1 da API (Sparks of Tomorrow)',
+      () async {
+    // Ao vivo: "A Luz do Futuro" não compartilha nenhum token com o inglês;
+    // o bestMatch no escuro rankearia pelo menor negativo ("See You Tomorrow
+    // at the Food Court"). A API ordena certo — usa o #1.
+    String payload(List<List<String>> rows) =>
+        '{"data":[${rows.map((r) => '{"id":"${r[0]}","title":"${r[1]}","audio":"Legendado"}').join(',')}]}';
+    final adapter = AnimeFireAdapter(
+      client: MockClient((req) async => http.Response(
+          payload([
+            ['UY6-domqQN0', 'A Luz do Futuro'],
+            ['pqU8o2iV15B', 'See You Tomorrow at the Food Court'],
+          ]),
+          200)),
+    );
+    final match = await adapter.resolveAnime(Anime(
+      name: 'Nijusseiki Denki Mokuroku: Eureka Evrika',
+      englishName: 'Sparks of Tomorrow',
+      url: '',
+      source: AnimeSource.animeFire,
+    ));
+    expect(match, isNotNull);
+    expect(match!.url, 'https://animefire.io/anime/UY6-domqQN0');
+  });
 }
