@@ -198,7 +198,6 @@ void main() {
         lastIdx = idx;
       }
     });
-
     test('falha vira failed com mensagem PT-BR (não trava no 0%)', () async {
       final mgr = SubtitleJobManager.instance;
       await mgr.enqueueTranscribe(
@@ -211,6 +210,28 @@ void main() {
       await _waitIdle(mgr);
       expect(mgr.state.value.phase, JobPhase.failed);
       expect(mgr.state.value.error, contains('internet'));
+    });
+
+    test('áudio-only pula o download do vídeo cheio', () async {
+      final mgr = SubtitleJobManager.instance;
+      var downloadCalled = false;
+      final audio =
+          await File('${tmp.path}/only.aac').writeAsBytes(const [9, 9]);
+      await mgr.enqueueTranscribe(
+        animeKey: 'haibane', ep: 5, videoUrl: 'http://x/ep5.m3u8',
+        sttFor: () => _FakeStt(), mt: _FakeMt(),
+        download: (_, __, ___) async {
+          downloadCalled = true;
+          throw StateError('não deveria baixar vídeo');
+        },
+        extract: _fakeExtract,
+        audioOnlyForTest: () async => audio,
+        jobsDirForTest: jobs, subsDirForTest: subs, tmpDirForTest: tmp);
+      await _waitIdle(mgr);
+      expect(downloadCalled, isFalse);
+      final f = await SubtitleStore.get(
+          animeKey: 'haibane', ep: 5, tag: 'ja-ai', subsDirForTest: subs);
+      expect(f, isNotNull);
     });
   });
 }

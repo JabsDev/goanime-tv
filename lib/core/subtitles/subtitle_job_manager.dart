@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'audio_extract.dart';
+import 'hls_audio_only.dart';
 import 'model_manager.dart';
 import 'mt_provider.dart';
 import 'srt_parser.dart';
@@ -143,6 +144,7 @@ class SubtitleJobManager {
     required MtProvider mt,
     Future<File> Function(String url, Map<String, String> headers, String outPath)? download,
     Future<String> Function(String url, Map<String, String> headers, String outPath)? extract,
+    Future<File?> Function()? audioOnlyForTest,
     Directory? jobsDirForTest,
     Directory? subsDirForTest,
     Directory? tmpDirForTest,
@@ -158,6 +160,7 @@ class SubtitleJobManager {
       mt: mt,
       download: download,
       extract: extract,
+      audioOnlyForTest: audioOnlyForTest,
       jobsDir: dir,
       subsDirForTest: subsDirForTest,
       tmpDirForTest: tmpDirForTest,
@@ -238,37 +241,47 @@ class SubtitleJobManager {
   }
 
   /// Carga SEQUENCIAL obrigatória: STT.dispose() antes de MT.load().
+  /// Prefere faixa de áudio separada (HLS `bestaudio`, ~15 MB); mp4 único
+  /// baixa o vídeo cheio (limitação do HTTP, sem demux parcial confiável).
   Future<void> _runTranscribe(_Job job) async {
     final tmp =
         job.tmpDirForTest ?? await Directory.systemTemp.createTemp('stt');
     final videoPath = '${tmp.path}/ep${job.ep}.mp4';
+    final audioOnlyPath = '${tmp.path}/ep${job.ep}.aac';
     final pcmPath = '${tmp.path}/ep${job.ep}.pcm';
     final stt = job.sttFor!();
     // tiny traduz ja→en (MT recebe 'en'); base/small transcrevem ja (NLLB).
     final mtSrc = stt.id == 'whisper-tiny-ja' ? 'en' : 'ja';
     try {
-      final download = job.download ??
-          (String url, Map<String, String> h, String out) =>
-              ModelManager.fetchFile(
-                  dest: File(out), url: url, headers: h,
-                  onProgress: (got, total) {
-                    final p = total <= 0 ? 0.0 : got / total;
-                    _set(
-                        JobPhase.downloadingVideo, p * 0.25, 'Baixando vídeo…',
-                        detail: total <= 0
-                            ? '${(got / 1048576).toStringAsFixed(0)} MB'
-                            : '${(got / 1048576).toStringAsFixed(0)}/${(total / 1048576).toStringAsFixed(0)} MB');
-                  });
-      _set(JobPhase.downloadingVideo, 0, 'Baixando vídeo…',
-          detail: 'preparando…');
-      await download(job.videoUrl, job.headers, videoPath);
+      String mediaPath = videoPath;
+      final audioOnly = await _tryAudioOnly(job, audioOnlyPath);
       if (_checkCancel(job)) return;
+      if (audioOnly != null) {
+        mediaPath = audioOnly.path;
+      } else {
+        final download = job.download ??
+            (String url, Map<String, String> h, String out) =>
+                ModelManager.fetchFile(
+                    dest: File(out), url: url, headers: h,
+                    onProgress: (got, total) {
+                      final p = total <= 0 ? 0.0 : got / total;
+                      _set(
+                          JobPhase.downloadingVideo, p * 0.25, 'Baixando vídeo…',
+                          detail: total <= 0
+                              ? '${(got / 1048576).toStringAsFixed(0)} MB'
+                              : '${(got / 1048576).toStringAsFixed(0)}/${(total / 1048576).toStringAsFixed(0)} MB');
+                    });
+        _set(JobPhase.downloadingVideo, 0, 'Baixando vídeo…',
+            detail: 'preparando…');
+        await download(job.videoUrl, job.headers, videoPath);
+        if (_checkCancel(job)) return;
+      }
       _set(JobPhase.extractingAudio, 0.26, 'Extraindo áudio…',
           detail: 'convertendo p/ 16 kHz');
       final extract = job.extract ??
           (String url, Map<String, String> h, String out) =>
               AudioExtract.extractPcm16k(
-                  path: videoPath, headers: const {}, outPath: out);
+                  path: mediaPath, headers: const {}, outPath: out);
       await extract(job.videoUrl, job.headers, pcmPath);
       if (_checkCancel(job)) return;
       _set(JobPhase.loadingVoice, 0.3, 'Carregando modelo de voz…',
@@ -304,11 +317,32 @@ class SubtitleJobManager {
         await mt.dispose();
       }
     } finally {
-      for (final p in [videoPath, pcmPath]) {
+      for (final p in [videoPath, audioOnlyPath, pcmPath]) {
         try {
           await File(p).delete();
         } catch (_) {}
       }
+    }
+  }
+
+  /// Tenta a faixa de áudio separada antes do vídeo cheio. Null = indisponível
+  /// (mp4 único, sem grupo AUDIO, AES/BYTERANGE ou qualquer erro).
+  Future<File?> _tryAudioOnly(_Job job, String outPath) async {
+    if (job.audioOnlyForTest != null) return job.audioOnlyForTest!();
+    if (!job.videoUrl.toLowerCase().contains('.m3u8')) return null;
+    try {
+      _set(JobPhase.downloadingVideo, 0, 'Procurando faixa de áudio…',
+          detail: 'só-áudio economiza ~90% do download');
+      final pl = await HlsAudioOnly.audioPlaylistUri(job.videoUrl,
+          headers: job.headers);
+      if (pl == null) return null;
+      return await HlsAudioOnly.fetch(pl, File(outPath),
+          headers: job.headers, onProgress: (got) {
+        _set(JobPhase.downloadingVideo, 0.05, 'Baixando áudio…',
+            detail: '${(got / 1048576).toStringAsFixed(0)} MB');
+      });
+    } catch (_) {
+      return null;
     }
   }
 
@@ -380,6 +414,7 @@ class _Job {
       String url, Map<String, String> headers, String outPath)? download;
   final Future<String> Function(
       String url, Map<String, String> headers, String outPath)? extract;
+  final Future<File?> Function()? audioOnlyForTest;
   final MtProvider mt;
   final Directory jobsDir;
   final Directory? subsDirForTest;
@@ -402,6 +437,7 @@ class _Job {
         sttFor = null,
         download = null,
         extract = null,
+        audioOnlyForTest = null,
         tmpDirForTest = null;
 
   _Job.transcribe({
@@ -414,6 +450,7 @@ class _Job {
     required this.jobsDir,
     this.download,
     this.extract,
+    this.audioOnlyForTest,
     this.subsDirForTest,
     this.tmpDirForTest,
     this.file,
