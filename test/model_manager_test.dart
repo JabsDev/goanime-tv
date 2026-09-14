@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -48,48 +46,28 @@ void main() {
     });
   });
 
-  group('Marian vocab.json + prefixo', () {
-    const vocabJson = {
-      '</s>': 0,
-      '<unk>': 1,
-      '<s>': 2,
-      '<pad>': 3,
-      '>>por<<': 4,
-      '▁Hello': 5,
-      '▁Olá': 6,
-    };
-
-    test('fromPieces monta encode/decode', () {
-      final v = MarianVocab.fromPieces(vocabJson);
-      expect(v.encode('Hello'), [5]);
-      expect(v.decode([2, 6, 0]), 'Olá');
-    });
-
-    test('prefixo >>por<< entra na entrada do encoder', () async {
-      List<int>? seenEnc;
+  group('Marian prefixo de alvo (canal Kotlin)', () {
+    test('prefixo >>por<< chega ao canal', () async {
+      final ch = _PrefixCapture();
       final mt = MarianMtProvider('unused',
-          sessionForTest: _CaptureSession((e) => seenEnc = e),
-          vocabForTest: jsonEncode(vocabJson),
-          targetPrefix: '>>por<<');
+          targetPrefix: '>>por<<', channelForTest: ch);
       await mt.load();
       await mt.translate('Hello', src: 'en', tgt: 'pt');
-      expect(seenEnc?.first, 4); // >>por<<
+      expect(ch.seenPrefix, '>>por<<');
       await mt.dispose();
     });
   });
 }
 
-class _CaptureSession implements MarianSession {
-  final void Function(List<int> enc) onStep;
-  _CaptureSession(this.onStep);
-
+class _PrefixCapture implements MarianChannel {
+  String? seenPrefix;
   @override
-  Future<List<double>> stepLogits(
-      List<int> encoderIds, List<int> decoderIds) async {
-    onStep(encoderIds);
-    return List.filled(7, -10.0)..[0] = 10.0; // eos imediato
+  Future<String> translate(String modelDir, String text,
+      {String? targetPrefix}) async {
+    seenPrefix = targetPrefix;
+    return 'PT';
   }
 
   @override
-  Future<void> close() async {}
+  Future<void> dispose() async {}
 }

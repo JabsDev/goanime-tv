@@ -2,79 +2,46 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:goanime_tv/core/subtitles/marian_mt.dart';
 
-const _vocabYml = '''
-"<s>": 0
-"<pad>": 1
-"</s>": 2
-"<unk>": 3
-"▁Hello": 4
-"▁world": 5
-"▁Olá": 6
-"▁mundo": 7
-"!": 8
-''';
-
-/// Sessão fake: emite a sequência [script] por sentença (reseta no bos).
-class _FakeSession implements MarianSession {
-  final List<int> script;
-  int _step = 0;
-  _FakeSession(this.script);
-
+class _FakeMarian implements MarianChannel {
+  String? seenPrefix;
   @override
-  Future<List<double>> stepLogits(
-      List<int> encoderIds, List<int> decoderIds) async {
-    if (decoderIds.length == 1) _step = 0; // nova sentença
-    final next = _step < script.length ? script[_step++] : 2; // eos
-    return List.generate(9, (i) => i == next ? 10.0 : -10.0);
+  Future<String> translate(String modelDir, String text,
+      {String? targetPrefix}) async {
+    seenPrefix = targetPrefix;
+    return 'PT[$text]';
   }
 
   @override
-  Future<void> close() async {}
+  Future<void> dispose() async {}
 }
 
 void main() {
-  group('MarianVocab', () {
-    test('parse + encode/decode round-trip', () {
-      final v = MarianVocab.parse(_vocabYml);
-      expect(v.bosId, 0);
-      expect(v.eosId, 2);
-      expect(v.encode('Hello world!'), [4, 5, 8]);
-      expect(v.decode([0, 6, 7, 8, 2]), 'Olá mundo!');
-    });
-
-    test('desconhecida vira unk sem quebrar', () {
-      final v = MarianVocab.parse(_vocabYml);
-      expect(v.encode('xyz'), isNotEmpty);
-    });
-  });
-
-  group('MarianMtProvider', () {
-    test('greedy emite script e para no eos', () async {
-      final mt = MarianMtProvider('unused',
-          sessionForTest: _FakeSession([6, 7]), vocabForTest: _vocabYml);
+  group('MarianMtProvider (canal Kotlin)', () {
+    test('traduz por frase com prefixo de alvo', () async {
+      final ch = _FakeMarian();
+      final mt = MarianMtProvider('dir',
+          targetPrefix: '>>por<<', channelForTest: ch);
       await mt.load();
-      expect(await mt.translate('Hello world', src: 'en', tgt: 'pt'),
-          'Olá mundo');
+      final out =
+          await mt.translate('Hello world. Hi.', src: 'en', tgt: 'pt');
+      expect(out, 'PT[Hello world.] PT[Hi.]');
+      expect(ch.seenPrefix, '>>por<<');
       await mt.dispose();
     });
 
-    test('chunk por frase (2 sentenças = 2 chamadas de sessão)', () async {
-      var calls = 0;
-      final mt = MarianMtProvider(
-          'unused',
-          sessionForTest: _FakeSession([6, 7]),
-          vocabForTest: _vocabYml);
+    test('translateSrt preserva timestamps', () async {
+      final mt = MarianMtProvider('dir', channelForTest: _FakeMarian());
       await mt.load();
-      final out =
-          await mt.translate('Hello world. Hello world.', src: 'en', tgt: 'pt');
-      calls = out.split('Olá mundo').length - 1;
-      expect(calls, 2);
+      const src = '1\n00:00:01,000 --> 00:00:02,000\nHello\n\n';
+      final out = await mt.translateSrt(src, src: 'en', tgt: 'pt');
+      expect(out, contains('00:00:01,000 --> 00:00:02,000'));
+      expect(out, contains('PT[Hello]'));
       await mt.dispose();
     });
 
     test('translate sem load falha alto', () async {
-      final mt = MarianMtProvider('unused',
-          sessionForTest: _FakeSession([]), vocabForTest: _vocabYml);
+      final mt =
+          MarianMtProvider('dir', channelForTest: _FakeMarian());
       expect(() => mt.translate('hi', src: 'en', tgt: 'pt'),
           throwsA(isA<StateError>()));
     });

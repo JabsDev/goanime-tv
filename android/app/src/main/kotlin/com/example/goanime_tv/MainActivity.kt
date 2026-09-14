@@ -17,6 +17,7 @@ class MainActivity : FlutterActivity() {
         UiModeChannel(this, flutterEngine.dartExecutor.binaryMessenger).register()
         AudioExtractChannel(flutterEngine.dartExecutor.binaryMessenger).register()
         NllbTranslator(flutterEngine.dartExecutor.binaryMessenger).register()
+        MarianTranslator(flutterEngine.dartExecutor.binaryMessenger).register()
     }
 
     // A instalação via ACTION_INSTALL_PACKAGE devolve o resultado aqui

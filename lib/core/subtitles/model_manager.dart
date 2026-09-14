@@ -53,11 +53,12 @@ final aiModelCatalog = <String, AiModelSpec>{
       remoteFiles: ['silero_vad.onnx'],
       files: ['vad.onnx']),
   // MT leve: Marian opus-mt-en-mul int8 (alvo via prefixo >>por<<).
+  // decoder_start/eos lidos de generation_config.json (sem chute).
   'marian-en-pt-int8': AiModelSpec(
       id: 'marian-en-pt-int8', mb: 120, sha256: 'PINAR', strongOnly: false,
       repo: 'Xenova/opus-mt-en-mul',
-      remoteFiles: ['onnx/encoder_model_int8.onnx', 'onnx/decoder_model_int8.onnx', 'vocab.json'],
-      files: ['encoder_model.onnx', 'decoder_model.onnx', 'vocab.json']),
+      remoteFiles: ['onnx/encoder_model_int8.onnx', 'onnx/decoder_model_int8.onnx', 'vocab.json', 'config.json', 'generation_config.json'],
+      files: ['encoder_model.onnx', 'decoder_model.onnx', 'vocab.json', 'config.json', 'generation_config.json']),
   // MT completa: NLLB int8 com decoder + decoder_with_past SEPARADOS (nunca
   // decoder_merged — crash Reshape no ORT Android, plano §L2).
   'nllb-600M-int8': AiModelSpec(

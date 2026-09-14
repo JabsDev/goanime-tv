@@ -76,8 +76,13 @@ void main() {
     });
 
     test('mt leve pronto quando arquivos existem', () async {
-      await _fakeModel('marian-en-pt-int8',
-          ['encoder_model.onnx', 'decoder_model.onnx', 'vocab.json']);
+      await _fakeModel('marian-en-pt-int8', [
+        'encoder_model.onnx',
+        'decoder_model.onnx',
+        'vocab.json',
+        'config.json',
+        'generation_config.json'
+      ]);
       final mt = await AiProviders.makeMt(modelRootForTest: root);
       expect(mt?.id, 'marian');
     });
