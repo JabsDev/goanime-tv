@@ -91,6 +91,8 @@ class Anime {
         return 'Animes Online IO';
       case AnimeSource.archiveJp:
         return 'Archive JA';
+      case AnimeSource.animeGg:
+        return 'AnimeGG';
     }
   }
 }
@@ -113,6 +115,7 @@ enum AnimeSource {
   animesHd,
   animesOnlineIo,
   archiveJp,
+  animeGg,
 }
 
 extension AnimeSourcePriority on AnimeSource {
@@ -173,6 +176,8 @@ extension AnimeSourcePriority on AnimeSource {
         return 15;
       case AnimeSource.archiveJp:
         return 16;
+      case AnimeSource.animeGg:
+        return 17;
     }
   }
 }
