@@ -104,10 +104,14 @@ class NllbTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandl
             )
             enc.run(encIn).use { out ->
                 @Suppress("UNCHECKED_CAST")
-                hidden = out[0].value as Array<Array<FloatArray>>
+                hidden = out.get(enc.outputNames.first()).get() as Array<Array<FloatArray>>
             }
             val dec = decoder!!
             val decPast = decoderPast!!
+            val decIn = dec.inputNames.toList()
+            val decPastIn = decPast.inputNames.toList()
+            val decLogitsName = dec.outputNames.first()
+            val decPastLogitsName = decPast.outputNames.first()
             val bosTgt = tok.idOf(tgtLang).toLong()
             val decHidden = hidden[0] // [n, h]
             val h = decHidden[0].size
@@ -121,12 +125,13 @@ class NllbTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandl
                 val newPast = mutableMapOf<String, OnnxTensor>()
                 // Com past válido usa decoder_with_past (1 token); senão o
                 // decoder cheio com o prefixo (export sem presents).
-                if (past != null && past!!.isNotEmpty) {
+                val cur = past
+                if (cur != null && cur.isNotEmpty()) {
                     val inputs = mutableMapOf<String, OnnxTensor>(
-                        decPast.inputNames[0] to OnnxTensor.createTensor(
+                        decPastIn[0] to OnnxTensor.createTensor(
                             env, LongBuffer.wrap(longArrayOf(gen.last())), longArrayOf(1, 1)),
                     )
-                    for (name in decPast.inputNames.drop(1)) {
+                    for (name in decPastIn.drop(1)) {
                         when {
                             name.contains("attention", ignoreCase = true) ||
                                 name.contains("mask", ignoreCase = true) ->
@@ -138,30 +143,30 @@ class NllbTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandl
                             name.contains("encoder_hidden", ignoreCase = true) ->
                                 inputs[name] = OnnxTensor.createTensor(
                                     env, java.nio.FloatBuffer.wrap(flatHidden), longArrayOf(1, n.toLong(), h.toLong()))
-                            name.startsWith("past") && past!!.containsKey(name) ->
-                                inputs[name] = past!![name]!!
+                            name.startsWith("past") && cur.containsKey(name) ->
+                                inputs[name] = cur.getValue(name)
                         }
                     }
                     decPast.run(inputs).use { out ->
                         @Suppress("UNCHECKED_CAST")
-                        logits = out.get(0).get() as Array<Array<FloatArray>>
+                        logits = out.get(decPastLogitsName).get() as Array<Array<FloatArray>>
                         collectPrefixed(out, decPast.outputNames, "present", newPast)
                     }
-                    past!!.values.forEach { runCatching { it.close() } }
+                    cur.values.forEach { runCatching { it.close() } }
                 } else {
                     val inputs = mutableMapOf(
-                        dec.inputNames[0] to OnnxTensor.createTensor(env, LongBuffer.wrap(gen.toLongArray()), longArrayOf(1, m.toLong())),
-                        dec.inputNames[1] to OnnxTensor.createTensor(
+                        decIn[0] to OnnxTensor.createTensor(env, LongBuffer.wrap(gen.toLongArray()), longArrayOf(1, m.toLong())),
+                        decIn[1] to OnnxTensor.createTensor(
                             env,
                             java.nio.FloatBuffer.wrap(flatHidden),
                             longArrayOf(1, n.toLong(), h.toLong())),
                     )
-                    if (dec.inputNames.size > 2) {
-                        inputs[dec.inputNames[2]] = OnnxTensor.createTensor(env, LongBuffer.wrap(encMask), longArrayOf(1, n.toLong()))
+                    if (decIn.size > 2) {
+                        inputs[decIn[2]] = OnnxTensor.createTensor(env, LongBuffer.wrap(encMask), longArrayOf(1, n.toLong()))
                     }
                     dec.run(inputs).use { out ->
                         @Suppress("UNCHECKED_CAST")
-                        logits = out.get(0).get() as Array<Array<FloatArray>>
+                        logits = out.get(decLogitsName).get() as Array<Array<FloatArray>>
                         collectPrefixed(out, dec.outputNames, "present", newPast)
                     }
                 }
