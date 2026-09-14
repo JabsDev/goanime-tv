@@ -219,6 +219,8 @@ class AnimeScraper {
           case AnimeSource.animesHd:
           case AnimeSource.animesOnlineIo:
             return a.url.isNotEmpty;
+          case AnimeSource.archiveJp:
+            return a.url.isNotEmpty;
           case AnimeSource.anilist:
             return false; // metadata provider, no stream URL
         }

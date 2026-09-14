@@ -5,6 +5,7 @@ import '../sources/anime_source_adapter.dart';
 import '../sources/anime_fire_adapter.dart';
 import '../sources/animesonline_io_adapter.dart';
 import '../sources/all_anime_adapter.dart';
+import '../sources/archive_jp_adapter.dart';
 import '../sources/goyabu_adapter.dart';
 import '../sources/dooplay_adapter.dart';
 import '../sources/animeplayer_adapter.dart';
@@ -32,6 +33,7 @@ class SourceRegistry {
     AnimePlayerAdapter(),
     AnimesOnlineIoAdapter(),
     AllAnimeAdapter(),
+    ArchiveJpAdapter(),
   ];
 
   static List<AnimeSourceAdapter> get adapters => _adapters;
@@ -50,6 +52,7 @@ class SourceRegistry {
       AnimeSource.animesHd,
       AnimeSource.animePlayer,
       AnimeSource.animesOnlineIo,
+      AnimeSource.archiveJp,
     ];
   }
 
@@ -87,6 +90,8 @@ class SourceRegistry {
         return 14;
       case AnimeSource.anilist:
         return 15;
+      case AnimeSource.archiveJp:
+        return 16;
     }
   }
 
