@@ -78,13 +78,23 @@ class _SttWorker {
   final Isolate _iso;
   final SendPort _cmd;
   final ReceivePort _resp;
+  final ReceivePort _errPort;
+  late final StreamSubscription _errSub;
   int _seq = 0;
   final _pending = <int, Completer<dynamic>>{};
 
-  _SttWorker._(this._iso, this._cmd, this._resp) {
+  _SttWorker._(this._iso, this._cmd, this._resp, this._errPort) {
     _resp.listen((m) {
       final mm = m as Map;
       _pending.remove(mm['id'])?.complete(mm['value']);
+    });
+    // Erro não-tratado no isolate vira falha dos pendentes — nunca crash.
+    _errSub = _errPort.listen((e) {
+      final pending = _pending.values.toList();
+      _pending.clear();
+      for (final c in pending) {
+        if (!c.isCompleted) c.completeError(StateError('worker STT: $e'));
+      }
     });
   }
 
@@ -93,14 +103,50 @@ class _SttWorker {
       required bool withVad,
       int threads = 2}) async {
     final ready = ReceivePort();
-    final iso = await Isolate.spawn(
-        _entry, [ready.sendPort, modelDir, task, withVad, threads],
-        debugName: 'stt-worker');
-    final cmd = await ready.first as SendPort;
-    final resp = ReceivePort();
-    final w = _SttWorker._(iso, cmd, resp);
-    await w._call('ping', null); // garante recognizer pronto
-    return w;
+    final errors = ReceivePort();
+    Isolate? iso;
+    try {
+      iso = await Isolate.spawn(
+          _entry, [ready.sendPort, modelDir, task, withVad, threads],
+          debugName: 'stt-worker', onError: errors.sendPort);
+    } catch (e) {
+      ready.close();
+      errors.close();
+      throw StateError('Falha ao iniciar o worker de voz: $e');
+    }
+    final errs = <Object>[];
+    final errSub = errors.listen((e) => errs.add(e));
+    try {
+      // Handshake com teto: isolate morto/travado vira erro legível,
+      // nunca trava o app nem mata o processo em silêncio.
+      final first = await ready.first
+          .timeout(const Duration(seconds: 120), onTimeout: () => null);
+      if (first == null) {
+        throw StateError(
+            'Modelo de voz travou ao carregar (timeout 2 min). '
+            'Tente de novo ou baixe o modelo novamente.');
+      }
+      if (first is Map) {
+        throw StateError('Falha ao carregar voz: ${first['error']}');
+      }
+      final resp = ReceivePort();
+      // A partir daqui, erros do isolate vão p/ o listener do worker.
+      await errSub.cancel();
+      final w = _SttWorker._(iso, first as SendPort, resp, errors);
+      await w._call('ping', null);
+      if (errs.isNotEmpty) {
+        throw StateError('Falha ao carregar voz: ${errs.first}');
+      }
+      return w;
+    } catch (e) {
+      try {
+        iso.kill(priority: Isolate.immediate);
+      } catch (_) {}
+      errors.close();
+      rethrow;
+    } finally {
+      await errSub.cancel();
+    }
   }
 
   Future<dynamic> _call(String op, dynamic arg) {
@@ -142,6 +188,8 @@ class _SttWorker {
     try {
       await _call('free', null).timeout(const Duration(seconds: 5));
     } catch (_) {}
+    await _errSub.cancel();
+    _errPort.close();
     _resp.close();
     _iso.kill(priority: Isolate.immediate);
   }
@@ -152,24 +200,32 @@ class _SttWorker {
     final task = args[2] as String;
     final withVad = args[3] as bool;
     final threads = args[4] as int;
-    sherpa.initBindings();
-    final recognizer = sherpa.OfflineRecognizer(
-      sherpa.OfflineRecognizerConfig(
-        model: sherpa.OfflineModelConfig(
-          whisper: sherpa.OfflineWhisperModelConfig(
-            encoder: '$modelDir/encoder.int8.onnx',
-            decoder: '$modelDir/decoder.int8.onnx',
-            language: 'ja',
-            task: task,
-          ),
-          tokens: '$modelDir/tokens.txt',
-          modelType: 'whisper',
-          numThreads: threads,
-          debug: false,
-        ),
-      ),
-    );
+    // Qualquer throw aqui (binding, modelo corrompido) vira mensagem
+    // de erro no handshake — nunca morte silenciosa do isolate.
+    late final sherpa.OfflineRecognizer recognizer;
     sherpa.VoiceActivityDetector? vad;
+    try {
+      sherpa.initBindings();
+      recognizer = sherpa.OfflineRecognizer(
+        sherpa.OfflineRecognizerConfig(
+          model: sherpa.OfflineModelConfig(
+            whisper: sherpa.OfflineWhisperModelConfig(
+              encoder: '$modelDir/encoder.int8.onnx',
+              decoder: '$modelDir/decoder.int8.onnx',
+              language: 'ja',
+              task: task,
+            ),
+            tokens: '$modelDir/tokens.txt',
+            modelType: 'whisper',
+            numThreads: threads,
+            debug: false,
+          ),
+        ),
+      );
+    } catch (e) {
+      main.send({'error': '$e'});
+      return;
+    }
     if (withVad) {
       // Best-effort: VAD incompatível/ausente cai p/ janelas fixas (fallback
       // testado no Dart; nunca falha o job por causa do VAD).
