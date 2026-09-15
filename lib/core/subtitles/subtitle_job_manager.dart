@@ -140,6 +140,16 @@ class SubtitleJobManager {
     if (e is SocketException) {
       return 'Sem internet. Verifique a rede e tente de novo.';
     }
+    if (s.contains('Stream has already been listened')) {
+      return 'Falha interna do worker de voz. Atualize o app e tente de novo.';
+    }
+    if (s.contains('worker STT sem resposta')) {
+      return 'Voz demorou demais (aparelho sem memória?). Tente o modelo leve (tiny).';
+    }
+    if (s.contains('worker STT:')) {
+      final short = s.replaceAll(RegExp(r'^.*worker STT:\s*'), '');
+      return 'Voz falhou: ${short.length > 120 ? '${short.substring(0, 120)}…' : short}';
+    }
     if (s.contains('404')) {
       return 'Vídeo indisponível (erro 404). A fonte pode ter saído do ar.';
     }
@@ -252,11 +262,15 @@ class SubtitleJobManager {
     } catch (e, st) {
       debugPrint('[SubtitleJob] fail: $e\n$st');
       await job.delete(); // falhou: não resume (re-tentativa é manual)
-      // Stack encurtado junto p/ diagnóstico no aparelho (sem logcat).
+      final msg = friendlyError(e);
+      // Erro interno do worker já é acionável: sem stack técnico na tela.
+      // Rede/outros mantêm stack curta p/ diagnóstico no aparelho.
+      final technical = !(msg.startsWith('Falha interna') ||
+          msg.startsWith('Voz '));
       final frames =
           st.toString().split('\n').take(4).join('\n');
       _set(JobPhase.failed, progress.value, 'Falhou',
-          error: '${friendlyError(e)}\n$frames');
+          error: technical ? '$msg\n$frames' : msg);
     } finally {
       _current = null;
       _pump(); // FIFO: próximo da fila
@@ -367,11 +381,19 @@ class SubtitleJobManager {
           (String url, Map<String, String> h, String out) =>
               AudioExtract.extractPcm16k(
                   path: mediaPath, headers: const {}, outPath: out);
-      await extract(job.videoUrl, job.headers, pcmPath);
+      // Teto anti-hang em stick fraco (ponytail: timeout em vez de EventChannel).
+      await extract(job.videoUrl, job.headers, pcmPath)
+          .timeout(const Duration(minutes: 10), onTimeout: () {
+        throw StateError(
+            'Extração de áudio demorou demais (timeout 10 min). Tente outra fonte.');
+      });
       if (_checkCancel(job)) return;
       _set(JobPhase.loadingVoice, 0.3, 'Carregando modelo de voz…',
           detail: 'pode demorar ~1 min na 1ª vez');
-      await stt.load();
+      await stt.load().timeout(const Duration(minutes: 3), onTimeout: () {
+        throw StateError(
+            'Modelo de voz demorou demais (timeout 3 min). Tente o modelo leve (tiny).');
+      });
       List<SrtCue> srcCues = [];
       try {
         srcCues = await stt.transcribe(pcmPath, onProgress: (p) {
@@ -431,7 +453,12 @@ class SubtitleJobManager {
     }
   }
 
-  void cancelCurrent() => _current?.cancelled = true;
+  void cancelCurrent() {
+    _current?.cancelled = true;
+    // Interrompe o nativo (extração PCM); o flag cobre download/transcrição.
+    // ignore: discarded_futures
+    AudioExtract.cancel();
+  }
 
   /// @visibleForTesting
   int queueLengthForTest() => _queue.length;
