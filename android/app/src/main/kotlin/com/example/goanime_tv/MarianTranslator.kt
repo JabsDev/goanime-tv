@@ -50,7 +50,7 @@ class MarianTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHan
                 } catch (e: Throwable) {
                     // Error (ex. OOM) também vira resposta: exceção não-capturada
                     // em thread mata o app sem mensagem. Best-effort: solta as sessões.
-                    try { dispose() } catch (_) {}
+                    try { dispose() } catch (_: Throwable) {}
                     reply { result.error("MARIAN", e.message, null) }
                 }
             }.start()
