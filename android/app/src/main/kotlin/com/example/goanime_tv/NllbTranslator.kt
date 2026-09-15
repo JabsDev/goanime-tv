@@ -49,7 +49,7 @@ class NllbTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandl
                     reply { result.success(out) }
                 } catch (e: Throwable) {
                     // Idem Marian: Error não-capturado em thread mata o app sem mensagem.
-                    try { dispose() } catch (_) {}
+                    try { dispose() } catch (_: Throwable) {}
                     reply { result.error("NLLB", e.message, null) }
                 }
             }.start()
