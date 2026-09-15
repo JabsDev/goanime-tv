@@ -1,5 +1,6 @@
 import 'dart:isolate';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:goanime_tv/core/subtitles/subtitle_job_manager.dart';
@@ -23,5 +24,14 @@ void main() {
         SubtitleJobManager.friendlyError(
             StateError('worker STT sem resposta (timeout 10s). x')),
         contains('Voz'));
+  });
+
+  test('friendlyError mapeia dlopen nativo p/ PT-BR sem stack', () {
+    final msg = SubtitleJobManager.friendlyError(PlatformException(
+        code: 'LFM',
+        message:
+            'dlopen failed: cannot locate symbol "OrtGetApiBase" referenced by "/data/app/~~x/lib/arm64/libonnxruntime4j_jni.so"'));
+    expect(msg, contains('Falha nas bibliotecas'));
+    expect(msg.contains('dlopen'), isFalse);
   });
 }

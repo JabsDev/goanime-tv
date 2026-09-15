@@ -150,6 +150,15 @@ class SubtitleJobManager {
       final short = s.replaceAll(RegExp(r'^.*worker STT:\s*'), '');
       return 'Voz falhou: ${short.length > 120 ? '${short.substring(0, 120)}…' : short}';
     }
+    // Conflito de .so nativos (plano-acao-ort-duplicado-v5 §0): dois
+    // libonnxruntime.so incompatíveis disputam o pickFirsts; o eleito
+    // quebra um dos lados. Mensagem curta, sem stack (ver _run).
+    if (s.contains('dlopen') ||
+        s.contains('UnsatisfiedLinkError') ||
+        s.contains('OrtGetApi')) {
+      return 'Falha nas bibliotecas de tradução desta versão. '
+          'Atualize o app e tente de novo.';
+    }
     if (s.contains('404')) {
       return 'Vídeo indisponível (erro 404). A fonte pode ter saído do ar.';
     }
@@ -263,9 +272,10 @@ class SubtitleJobManager {
       debugPrint('[SubtitleJob] fail: $e\n$st');
       await job.delete(); // falhou: não resume (re-tentativa é manual)
       final msg = friendlyError(e);
-      // Erro interno do worker já é acionável: sem stack técnico na tela.
+      // Erro interno/mapeado já é acionável: sem stack técnico na tela.
       // Rede/outros mantêm stack curta p/ diagnóstico no aparelho.
       final technical = !(msg.startsWith('Falha interna') ||
+          msg.startsWith('Falha nas bibliotecas') ||
           msg.startsWith('Voz '));
       final frames =
           st.toString().split('\n').take(4).join('\n');

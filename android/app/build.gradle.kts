@@ -77,16 +77,22 @@ dependencies {
     // FileProvider (fallback ACTION_VIEW do updater) vem do androidx.core.
     implementation("androidx.core:core-ktx:1.13.1")
     // NLLB-600M int8 on-device (L2): ORT Android. Sem decoder_merged.
-    // Versão alinhada ao ORT que o sherpa embarca (1.28.x): o .so chega em
-    // 3 cópias e o pickFirst abaixo pode eleger qualquer uma.
+    // ATENÇÃO (plano-acao-ort-duplicado-v5 §0): este AAR embarca
+    // libonnxruntime.so (nó VERS_1.28.0) que DISPUTA o pickFirsts abaixo com
+    // o fork do plugin sherpa (nó VERS_1.28.2, sem o qual o STT quebra).
+    // Nós mutuamente exclusivos: o eleito quebra um dos lados (hoje o fork
+    // vence — tradutores ORT-Java mortos com `dlopen OrtGetApiBase`).
+    // Não adicionar outro runtime ORT sem resolver a disputa primeiro.
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
 }
 
 android {
     packaging {
-        // libonnxruntime.so chega em 3 cópias (plugin Dart onnxruntime 1.15,
-        // este AAR 1.28 e o JNI do sherpa 1.28.2): C ABI estável + Java 1.28
-        // contra nativo 1.28.x em qualquer ordem de eleição, fica a primeira.
+        // libonnxruntime.so chega em 2 cópias/ABI (este AAR 1.28.0 com nó
+        // VERS_1.28.0 + fork sherpa 1.13.8 com nó VERS_1.28.2). Nós mutuamente
+        // exclusivos: o pickFirsts elege UMA e quebra o outro lado (medido:
+        // vence o fork — STT vivo, tradutores ORT-Java mortos). Ver
+        // plano-acao-ort-duplicado-v5. Não confiar nesta eleição p/ nada novo.
         jniLibs.pickFirsts.add("**/libonnxruntime.so")
     }
 }
