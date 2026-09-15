@@ -42,21 +42,21 @@ final aiModelCatalog = <String, AiModelSpec>{
   // fine-tuned p/ layout sherpa (encoder/decoder/tokens).
   'whisper-tiny-ja': AiModelSpec(
       id: 'whisper-tiny-ja', label: 'Voz leve (tiny)',
-      hint: '~110 MB · rápido no stick fraco · inglês com sotaque',
+      hint: 'Voz · transforma o áudio japonês em texto inglês. Rápido, qualidade básica (passo 1 de 2)',
       mb: 110, sha256: 'PINAR', strongOnly: false,
       repo: 'csukuangfj/sherpa-onnx-whisper-tiny',
       remoteFiles: ['tiny-encoder.int8.onnx', 'tiny-decoder.int8.onnx', 'tiny-tokens.txt'],
       files: ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']),
   'whisper-base': AiModelSpec(
       id: 'whisper-base', label: 'Voz equilibrada (base)',
-      hint: '~170 MB · japonês melhor · aparelho médio+',
+      hint: 'Voz · transcreve o japonês com mais qualidade. Mais lento (passo 1 de 2)',
       mb: 170, sha256: 'PINAR', strongOnly: false,
       repo: 'csukuangfj/sherpa-onnx-whisper-base',
       remoteFiles: ['base-encoder.int8.onnx', 'base-decoder.int8.onnx', 'base-tokens.txt'],
       files: ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']),
   'whisper-small': AiModelSpec(
       id: 'whisper-small', label: 'Voz superior (small)',
-      hint: '~380 MB · bem melhor em JA · só aparelho forte',
+      hint: 'Voz · melhor transcrição de japonês. Só aparelho forte (passo 1 de 2)',
       mb: 380, sha256: 'PINAR', strongOnly: true,
       repo: 'csukuangfj/sherpa-onnx-whisper-small',
       remoteFiles: ['small-encoder.int8.onnx', 'small-decoder.int8.onnx', 'small-tokens.txt'],
@@ -65,7 +65,7 @@ final aiModelCatalog = <String, AiModelSpec>{
   // decoder autoregressivo — rápido e leve; idioma fixo 'ja' no provider).
   'sensevoice-ja': AiModelSpec(
       id: 'sensevoice-ja', label: 'Voz JA dedicada (SenseVoice)',
-      hint: '~240 MB · japonês direto · rápido no stick',
+      hint: 'Voz · transcreve japonês direto, rápido no stick fraco (passo 1 de 2)',
       mb: 240, sha256: 'PINAR', strongOnly: false,
       repo: 'csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17',
       remoteFiles: ['model.int8.onnx', 'tokens.txt'],
@@ -73,7 +73,7 @@ final aiModelCatalog = <String, AiModelSpec>{
   // VAD silero opcional (sem ele, janelas fixas de 30s).
   'silero-vad': AiModelSpec(
       id: 'silero-vad', label: 'VAD silero (opcional)',
-      hint: '~3 MB · corta silêncios (sem ele: janelas de 30s)',
+      hint: 'Áudio · corta silêncios p/ transcrever mais rápido. Opcional',
       mb: 3, sha256: 'PINAR', strongOnly: false,
       repo: 'deepghs/silero-vad-onnx',
       remoteFiles: ['silero_vad.onnx'],
@@ -82,14 +82,14 @@ final aiModelCatalog = <String, AiModelSpec>{
   // Q3_K_M comunitário (Jabs2, 6/6 no gate) e Q4_K_M oficial (tencent).
   'hymt-ja-pt-q3km': AiModelSpec(
       id: 'hymt-ja-pt-q3km', label: 'Tradução JA→PT (Hy-MT2 Q3)',
-      hint: '~907 MB · JA→PT direto · rápido',
+      hint: 'Tradução · leva japonês ou inglês p/ português (passo 2 de 2)',
       mb: 907, sha256: 'PINAR', strongOnly: false,
       repo: 'Jabs2/Hy-MT2-1.8B-Q3_K_M-GGUF',
       remoteFiles: ['Hy-MT2-1.8B-Q3_K_M.gguf'],
       files: ['model.gguf']),
   'hymt-ja-pt-q4': AiModelSpec(
       id: 'hymt-ja-pt-q4', label: 'Tradução JA→PT (Hy-MT2 Q4)',
-      hint: '~1,13 GB · JA→PT direto · melhor qualidade',
+      hint: 'Tradução · igual ao Q3, com mais qualidade (passo 2 de 2)',
       mb: 1133, sha256: 'PINAR', strongOnly: false,
       repo: 'tencent/Hy-MT2-1.8B-GGUF',
       remoteFiles: ['Hy-MT2-1.8B-Q4_K_M.gguf'],

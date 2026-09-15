@@ -277,7 +277,12 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
           ),
           const SizedBox(height: 24),
           _SectionTitle('2 · Modelos (HuggingFace, só Wi-Fi)'),
-          if (_route == 'transcribe')
+          const Text('Passo 1 e 2: a voz transforma o áudio em texto e a '
+              'tradução leva esse texto p/ português. Baixe um de cada.',
+              style: TextStyle(color: ThemeConstants.textSecondary, fontSize: 14)),
+          const SizedBox(height: 12),
+          if (_route == 'transcribe') ...[
+            const _SubTitle('Voz — transcreve o áudio japonês'),
             ..._sttModels.map((id) => _ModelOptionRow(
                   modelId: _sttModelIds[id]!,
                   selected: _sttId == id,
@@ -289,6 +294,8 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
                   onDownload: () =>
                       _downloadModel(_sttModelIds[id]!),
                 )),
+          ],
+          const _SubTitle('Tradução — leva o texto p/ português'),
           _ModelOptionRow(
             modelId:
                 _mtId == 'completa' ? 'hymt-ja-pt-q4' : 'hymt-ja-pt-q3km',
@@ -491,6 +498,24 @@ class _OptionRowState extends State<_OptionRow> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Subtítulo de categoria dentro da seção de modelos.
+class _SubTitle extends StatelessWidget {
+  final String text;
+  const _SubTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: Text(text,
+          style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: ThemeConstants.textSecondary)),
     );
   }
 }

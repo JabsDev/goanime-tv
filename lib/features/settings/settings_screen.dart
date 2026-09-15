@@ -263,17 +263,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: ThemeConstants.white,
                       ),
                     ),
+                    const Text(
+                      'Voz transforma áudio em texto; tradução leva p/ português.',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: ThemeConstants.textSecondary,
+                      ),
+                    ),
                     const SizedBox(height: 8),
+                    const _ModelGroupTitle('Voz — transcreve o áudio'),
                     _ModelRow(modelId: 'whisper-tiny-ja', label: 'Voz leve (tiny)'),
                     _ModelRow(modelId: 'sensevoice-ja', label: 'Voz JA dedicada (SenseVoice)'),
                     _ModelRow(modelId: 'whisper-base', label: 'Voz completa (base)'),
-                    _ModelRow(modelId: 'silero-vad', label: 'VAD silero (opcional)'),
+                    _ModelRow(modelId: 'whisper-small', label: 'Voz superior (small)'),
+                    const _ModelGroupTitle('Tradução — leva p/ português'),
                     _ModelRow(
                         modelId: 'hymt-ja-pt-q3km',
                         label: 'Tradução JA→PT (Hy-MT2 Q3)'),
                     _ModelRow(
                         modelId: 'hymt-ja-pt-q4',
                         label: 'Tradução JA→PT (Hy-MT2 Q4)'),
+                    const _ModelGroupTitle('Áudio — ajuda a transcrição'),
+                    _ModelRow(modelId: 'silero-vad', label: 'VAD silero (opcional)'),
                     const SizedBox(height: 32),
                     const Text(
                       'Atualizações',
@@ -308,6 +319,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Subtítulo de categoria na lista de modelos.
+class _ModelGroupTitle extends StatelessWidget {
+  final String text;
+  const _ModelGroupTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10, bottom: 2),
+      child: Text(text,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+            color: ThemeConstants.textSecondary,
+          )),
     );
   }
 }
