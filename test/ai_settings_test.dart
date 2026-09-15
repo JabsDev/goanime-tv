@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:goanime_tv/core/storage/local_storage.dart';
 import 'package:goanime_tv/core/storage/settings_service.dart';
 import 'package:goanime_tv/core/subtitles/ai_providers.dart';
-import 'package:goanime_tv/core/subtitles/nllb_mt.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -91,40 +90,17 @@ void main() {
       expect(stt?.id, 'whisper-tiny-ja');
     });
 
-    test('mt leve pronto quando arquivos existem', () async {
-      await _fakeModel('marian-en-pt-int8', [
-        'encoder_model.onnx',
-        'decoder_model.onnx',
-        'vocab.json',
-        'config.json',
-        'generation_config.json'
-      ]);
+    test('mt leve (Hy-MT2 Q3) pronto quando arquivo existe', () async {
+      await _fakeModel('hymt-ja-pt-q3km', ['model.gguf']);
       final mt = await AiProviders.makeMt(modelRootForTest: root);
-      expect(mt?.id, 'marian');
+      expect(mt?.id, 'hymt-llm');
     });
 
-    test('nllb exige arquivos + capability', () async {
-      await _fakeModel('nllb-600M-int8', [
-        'encoder_model.onnx',
-        'decoder_model.onnx',
-        'decoder_with_past_model.onnx',
-        'tokenizer.model'
-      ]);
-      const strong = AiCapability(
-          isLowEndForTest: _no, freeBytesForTest: _plenty);
-      const weak =
-          AiCapability(isLowEndForTest: _yes, freeBytesForTest: _plenty);
-      final ok = await AiProviders.makeMt(
-          modelRootForTest: root, engine: 'completa', cap: strong);
-      expect(ok?.id, 'nllb');
-      expect(
-          await AiProviders.makeMt(
-              modelRootForTest: root, engine: 'completa', cap: weak),
-          isNull);
+    test('mt completa (Hy-MT2 Q4) pronto quando arquivo existe', () async {
+      await _fakeModel('hymt-ja-pt-q4', ['model.gguf']);
+      final mt = await AiProviders.makeMt(
+          modelRootForTest: root, engine: 'completa');
+      expect(mt?.id, 'hymt-llm');
     });
   });
 }
-
-Future<bool> _no() async => false;
-Future<bool> _yes() async => true;
-Future<int> _plenty() async => 8 * 1024 * 1024 * 1024;
