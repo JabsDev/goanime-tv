@@ -104,23 +104,24 @@ class _SttWorker {
       int threads = 2}) async {
     final ready = ReceivePort();
     final errors = ReceivePort();
+    ReceivePort? resp;
     Isolate? iso;
     try {
-      iso = await Isolate.spawn(
-          _entry, [ready.sendPort, modelDir, task, withVad, threads],
-          debugName: 'stt-worker', onError: errors.sendPort);
-    } catch (e) {
-      ready.close();
-      errors.close();
-      throw StateError('Falha ao iniciar o worker de voz: $e');
-    }
-    final errs = <Object>[];
-    final errSub = errors.listen((e) => errs.add(e));
-    try {
-      // Handshake com teto: isolate morto/travado vira erro legível,
-      // nunca trava o app nem mata o processo em silêncio.
+      try {
+        iso = await Isolate.spawn(
+            _entry, [ready.sendPort, modelDir, task, withVad, threads],
+            debugName: 'stt-worker', onError: errors.sendPort);
+      } catch (e) {
+        ready.close();
+        errors.close();
+        throw StateError('Falha ao iniciar o worker de voz: $e');
+      }
+      // Handshake usa SÓ `ready`. `errors` tem UM listen vitalício (construtor
+      // abaixo); ReceivePort faz buffer pré-listen, então erro de boot não se perde.
+      // Nunca dois `listen`s no mesmo ReceivePort (nem sequenciais com cancel).
       final first = await ready.first
           .timeout(const Duration(seconds: 120), onTimeout: () => null);
+      ready.close();
       if (first == null) {
         throw StateError(
             'Modelo de voz travou ao carregar (timeout 2 min). '
@@ -129,32 +130,36 @@ class _SttWorker {
       if (first is Map) {
         throw StateError('Falha ao carregar voz: ${first['error']}');
       }
-      final resp = ReceivePort();
-      // A partir daqui, erros do isolate vão p/ o listener do worker.
-      await errSub.cancel();
+      resp = ReceivePort();
       final w = _SttWorker._(iso, first as SendPort, resp, errors);
-      await w._call('ping', null);
-      if (errs.isNotEmpty) {
-        throw StateError('Falha ao carregar voz: ${errs.first}');
-      }
+      resp = null; // sucesso: ports pertencem ao worker (close() fecha)
+      await w._call('ping', null,
+          timeout: const Duration(seconds: 10));
       return w;
     } catch (e) {
       try {
-        iso.kill(priority: Isolate.immediate);
+        iso?.kill(priority: Isolate.immediate);
       } catch (_) {}
+      resp?.close();
       errors.close();
       rethrow;
-    } finally {
-      await errSub.cancel();
     }
   }
 
-  Future<dynamic> _call(String op, dynamic arg) {
+  Future<dynamic> _call(String op, dynamic arg,
+      {Duration timeout = const Duration(seconds: 60)}) {
     final id = _seq++;
     final c = Completer<dynamic>();
     _pending[id] = c;
     _cmd.send({'id': id, 'op': op, 'arg': arg, 'reply': _resp.sendPort});
-    return c.future;
+    // Teto anti-hang: isolate morto/OOM vira erro legível em vez de travar a
+    // fila FIFO para sempre. Resposta tardia é ignorada (pending já removido).
+    return c.future.timeout(timeout, onTimeout: () {
+      _pending.remove(id);
+      throw StateError(
+          'worker STT sem resposta (timeout ${timeout.inSeconds}s). '
+          'Aparelho pode estar sem memória — tente o modelo de voz leve (tiny).');
+    });
   }
 
   Future<List<SpeechChunk>> segments(Float32List pcm,
