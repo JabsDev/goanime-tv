@@ -118,8 +118,8 @@ class AudioExtractChannel(messenger: BinaryMessenger) : MethodChannel.MethodCall
                 val mime = fmt.getString(MediaFormat.KEY_MIME) ?: continue
                 if (mime.startsWith("audio/")) {
                     audioIdx = i
-                    srcRate = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                    srcCh = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    srcRate = runCatching { fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE) }.getOrDefault(44100)
+                    srcCh = runCatching { fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT) }.getOrDefault(1).coerceAtLeast(1)
                     break
                 }
             }
@@ -128,6 +128,7 @@ class AudioExtractChannel(messenger: BinaryMessenger) : MethodChannel.MethodCall
             val srcFmt = ext.getTrackFormat(audioIdx)
             val mime = srcFmt.getString(MediaFormat.KEY_MIME)!!
             val codec = MediaCodec.createDecoderByType(mime)
+            try {
             codec.configure(srcFmt, null, null, 0)
             codec.start()
             val out = File(outPath)
@@ -141,6 +142,7 @@ class AudioExtractChannel(messenger: BinaryMessenger) : MethodChannel.MethodCall
                 val ratio = srcRate / 16000.0
                 var srcPos = 0L
                 var nextOut = 0L
+                val ch = srcCh.coerceAtLeast(1)
                 while (!sawOutputEos) {
                     if (cancelled) throw InterruptedException("cancelado")
                     if (!sawInputEos) {
@@ -158,16 +160,19 @@ class AudioExtractChannel(messenger: BinaryMessenger) : MethodChannel.MethodCall
                         }
                     }
                     val ob = codec.dequeueOutputBuffer(info, 10_000)
-                    if (ob >= 0) {
+                    when {
+                        ob == MediaCodec.INFO_TRY_AGAIN_LATER -> continue
+                        ob == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> continue
+                        ob >= 0 -> {
                         if (info.size > 0) {
                             val buf = codec.getOutputBuffer(ob)!!.duplicate().order(ByteOrder.LITTLE_ENDIAN)
                             val shorts = ShortArray(info.size / 2)
                             buf.asShortBuffer().get(shorts)
                             // média dos canais -> mono, nearest-neighbor -> 16k
-                            val mono = ShortArray(shorts.size / srcCh.coerceAtLeast(1)) { k ->
+                            val mono = ShortArray(shorts.size / ch) { k ->
                                 var acc = 0
-                                for (c in 0 until srcCh.coerceAtLeast(1)) acc += shorts[k * srcCh.coerceAtLeast(1) + c]
-                                (acc / srcCh.coerceAtLeast(1)).toShort()
+                                for (c in 0 until ch) acc += shorts[k * ch + c]
+                                (acc / ch).toShort()
                             }
                             val le = ByteBuffer.allocate(mono.size * 2).order(ByteOrder.LITTLE_ENDIAN)
                             for (s in mono) {
@@ -181,12 +186,16 @@ class AudioExtractChannel(messenger: BinaryMessenger) : MethodChannel.MethodCall
                         }
                         codec.releaseOutputBuffer(ob, false)
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEos = true
+                        }
+                        else -> continue
                     }
                 }
             }
-            codec.stop()
-            codec.release()
             return mapOf("pcmPath" to outPath, "sampleRate" to 16000, "channels" to 1)
+            } finally {
+                runCatching { codec.stop() }
+                runCatching { codec.release() }
+            }
         } finally {
             ext.release()
         }
