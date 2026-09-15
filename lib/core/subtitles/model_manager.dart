@@ -61,6 +61,15 @@ final aiModelCatalog = <String, AiModelSpec>{
       repo: 'csukuangfj/sherpa-onnx-whisper-small',
       remoteFiles: ['small-encoder.int8.onnx', 'small-decoder.int8.onnx', 'small-tokens.txt'],
       files: ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']),
+  // STT JA dedicado: SenseVoice-small int8 multilíngue (encoder direto, sem
+  // decoder autoregressivo — rápido e leve; idioma fixo 'ja' no provider).
+  'sensevoice-ja': AiModelSpec(
+      id: 'sensevoice-ja', label: 'Voz JA dedicada (SenseVoice)',
+      hint: '~240 MB · japonês direto · rápido no stick',
+      mb: 240, sha256: 'PINAR', strongOnly: false,
+      repo: 'csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17',
+      remoteFiles: ['model.int8.onnx', 'tokens.txt'],
+      files: ['model.int8.onnx', 'tokens.txt']),
   // VAD silero opcional (sem ele, janelas fixas de 30s).
   'silero-vad': AiModelSpec(
       id: 'silero-vad', label: 'VAD silero (opcional)',
@@ -78,6 +87,16 @@ final aiModelCatalog = <String, AiModelSpec>{
       repo: 'Xenova/opus-mt-en-mul',
       remoteFiles: ['onnx/encoder_model_int8.onnx', 'onnx/decoder_model_int8.onnx', 'vocab.json', 'config.json', 'generation_config.json'],
       files: ['encoder_model.onnx', 'decoder_model.onnx', 'vocab.json', 'config.json', 'generation_config.json']),
+  // MT JA→EN dedicada: LFM2-350M-ENJP-MT q4f16 (causal com cache; 1º passo
+  // NLLB/Marian não cobrem JA→EN com qualidade — este sim).
+  // Arquivo normalizado p/ model.onnx (agnóstico ao quant).
+  'lfm-ja-en': AiModelSpec(
+      id: 'lfm-ja-en', label: 'Tradução JA→EN (LFM2)',
+      hint: '~316 MB · JA→EN dedicado · 2º passo vira Marian',
+      mb: 316, sha256: 'PINAR', strongOnly: false,
+      repo: 'onnx-community/LFM2-350M-ENJP-MT-ONNX',
+      remoteFiles: ['onnx/model_q4f16.onnx', 'onnx/model_q4f16.onnx_data', 'tokenizer.json', 'tokenizer_config.json', 'config.json', 'generation_config.json'],
+      files: ['model.onnx', 'model.onnx_data', 'tokenizer.json', 'tokenizer_config.json', 'config.json', 'generation_config.json']),
   // MT completa: NLLB int8 com decoder + decoder_with_past SEPARADOS (nunca
   // decoder_merged — crash Reshape no ORT Android, plano §L2).
   'nllb-600M-int8': AiModelSpec(
@@ -196,6 +215,12 @@ class ModelManager {
     try {
       final req = await client.getUrl(Uri.parse(url));
       headers.forEach(req.headers.set);
+      // HF barra bots em alguns repos (401): UA de browser passa.
+      // Só quando o chamador não definiu um (não quebra anti-bot de vídeos).
+      if (req.headers.value(HttpHeaders.userAgentHeader) == null) {
+        req.headers.set(HttpHeaders.userAgentHeader,
+            'Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36');
+      }
       if (start > 0) req.headers.set('Range', 'bytes=$start-');
       var resp = await req.close();
       if (resp.statusCode == 416) {
