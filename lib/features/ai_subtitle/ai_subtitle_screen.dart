@@ -7,7 +7,6 @@ import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/subtitles/ai_providers.dart';
 import '../../core/subtitles/model_manager.dart';
-import '../../core/subtitles/mt_provider.dart';
 import '../../core/subtitles/srt_parser.dart';
 import '../../core/subtitles/subtitle_job_manager.dart';
 import '../../core/subtitles/subtitle_store.dart';
@@ -60,11 +59,6 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
     'base': 'whisper-base',
     'small': 'whisper-small',
   };
-
-  /// LFM-ONNX nunca funcionou no aparelho (conflito de .so nativos —
-  /// plano-acao-ort-duplicado-v5). Linha oculta até o pivô llama.cpp;
-  /// reverta p/ true para reexibir. Reversível, sem efeito no job.
-  static const _lfmEnabled = false;
 
   @override
   void initState() {
@@ -188,27 +182,9 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
       _snack('Modelo de voz ($_sttId) não instalado. Baixe abaixo.');
       return;
     }
-    MtProvider? mt;
-    SttProvider? sttFinal = stt;
-    if (stt.id == 'whisper-tiny-ja') {
-      mt = await AiProviders.makeMt(
-          engine: _mtId == 'completa' ? 'completa' : 'leve');
-    } else {
-      // Transcrição gera JA: NLLB direto; senão cadeia LFM+Marian;
-      // sem eles, cai p/ tiny+Marian avisando.
-      mt = await AiProviders.makeMtForTranscribe();
-      if (mt == null) {
-        mt = await AiProviders.makeMtChainJaPt();
-      }
-      if (mt == null) {
-        _snack('Sem NLLB neste aparelho — usando voz leve (tiny) + Marian.');
-        final tiny = await AiProviders.makeStt(stt: 'tiny');
-        mt = tiny == null
-            ? null
-            : await AiProviders.makeMt(engine: 'leve');
-        if (tiny != null && mt != null) sttFinal = tiny;
-      }
-    }
+    // Hy-MT2 cobre JA→PT direto e EN→PT (tiny) no mesmo provider.
+    final mt = await AiProviders.makeMt(
+        engine: _mtId == 'completa' ? 'completa' : 'leve');
     if (mt == null) {
       _snack('Modelo de tradução não instalado. Baixe abaixo.');
       return;
@@ -219,7 +195,7 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
       ep: widget.episode.number,
       videoUrl: src.url,
       headers: src.headers,
-      sttFor: () => sttFinal!,
+      sttFor: () => stt,
       mt: mt,
     );
   }
@@ -314,10 +290,10 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
                       _downloadModel(_sttModelIds[id]!),
                 )),
           _ModelOptionRow(
-            modelId: _mtId == 'completa'
-                ? 'nllb-600M-int8'
-                : 'marian-en-pt-int8',
-            selectLabel: _mtId == 'completa' ? 'NLLB' : 'Marian',
+            modelId:
+                _mtId == 'completa' ? 'hymt-ja-pt-q4' : 'hymt-ja-pt-q3km',
+            selectLabel:
+                _mtId == 'completa' ? 'Hy-MT2 Q4 (1,1 GB)' : 'Hy-MT2 Q3 (907 MB)',
             selected: true,
             onSelect: () {
               final next = _mtId == 'completa' ? 'leve' : 'completa';
@@ -325,21 +301,12 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
               SettingsService.instance.setMtEngine(next);
             },
             downloading: _downloading[_mtId == 'completa'
-                ? 'nllb-600M-int8'
-                : 'marian-en-pt-int8'],
+                ? 'hymt-ja-pt-q4'
+                : 'hymt-ja-pt-q3km'],
             onDownload: () => _downloadModel(_mtId == 'completa'
-                ? 'nllb-600M-int8'
-                : 'marian-en-pt-int8'),
+                ? 'hymt-ja-pt-q4'
+                : 'hymt-ja-pt-q3km'),
           ),
-          if (_route == 'transcribe' && _lfmEnabled)
-            _ModelOptionRow(
-              modelId: 'lfm-ja-en',
-              selectLabel: 'LFM JA→EN (p/ voz base/small)',
-              selected: true,
-              onSelect: () {},
-              downloading: _downloading['lfm-ja-en'],
-              onDownload: () => _downloadModel('lfm-ja-en'),
-            ),
           const SizedBox(height: 24),
           _SectionTitle('3 · Gerar'),
           FutureBuilder<String?>(

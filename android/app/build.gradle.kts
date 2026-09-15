@@ -41,6 +41,11 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        externalNativeBuild {
+            cmake {
+                arguments("-DANDROID_STL=c++_shared")
+            }
+        }
     }
 
     signingConfigs {
@@ -76,23 +81,25 @@ kotlin {
 dependencies {
     // FileProvider (fallback ACTION_VIEW do updater) vem do androidx.core.
     implementation("androidx.core:core-ktx:1.13.1")
-    // NLLB-600M int8 on-device (L2): ORT Android. Sem decoder_merged.
-    // ATENÇÃO (plano-acao-ort-duplicado-v5 §0): este AAR embarca
-    // libonnxruntime.so (nó VERS_1.28.0) que DISPUTA o pickFirsts abaixo com
-    // o fork do plugin sherpa (nó VERS_1.28.2, sem o qual o STT quebra).
-    // Nós mutuamente exclusivos: o eleito quebra um dos lados (hoje o fork
-    // vence — tradutores ORT-Java mortos com `dlopen OrtGetApiBase`).
-    // Não adicionar outro runtime ORT sem resolver a disputa primeiro.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
+    // Tradução local via llama.cpp (GGUF, SONAME único — sem disputa de .so;
+    // ver plano-acao-ort-duplicado-v5). O AAR onnxruntime-android foi
+    // REMOVIDO de propósito: seu libonnxruntime.so colidia com o fork do
+    // sherpa (nós ELF mutuamente exclusivos) e matava os tradutores.
 }
 
 android {
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
+    }
     packaging {
-        // libonnxruntime.so chega em 2 cópias/ABI (este AAR 1.28.0 com nó
-        // VERS_1.28.0 + fork sherpa 1.13.8 com nó VERS_1.28.2). Nós mutuamente
-        // exclusivos: o pickFirsts elege UMA e quebra o outro lado (medido:
-        // vence o fork — STT vivo, tradutores ORT-Java mortos). Ver
-        // plano-acao-ort-duplicado-v5. Não confiar nesta eleição p/ nada novo.
+        // Histórico: libonnxruntime.so chegava em 2 cópias incompatíveis
+        // (AAR oficial removido + fork sherpa) e o pickFirsts quebrava um dos
+        // lados (plano-acao-ort-duplicado-v5). Hoje só o fork sherpa fornece
+        // esse nome (fonte única, STT vivo); tradutores usam libllama.so
+        // (SONAME único, sem disputa). Manter o pickFirsts como rede de
+        // segurança p/ duplicatas futuras de terceiros.
         jniLibs.pickFirsts.add("**/libonnxruntime.so")
     }
 }

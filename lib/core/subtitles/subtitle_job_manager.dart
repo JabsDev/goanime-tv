@@ -159,6 +159,11 @@ class SubtitleJobManager {
       return 'Falha nas bibliotecas de tradução desta versão. '
           'Atualize o app e tente de novo.';
     }
+    // Aparelho 32-bit: libgoanime_llm.so é stub (sem JNI implementado).
+    if (s.contains('No implementation found')) {
+      return 'Tradução local indisponível neste aparelho. '
+          'Use um aparelho 64-bit.';
+    }
     if (s.contains('404')) {
       return 'Vídeo indisponível (erro 404). A fonte pode ter saído do ar.';
     }
@@ -276,6 +281,7 @@ class SubtitleJobManager {
       // Rede/outros mantêm stack curta p/ diagnóstico no aparelho.
       final technical = !(msg.startsWith('Falha interna') ||
           msg.startsWith('Falha nas bibliotecas') ||
+          msg.startsWith('Tradução local') ||
           msg.startsWith('Voz '));
       final frames =
           st.toString().split('\n').take(4).join('\n');

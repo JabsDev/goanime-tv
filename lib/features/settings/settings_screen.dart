@@ -269,17 +269,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _ModelRow(modelId: 'whisper-base', label: 'Voz completa (base)'),
                     _ModelRow(modelId: 'silero-vad', label: 'VAD silero (opcional)'),
                     _ModelRow(
-                        modelId: 'marian-en-pt-int8',
-                        label: 'Tradução leve (Marian)'),
-                    _ModelRow(
-                        modelId: 'lfm-ja-en',
-                        label: 'Tradução JA→EN (LFM2)'),
-                    _ModelRow(
                         modelId: 'hymt-ja-pt-q3km',
-                        label: 'Tradução JA→PT (Hy-MT2, em breve)'),
+                        label: 'Tradução JA→PT (Hy-MT2 Q3)'),
                     _ModelRow(
-                        modelId: 'nllb-600M-int8',
-                        label: 'Tradução completa (NLLB)'),
+                        modelId: 'hymt-ja-pt-q4',
+                        label: 'Tradução JA→PT (Hy-MT2 Q4)'),
                     const SizedBox(height: 32),
                     const Text(
                       'Atualizações',

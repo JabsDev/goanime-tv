@@ -16,9 +16,7 @@ class MainActivity : FlutterActivity() {
         CodecsChannel(flutterEngine.dartExecutor.binaryMessenger).register()
         UiModeChannel(this, flutterEngine.dartExecutor.binaryMessenger).register()
         AudioExtractChannel(flutterEngine.dartExecutor.binaryMessenger).register()
-        NllbTranslator(flutterEngine.dartExecutor.binaryMessenger).register()
-        MarianTranslator(flutterEngine.dartExecutor.binaryMessenger).register()
-        LfmTranslator(flutterEngine.dartExecutor.binaryMessenger).register()
+        LlmTranslator(flutterEngine.dartExecutor.binaryMessenger).register()
     }
 
     // A instalação via ACTION_INSTALL_PACKAGE devolve o resultado aqui

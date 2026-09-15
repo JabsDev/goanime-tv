@@ -37,15 +37,15 @@ class SettingsService {
   ValueListenable<bool> get autoSkipIntroListenable => _autoSkipIntroVN;
   bool get autoSkipIntro => _autoSkipIntro;
 
-  /// Legenda IA: STT 'tiny' (L1 padrão stick fraco), 'base' ou 'small'
-  /// (transcrevem JA, pedem NLLB). Valores inválidos caem em 'tiny'.
+  /// Legenda IA: STT 'tiny' (L1 padrão stick fraco), 'base', 'small' ou
+  /// 'sensevoice' (transcrevem JA; depois Hy-MT2 direto). Inválidos → 'tiny'.
   String _sttModel = 'tiny';
   final ValueNotifier<String> _sttModelVN = ValueNotifier<String>('tiny');
   ValueListenable<String> get sttModelListenable => _sttModelVN;
   String get sttModel => _sttModel;
 
-  /// Legenda IA: MT 'leve' (Marian ~120MB) ou 'completa' (NLLB ~1.28GB,
-  /// gated por aparelho+disco em AiCapability).
+  /// Legenda IA: MT 'leve' (Hy-MT2 Q3 ~907MB) ou 'completa' (Hy-MT2 Q4
+  /// ~1,13GB, via llama.cpp).
   String _mtEngine = 'leve';
   final ValueNotifier<String> _mtEngineVN = ValueNotifier<String>('leve');
   ValueListenable<String> get mtEngineListenable => _mtEngineVN;

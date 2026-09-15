@@ -78,45 +78,22 @@ final aiModelCatalog = <String, AiModelSpec>{
       repo: 'deepghs/silero-vad-onnx',
       remoteFiles: ['silero_vad.onnx'],
       files: ['vad.onnx']),
-  // MT leve: Marian opus-mt-en-mul int8 (alvo via prefixo >>por<<).
-  // decoder_start/eos lidos de generation_config.json (sem chute).
-  'marian-en-pt-int8': AiModelSpec(
-      id: 'marian-en-pt-int8', label: 'Tradução leve (Marian)',
-      hint: '~120 MB · EN→PT rápido · qualquer aparelho',
-      mb: 120, sha256: 'PINAR', strongOnly: false,
-      repo: 'Xenova/opus-mt-en-mul',
-      remoteFiles: ['onnx/encoder_model_int8.onnx', 'onnx/decoder_model_int8.onnx', 'vocab.json', 'config.json', 'generation_config.json'],
-      files: ['encoder_model.onnx', 'decoder_model.onnx', 'vocab.json', 'config.json', 'generation_config.json']),
-  // MT JA→EN dedicada: LFM2-350M-ENJP-MT q4f16 (causal com cache; 1º passo
-  // NLLB/Marian não cobrem JA→EN com qualidade — este sim).
-  // Arquivo normalizado p/ model.onnx (agnóstico ao quant).
-  'lfm-ja-en': AiModelSpec(
-      id: 'lfm-ja-en', label: 'Tradução JA→EN (LFM2)',
-      hint: '~316 MB · JA→EN dedicado · 2º passo vira Marian',
-      mb: 316, sha256: 'PINAR', strongOnly: false,
-      repo: 'onnx-community/LFM2-350M-ENJP-MT-ONNX',
-      remoteFiles: ['onnx/model_q4f16.onnx', 'onnx/model_q4f16.onnx_data', 'tokenizer.json', 'tokenizer_config.json', 'config.json', 'generation_config.json'],
-      files: ['model.onnx', 'model.onnx_data', 'tokenizer.json', 'tokenizer_config.json', 'config.json', 'generation_config.json']),
-  // MT JA→PT direta via llama.cpp (pivô plano-acao-ort-duplicado-v5 §6):
-  // Hy-MT2-1.8B requant Q3_K_M comunitário, 6/6 no gate. GGUF auto-contido
-  // (tokenizer embutido). Runtime (Fase 1) ainda não implementado — entrada
-  // permite pré-baixar.
+  // MT JA→PT direta via llama.cpp (GGUF auto-contido, tokenizer embutido).
+  // Q3_K_M comunitário (Jabs2, 6/6 no gate) e Q4_K_M oficial (tencent).
   'hymt-ja-pt-q3km': AiModelSpec(
-      id: 'hymt-ja-pt-q3km', label: 'Tradução JA→PT (Hy-MT2)',
-      hint: '~907 MB · JA→PT direto via llama.cpp (em breve)',
+      id: 'hymt-ja-pt-q3km', label: 'Tradução JA→PT (Hy-MT2 Q3)',
+      hint: '~907 MB · JA→PT direto · rápido',
       mb: 907, sha256: 'PINAR', strongOnly: false,
       repo: 'Jabs2/Hy-MT2-1.8B-Q3_K_M-GGUF',
       remoteFiles: ['Hy-MT2-1.8B-Q3_K_M.gguf'],
       files: ['model.gguf']),
-  // MT completa: NLLB int8 com decoder + decoder_with_past SEPARADOS (nunca
-  // decoder_merged — crash Reshape no ORT Android, plano §L2).
-  'nllb-600M-int8': AiModelSpec(
-      id: 'nllb-600M-int8', label: 'Tradução completa (NLLB)',
-      hint: '~1.28 GB · JA→PT direto · só forte com 2 GB livres',
-      mb: 1280, sha256: 'PINAR', strongOnly: true,
-      repo: 'Xenova/nllb-200-distilled-600M',
-      remoteFiles: ['onnx/encoder_model_int8.onnx', 'onnx/decoder_model_int8.onnx', 'onnx/decoder_with_past_model_int8.onnx', 'sentencepiece.bpe.model'],
-      files: ['encoder_model.onnx', 'decoder_model.onnx', 'decoder_with_past_model.onnx', 'tokenizer.model']),
+  'hymt-ja-pt-q4': AiModelSpec(
+      id: 'hymt-ja-pt-q4', label: 'Tradução JA→PT (Hy-MT2 Q4)',
+      hint: '~1,13 GB · JA→PT direto · melhor qualidade',
+      mb: 1133, sha256: 'PINAR', strongOnly: false,
+      repo: 'tencent/Hy-MT2-1.8B-GGUF',
+      remoteFiles: ['Hy-MT2-1.8B-Q4_K_M.gguf'],
+      files: ['model.gguf']),
 };
 
 /// Download de modelos: só Wi-Fi (flag do chamador), Range/resume, sha256.

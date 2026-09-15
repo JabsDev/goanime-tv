@@ -1,17 +1,15 @@
 import 'dart:io';
 
 import '../storage/settings_service.dart';
-import 'lfm_mt.dart';
-import 'marian_mt.dart';
+import 'llm_mt.dart';
 import 'model_manager.dart';
 import 'mt_provider.dart';
-import 'nllb_mt.dart';
 import 'sherpa_stt.dart';
 
-/// Fábrica dos providers reais conforme Settings (STT tiny/base, MT
-/// leve/completa). Retorna null quando o modelo não está instalado — o
-/// chamador (picker) informa o usuário em vez de falhar silencioso.
-/// `modelRootForTest`/`stt`/`engine`/`cap` injetáveis p/ teste sem nativo.
+/// Fábrica dos providers reais conforme Settings (STT tiny/base/sensevoice,
+/// MT leve/completa = Hy-MT2 Q3/Q4 via llama.cpp). Retorna null quando o
+/// modelo não está instalado — o chamador informa o usuário em vez de
+/// falhar silencioso. `modelRootForTest`/`stt`/`engine` injetáveis p/ teste.
 class AiProviders {
   const AiProviders._();
 
@@ -28,7 +26,7 @@ class AiProviders {
   }
 
   /// Mapeamento Settings → (modelo, task, kind). tiny traduz ja→en (rápido);
-  /// base/small/sensevoice transcrevem ja (melhor; depois NLLB ou cadeia LFM).
+  /// base/small/sensevoice transcrevem ja (melhor; depois Hy-MT2 direto).
   static const _sttKinds = {
     'tiny': ('whisper-tiny-ja', 'translate', 'whisper'),
     'base': ('whisper-base', 'transcribe', 'whisper'),
@@ -49,83 +47,34 @@ class AiProviders {
     return SherpaSttProvider(dir, task: spec.$2, sttKind: spec.$3);
   }
 
+  /// MT Hy-MT2 via llama.cpp: 'leve' = Q3_K_M (~907 MB), 'completa' = Q4_K_M
+  /// (~1,13 GB). Mesmo provider cobre JA→PT direto e EN→PT (Rota S).
+  static const _mtIds = {
+    'leve': 'hymt-ja-pt-q3km',
+    'completa': 'hymt-ja-pt-q4',
+  };
+
   static Future<MtProvider?> makeMt({
     Directory? modelRootForTest,
     String? engine,
     String? modelDirForTest,
-    AiCapability? cap,
   }) async {
     final kind = engine ?? SettingsService.instance.mtEngine;
-    if (kind == 'completa') {
-      const modelId = 'nllb-600M-int8';
-      final root = await modelsRoot(forTest: modelRootForTest);
-      final dir = modelDirForTest ?? '${root.path}/$modelId';
-      final capability = cap ?? AiCapability.instance;
-      if (await _ready(dir, modelId) && await capability.canUseFull()) {
-        return NllbMtProvider(dir);
-      }
-      return null;
-    }
-    const modelId = 'marian-en-pt-int8';
+    final modelId = _mtIds[kind] ?? _mtIds['leve']!;
     final root = await modelsRoot(forTest: modelRootForTest);
     final dir = modelDirForTest ?? '${root.path}/$modelId';
     if (!await _ready(dir, modelId)) return null;
-    // opus-mt-en-mul exige alvo >>por<< na entrada.
-    return MarianMtProvider(dir, targetPrefix: '>>por<<');
+    return LlmMtProvider('$dir/model.gguf');
   }
 
-  /// MT p/ job transcribe (texto JA): só NLLB serve; Marian é EN→PT.
-  /// Null = sem NLLB capaz → o chamador cai p/ cadeia LFM ou tiny.
-  static Future<MtProvider?> makeMtForTranscribe({
-    Directory? modelRootForTest,
-    AiCapability? cap,
-  }) async {
-    const modelId = 'nllb-600M-int8';
-    final root = await modelsRoot(forTest: modelRootForTest);
-    final dir = '${root.path}/$modelId';
-    final capability = cap ?? AiCapability.instance;
-    if (await _ready(dir, modelId) && await capability.canUseFull()) {
-      return NllbMtProvider(dir);
-    }
-    return null;
-  }
-
-  static Future<LfmMtProvider?> makeLfm({
-    Directory? modelRootForTest,
-    String? modelDirForTest,
-  }) async {
-    const modelId = 'lfm-ja-en';
-    final root = await modelsRoot(forTest: modelRootForTest);
-    final dir = modelDirForTest ?? '${root.path}/$modelId';
-    if (!await _ready(dir, modelId)) return null;
-    return LfmMtProvider(dir);
-  }
-
-  /// Cadeia JA→PT p/ transcrição: LFM JA→EN + Marian EN→PT (carga sequencial).
-  /// Null = falta LFM ou Marian → chamador usa fallback tiny.
-  static Future<MtProvider?> makeMtChainJaPt({
-    Directory? modelRootForTest,
-  }) async {
-    final root = await modelsRoot(forTest: modelRootForTest);
-    final lfmDir = '${root.path}/lfm-ja-en';
-    final marianDir = '${root.path}/marian-en-pt-int8';
-    if (!await _ready(lfmDir, 'lfm-ja-en')) return null;
-    if (!await _ready(marianDir, 'marian-en-pt-int8')) return null;
-    return ChainedMtProvider([
-      MtStage(LfmMtProvider(lfmDir), 'ja', 'en'),
-      MtStage(
-          MarianMtProvider(marianDir, targetPrefix: '>>por<<'), 'en', 'pt'),
-    ]);
-  }
-
-  /// Rota S usa EN→PT leve; JA pede MT conforme Settings.
+  /// Rota S (EN/ES→PT) e transcribe (JA→PT) usam o mesmo provider Hy-MT2.
   static Future<MtProvider?> makeMtForSrc(String srcLang,
-      {Directory? modelRootForTest,
-      String? engine,
-      AiCapability? cap}) async {
-    if (srcLang == 'ja') return makeMt(
-        modelRootForTest: modelRootForTest, engine: engine, cap: cap);
+      {Directory? modelRootForTest, String? engine}) async {
+    if (srcLang != 'en' && srcLang != 'ja' && srcLang != 'es') return null;
+    // Rota S hoje só entra com EN/ES; ES cai p/ EN (limitação honesta do
+    // prompt atual — Hy-MT2 cobre ES, fiação futura).
     return makeMt(
-        modelRootForTest: modelRootForTest, engine: 'leve', cap: cap);
+        modelRootForTest: modelRootForTest,
+        engine: srcLang == 'ja' ? engine : 'leve');
   }
 }

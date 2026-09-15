@@ -1,7 +1,6 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:goanime_tv/core/subtitles/marian_mt.dart';
 import 'package:goanime_tv/core/subtitles/model_manager.dart';
 
 void main() {
@@ -20,11 +19,12 @@ void main() {
       }
     });
 
-    test('NLLB sem decoder_merged', () {
-      final spec = aiModelCatalog['nllb-600M-int8']!;
-      expect(
-          spec.remoteFiles.any((f) => f.contains('merged')), isFalse);
-      expect(spec.files.any((f) => f.contains('with_past')), isTrue);
+    test('GGUF Hy-MT2 auto-contido (1 arquivo → model.gguf)', () {
+      for (final id in ['hymt-ja-pt-q3km', 'hymt-ja-pt-q4']) {
+        final spec = aiModelCatalog[id]!;
+        expect(spec.files, ['model.gguf']);
+        expect(spec.remoteFiles.single.endsWith('.gguf'), isTrue);
+      }
     });
   });
 
@@ -32,7 +32,7 @@ void main() {
     test('recusa sem Wi-Fi antes de qualquer rede', () async {
       const mgr = ModelManager();
       expect(
-          () => mgr.downloadModel('marian-en-pt-int8',
+          () => mgr.downloadModel('hymt-ja-pt-q3km',
               connectivityForTest: () async => [ConnectivityResult.mobile]),
           throwsA(isA<ModelDownloadException>()));
     });
@@ -45,29 +45,4 @@ void main() {
           throwsA(isA<ArgumentError>()));
     });
   });
-
-  group('Marian prefixo de alvo (canal Kotlin)', () {
-    test('prefixo >>por<< chega ao canal', () async {
-      final ch = _PrefixCapture();
-      final mt = MarianMtProvider('unused',
-          targetPrefix: '>>por<<', channelForTest: ch);
-      await mt.load();
-      await mt.translate('Hello', src: 'en', tgt: 'pt');
-      expect(ch.seenPrefix, '>>por<<');
-      await mt.dispose();
-    });
-  });
-}
-
-class _PrefixCapture implements MarianChannel {
-  String? seenPrefix;
-  @override
-  Future<String> translate(String modelDir, String text,
-      {String? targetPrefix}) async {
-    seenPrefix = targetPrefix;
-    return 'PT';
-  }
-
-  @override
-  Future<void> dispose() async {}
 }

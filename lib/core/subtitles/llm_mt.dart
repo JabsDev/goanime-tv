@@ -2,21 +2,21 @@ import 'package:flutter/services.dart';
 
 import 'mt_provider.dart';
 
-/// Canal do tradutor LFM2 Kotlin (injetável p/ teste sem nativo).
-abstract class LfmChannel {
-  Future<String> translate(String modelDir, String text,
+/// Canal do tradutor llama.cpp Kotlin (injetável p/ teste sem nativo).
+abstract class LlmChannel {
+  Future<String> translate(String modelPath, String text,
       {required String srcLang, required String tgtLang});
   Future<void> dispose();
 }
 
-class MethodLfmChannel implements LfmChannel {
-  static const _ch = MethodChannel('goanime_tv/lfm');
+class MethodLlmChannel implements LlmChannel {
+  static const _ch = MethodChannel('goanime_tv/llm');
 
   @override
-  Future<String> translate(String modelDir, String text,
+  Future<String> translate(String modelPath, String text,
       {required String srcLang, required String tgtLang}) async {
     final out = await _ch.invokeMethod<String>('translate', {
-      'modelDir': modelDir,
+      'modelPath': modelPath,
       'text': text,
       'srcLang': srcLang,
       'tgtLang': tgtLang,
@@ -28,36 +28,37 @@ class MethodLfmChannel implements LfmChannel {
   Future<void> dispose() => _ch.invokeMethod('dispose');
 }
 
-/// MT LFM2-350M-ENJP-MT q4f16 (JA↔EN dedicado, causal com cache).
-/// Sessão Kotlin cacheada; [dispose] descarrega (carga sequencial).
-/// Cobre o buraco do L1: STT transcreve JA (base) → LFM JA→EN → Marian EN→PT.
-class LfmMtProvider extends MtProvider {
-  final String modelDir;
-  final LfmChannel? channelForTest;
-  /// LFM é maior que Marian (prefill 350M/frase): teto 10 min.
+/// MT Hy-MT2-1.8B via llama.cpp (GGUF, JA→PT direto + EN→PT).
+/// Sessão nativa cacheada; [dispose] descarrega (carga sequencial com STT).
+class LlmMtProvider extends MtProvider {
+  final String modelPath;
+  final LlmChannel? channelForTest;
+  /// LLM é lento por frase (pior no stick): teto 10 min.
   final Duration translateTimeout;
-  LfmChannel? _ch;
+  LlmChannel? _ch;
   bool _loaded = false;
 
-  LfmMtProvider(this.modelDir,
+  LlmMtProvider(this.modelPath,
       {this.channelForTest,
       this.translateTimeout = const Duration(minutes: 10)});
 
   @override
-  String get id => 'lfm-ja-en';
+  String get id => 'hymt-llm';
 
   @override
   Future<void> load() async {
-    _ch = channelForTest ?? MethodLfmChannel();
+    _ch = channelForTest ?? MethodLlmChannel();
     _loaded = true;
   }
 
   static final _sentSplit = RegExp(r'(?<=[.!?…])\s+');
 
-  static String _lfmCode(String lang) => switch (lang) {
+  static String _llmCode(String lang) => switch (lang) {
         'ja' => 'ja',
         'en' => 'en',
-        _ => throw StateError('LFM só traduz JA↔EN (pedido $lang)'),
+        'pt' => 'pt',
+        'es' => 'es',
+        _ => throw StateError('LLM sem par p/ "$lang" (só ja/en/pt/es)'),
       };
 
   @override
@@ -65,16 +66,16 @@ class LfmMtProvider extends MtProvider {
       {required String src, required String tgt}) async {
     final ch = _ch;
     if (!_loaded || ch == null) {
-      throw StateError('LfmMtProvider.load() antes de translate()');
+      throw StateError('LlmMtProvider.load() antes de translate()');
     }
-    final srcCode = _lfmCode(src);
-    final tgtCode = _lfmCode(tgt);
+    final srcCode = _llmCode(src);
+    final tgtCode = _llmCode(tgt);
     if (srcCode == tgtCode) return text;
     final parts = text.split(_sentSplit).where((s) => s.trim().isNotEmpty);
     final out = <String>[];
     for (final p in parts) {
       out.add(await ch
-          .translate(modelDir, p.trim(), srcLang: srcCode, tgtLang: tgtCode)
+          .translate(modelPath, p.trim(), srcLang: srcCode, tgtLang: tgtCode)
           .timeout(translateTimeout, onTimeout: () {
         throw StateError(
             'Tradução travou (timeout ${translateTimeout.inMinutes} min). '
@@ -93,5 +94,6 @@ class LfmMtProvider extends MtProvider {
     _loaded = false;
   }
 
-  static String get modelId => 'lfm-ja-en';
+  static String get modelIdQ3 => 'hymt-ja-pt-q3km';
+  static String get modelIdQ4 => 'hymt-ja-pt-q4';
 }
