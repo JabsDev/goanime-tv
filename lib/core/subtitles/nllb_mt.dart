@@ -69,10 +69,15 @@ class NllbMtProvider extends MtProvider {
   final String modelDir;
   final NllbChannel? channelForTest;
   final AiCapability? capabilityForTest;
+  /// Idem Marian (modelo 10x maior: teto 10 min; 1ª frase carrega 3 sessões).
+  final Duration translateTimeout;
   NllbChannel? _ch;
   bool _loaded = false;
 
-  NllbMtProvider(this.modelDir, {this.channelForTest, this.capabilityForTest});
+  NllbMtProvider(this.modelDir,
+      {this.channelForTest,
+      this.capabilityForTest,
+      this.translateTimeout = const Duration(minutes: 10)});
 
   @override
   String get id => 'nllb';
@@ -99,8 +104,14 @@ class NllbMtProvider extends MtProvider {
     final parts = text.split(_sentSplit).where((s) => s.trim().isNotEmpty);
     final out = <String>[];
     for (final p in parts) {
-      out.add(await ch.translate(modelDir, p.trim(),
-          srcLang: _nllbCode(src), tgtLang: _nllbCode(tgt)));
+      out.add(await ch
+          .translate(modelDir, p.trim(),
+              srcLang: _nllbCode(src), tgtLang: _nllbCode(tgt))
+          .timeout(translateTimeout, onTimeout: () {
+        throw StateError(
+            'Tradução travou (timeout ${translateTimeout.inMinutes} min). '
+            'Aparelho sem memória? Tente de novo.');
+      }));
     }
     return out.join(' ');
   }

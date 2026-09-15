@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../storage/settings_service.dart';
+import 'lfm_mt.dart';
 import 'marian_mt.dart';
 import 'model_manager.dart';
 import 'mt_provider.dart';
@@ -26,12 +27,13 @@ class AiProviders {
     return true;
   }
 
-  /// Mapeamento Settings → (modelo, task). tiny traduz ja→en (rápido);
-  /// base/small transcrevem ja (melhor, depois NLLB).
+  /// Mapeamento Settings → (modelo, task, kind). tiny traduz ja→en (rápido);
+  /// base/small/sensevoice transcrevem ja (melhor; depois NLLB ou cadeia LFM).
   static const _sttKinds = {
-    'tiny': ('whisper-tiny-ja', 'translate'),
-    'base': ('whisper-base', 'transcribe'),
-    'small': ('whisper-small', 'transcribe'),
+    'tiny': ('whisper-tiny-ja', 'translate', 'whisper'),
+    'base': ('whisper-base', 'transcribe', 'whisper'),
+    'small': ('whisper-small', 'transcribe', 'whisper'),
+    'sensevoice': ('sensevoice-ja', 'transcribe', 'sensevoice'),
   };
 
   static Future<SttProvider?> makeStt({
@@ -44,7 +46,7 @@ class AiProviders {
     final root = await modelsRoot(forTest: modelRootForTest);
     final dir = modelDirForTest ?? '${root.path}/${spec.$1}';
     if (!await _ready(dir, spec.$1)) return null;
-    return SherpaSttProvider(dir, task: spec.$2);
+    return SherpaSttProvider(dir, task: spec.$2, sttKind: spec.$3);
   }
 
   static Future<MtProvider?> makeMt({
@@ -73,7 +75,7 @@ class AiProviders {
   }
 
   /// MT p/ job transcribe (texto JA): só NLLB serve; Marian é EN→PT.
-  /// Null = sem NLLB capaz → o chamador cai p/ tiny-translate ou avisa.
+  /// Null = sem NLLB capaz → o chamador cai p/ cadeia LFM ou tiny.
   static Future<MtProvider?> makeMtForTranscribe({
     Directory? modelRootForTest,
     AiCapability? cap,
@@ -86,6 +88,34 @@ class AiProviders {
       return NllbMtProvider(dir);
     }
     return null;
+  }
+
+  static Future<LfmMtProvider?> makeLfm({
+    Directory? modelRootForTest,
+    String? modelDirForTest,
+  }) async {
+    const modelId = 'lfm-ja-en';
+    final root = await modelsRoot(forTest: modelRootForTest);
+    final dir = modelDirForTest ?? '${root.path}/$modelId';
+    if (!await _ready(dir, modelId)) return null;
+    return LfmMtProvider(dir);
+  }
+
+  /// Cadeia JA→PT p/ transcrição: LFM JA→EN + Marian EN→PT (carga sequencial).
+  /// Null = falta LFM ou Marian → chamador usa fallback tiny.
+  static Future<MtProvider?> makeMtChainJaPt({
+    Directory? modelRootForTest,
+  }) async {
+    final root = await modelsRoot(forTest: modelRootForTest);
+    final lfmDir = '${root.path}/lfm-ja-en';
+    final marianDir = '${root.path}/marian-en-pt-int8';
+    if (!await _ready(lfmDir, 'lfm-ja-en')) return null;
+    if (!await _ready(marianDir, 'marian-en-pt-int8')) return null;
+    return ChainedMtProvider([
+      MtStage(LfmMtProvider(lfmDir), 'ja', 'en'),
+      MtStage(
+          MarianMtProvider(marianDir, targetPrefix: '>>por<<'), 'en', 'pt'),
+    ]);
   }
 
   /// Rota S usa EN→PT leve; JA pede MT conforme Settings.
