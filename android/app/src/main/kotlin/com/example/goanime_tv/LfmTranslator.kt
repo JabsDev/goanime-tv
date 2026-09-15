@@ -53,7 +53,7 @@ class LfmTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandle
                 } catch (e: Throwable) {
                     // Error (ex. OOM) também vira resposta: exceção não-capturada
                     // em thread mata o app sem mensagem.
-                    try { dispose() } catch (_) {}
+                    try { dispose() } catch (_: Throwable) {}
                     reply { result.error("LFM", e.message, null) }
                 }
             }.start()
