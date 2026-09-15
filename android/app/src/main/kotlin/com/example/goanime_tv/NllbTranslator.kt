@@ -47,7 +47,9 @@ class NllbTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandl
                     val tgt = call.argument<String>("tgtLang") ?: "por_Latn"
                     val out = translate(dir, text, src, tgt)
                     reply { result.success(out) }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
+                    // Idem Marian: Error não-capturado em thread mata o app sem mensagem.
+                    try { dispose() } catch (_) {}
                     reply { result.error("NLLB", e.message, null) }
                 }
             }.start()
@@ -55,7 +57,7 @@ class NllbTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandl
                 try {
                     dispose()
                     reply { result.success(true) }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     reply { result.error("NLLB", e.message, null) }
                 }
             }.start()
@@ -97,14 +99,21 @@ class NllbTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandl
         lock.lock()
         try {
             val enc = encoder!!
+            val idsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(encIds), longArrayOf(1, n.toLong()))
+            val maskTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(encMask), longArrayOf(1, n.toLong()))
             val encIn = mapOf(
-                enc.inputNames.first() to OnnxTensor.createTensor(env, LongBuffer.wrap(encIds), longArrayOf(1, n.toLong())),
-                enc.inputNames.elementAtOrElse(1) { enc.inputNames.first() } to
-                    OnnxTensor.createTensor(env, LongBuffer.wrap(encMask), longArrayOf(1, n.toLong())),
+                enc.inputNames.first() to idsTensor,
+                enc.inputNames.elementAtOrElse(1) { enc.inputNames.first() } to maskTensor,
             )
-            enc.run(encIn).use { out ->
-                @Suppress("UNCHECKED_CAST")
-                hidden = out.get(enc.outputNames.first()).get() as Array<Array<FloatArray>>
+            try {
+                enc.run(encIn).use { out ->
+                    @Suppress("UNCHECKED_CAST")
+                    hidden = out.get(enc.outputNames.first()).get() as Array<Array<FloatArray>>
+                }
+            } finally {
+                // Fecha os objetos (map pode descartar um com 1 input).
+                runCatching { idsTensor.close() }
+                runCatching { maskTensor.close() }
             }
             val dec = decoder!!
             val decPast = decoderPast!!
@@ -153,6 +162,11 @@ class NllbTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandl
                         collectPrefixed(out, decPast.outputNames, "present", newPast)
                     }
                     cur.values.forEach { runCatching { it.close() } }
+                    // Fecha só os frescos: os vindos de `cur` já foram fechados acima
+                    // e os coletados em `newPast` vivem até a próxima iteração.
+                    inputs.values.forEach { t ->
+                        if (cur.values.none { it === t }) runCatching { t.close() }
+                    }
                 } else {
                     val inputs = mutableMapOf(
                         decIn[0] to OnnxTensor.createTensor(env, LongBuffer.wrap(gen.toLongArray()), longArrayOf(1, m.toLong())),
@@ -164,10 +178,14 @@ class NllbTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandl
                     if (decIn.size > 2) {
                         inputs[decIn[2]] = OnnxTensor.createTensor(env, LongBuffer.wrap(encMask), longArrayOf(1, n.toLong()))
                     }
-                    dec.run(inputs).use { out ->
-                        @Suppress("UNCHECKED_CAST")
-                        logits = out.get(decLogitsName).get() as Array<Array<FloatArray>>
-                        collectPrefixed(out, dec.outputNames, "present", newPast)
+                    try {
+                        dec.run(inputs).use { out ->
+                            @Suppress("UNCHECKED_CAST")
+                            logits = out.get(decLogitsName).get() as Array<Array<FloatArray>>
+                            collectPrefixed(out, dec.outputNames, "present", newPast)
+                        }
+                    } finally {
+                        inputs.values.forEach { runCatching { it.close() } }
                     }
                 }
                 past = newPast

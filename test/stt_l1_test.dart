@@ -186,6 +186,15 @@ void main() {
           throwsA(isA<StateError>()));
     });
 
+    test('sensevoice: id JA + guarda de arquivos próprios', () async {
+      final stt = SherpaSttProvider('x/sensevoice-ja',
+          task: 'transcribe', sttKind: 'sensevoice');
+      expect(stt.id, 'sensevoice-ja');
+      final engine = SherpaSttEngine(sttKind: 'sensevoice');
+      expect(() => engine.init(tmp.path, task: 'transcribe'),
+          throwsA(isA<StateError>()));
+    });
+
     test('breadcrumb: job pendente vira dica de crash', () async {
       final fakeJob = File('${jobs.path}/x_ep1.123.job.json');
       await fakeJob.writeAsString(

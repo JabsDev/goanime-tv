@@ -38,11 +38,16 @@ class MarianMtProvider extends MtProvider {
   final String modelDir;
   final String? targetPrefix;
   final MarianChannel? channelForTest;
+  /// Teto por frase: thread nativa morta vira job falho com mensagem em vez
+  /// de hang eterno (a 1ª frase inclui o load das 2 sessões ORT).
+  final Duration translateTimeout;
   MarianChannel? _ch;
   bool _loaded = false;
 
   MarianMtProvider(this.modelDir,
-      {this.targetPrefix, this.channelForTest});
+      {this.targetPrefix,
+      this.channelForTest,
+      this.translateTimeout = const Duration(minutes: 5)});
 
   @override
   String get id => 'marian';
@@ -65,8 +70,13 @@ class MarianMtProvider extends MtProvider {
     final parts = text.split(_sentSplit).where((s) => s.trim().isNotEmpty);
     final out = <String>[];
     for (final p in parts) {
-      out.add(await ch.translate(modelDir, p.trim(),
-          targetPrefix: targetPrefix));
+      out.add(await ch
+          .translate(modelDir, p.trim(), targetPrefix: targetPrefix)
+          .timeout(translateTimeout, onTimeout: () {
+        throw StateError(
+            'Tradução travou (timeout ${translateTimeout.inMinutes} min). '
+            'Aparelho sem memória? Tente de novo.');
+      }));
     }
     return out.join(' ');
   }

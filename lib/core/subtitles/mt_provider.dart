@@ -4,7 +4,7 @@ import 'srt_parser.dart';
 /// faz `SttProvider.dispose()` antes de `MtProvider.load()` — nunca ambos
 /// residentes (plano §carga).
 abstract class MtProvider {
-  String get id; // 'marian' | 'nllb'
+  String get id; // 'marian' | 'nllb' | 'lfm-ja-en' | 'a+b' (cadeia)
   Future<void> load();
   Future<String> translate(String text, {required String src, required String tgt});
   Future<void> dispose();
@@ -17,6 +17,53 @@ abstract class MtProvider {
       out.add(c.withText(await translate(c.text, src: src, tgt: tgt)));
     }
     return out;
+  }
+}
+
+/// Uma etapa de cadeia (ex. LFM JA→EN + Marian EN→PT).
+class MtStage {
+  final MtProvider provider;
+  final String src;
+  final String tgt;
+  const MtStage(this.provider, this.src, this.tgt);
+}
+
+/// Cadeia SEQUENCIAL de tradutores (cada um com seu par src→tgt fixo).
+/// Load/descarrega em ordem; falha de qualquer etapa aborta tudo.
+/// Exceção à regra "nunca ambos residentes": as etapas convivem (LFM+Marian
+/// ≈ 430 MB de pesos, ordem de um STT base). A regra dura continua valendo
+/// p/ STT vs MT (o job faz dispose do STT antes do load da cadeia).
+class ChainedMtProvider extends MtProvider {
+  final List<MtStage> stages;
+  ChainedMtProvider(this.stages) : assert(stages.isNotEmpty);
+
+  @override
+  String get id => stages.map((s) => s.provider.id).join('+');
+
+  @override
+  Future<void> load() async {
+    for (final s in stages) {
+      await s.provider.load();
+    }
+  }
+
+  @override
+  Future<String> translate(String text,
+      {required String src, required String tgt}) async {
+    var cur = text;
+    for (final s in stages) {
+      cur = await s.provider.translate(cur, src: s.src, tgt: s.tgt);
+    }
+    return cur;
+  }
+
+  @override
+  Future<void> dispose() async {
+    for (final s in stages) {
+      try {
+        await s.provider.dispose();
+      } catch (_) {}
+    }
   }
 }
 

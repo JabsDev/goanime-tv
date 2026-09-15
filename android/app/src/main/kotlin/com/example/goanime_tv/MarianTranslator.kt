@@ -47,7 +47,10 @@ class MarianTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHan
                         call.argument<String>("targetPrefix"),
                     )
                     reply { result.success(out) }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
+                    // Error (ex. OOM) também vira resposta: exceção não-capturada
+                    // em thread mata o app sem mensagem. Best-effort: solta as sessões.
+                    try { dispose() } catch (_) {}
                     reply { result.error("MARIAN", e.message, null) }
                 }
             }.start()
@@ -55,7 +58,7 @@ class MarianTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHan
                 try {
                     dispose()
                     reply { result.success(true) }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     reply { result.error("MARIAN", e.message, null) }
                 }
             }.start()
@@ -107,14 +110,24 @@ class MarianTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHan
             val n = ids.size
             val encMask = LongArray(n) { 1L }
             val hidden: Array<Array<FloatArray>>
+            val idsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(ids.map { it.toLong() }.toLongArray()), longArrayOf(1, n.toLong()))
+            val maskTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(encMask), longArrayOf(1, n.toLong()))
             val encIn = mapOf(
-                enc.inputNames.first() to OnnxTensor.createTensor(env, LongBuffer.wrap(ids.map { it.toLong() }.toLongArray()), longArrayOf(1, n.toLong())),
-                enc.inputNames.elementAtOrElse(1) { enc.inputNames.first() } to
-                    OnnxTensor.createTensor(env, LongBuffer.wrap(encMask), longArrayOf(1, n.toLong())),
+                enc.inputNames.first() to idsTensor,
+                enc.inputNames.elementAtOrElse(1) { enc.inputNames.first() } to maskTensor,
             )
-            enc.run(encIn).use { out ->
-                @Suppress("UNCHECKED_CAST")
-                hidden = out.get(enc.outputNames.first()).get() as Array<Array<FloatArray>>
+            try {
+                enc.run(encIn).use { out ->
+                    @Suppress("UNCHECKED_CAST")
+                    hidden = out.get(enc.outputNames.first()).get() as Array<Array<FloatArray>>
+                }
+            } finally {
+                // Tensores de entrada também seguram heap nativo: fechar sempre.
+                // Sem isto, EP inteiro (centenas de frases) vaza até OOM silencioso.
+                // Fecha os objetos (não os valores do map: com 1 input, o map
+                // descarta um deles por chave duplicada).
+                runCatching { idsTensor.close() }
+                runCatching { maskTensor.close() }
             }
             val decHidden = hidden[0]
             val h = decHidden[0].size
@@ -133,19 +146,24 @@ class MarianTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHan
                     inputs[decInNames[2]] = OnnxTensor.createTensor(env, LongBuffer.wrap(encMask), longArrayOf(1, n.toLong()))
                 }
                 val next: Int
-                dec.run(inputs).use { out ->
-                    @Suppress("UNCHECKED_CAST")
-                    val logits = out.get(decLogitsName).get() as Array<Array<FloatArray>>
-                    val last = logits[0][logits[0].size - 1]
-                    var best = 0
-                    var bestV = last[0]
-                    for (k in 1 until last.size) {
-                        if (last[k] > bestV) {
-                            bestV = last[k]
-                            best = k
+                try {
+                    dec.run(inputs).use { out ->
+                        @Suppress("UNCHECKED_CAST")
+                        val logits = out.get(decLogitsName).get() as Array<Array<FloatArray>>
+                        val last = logits[0][logits[0].size - 1]
+                        var best = 0
+                        var bestV = last[0]
+                        for (k in 1 until last.size) {
+                            if (last[k] > bestV) {
+                                bestV = last[k]
+                                best = k
+                            }
                         }
+                        next = best
                     }
-                    next = best
+                } finally {
+                    // Até 128 passos/frase: cada input vazado aqui vira OOM no EP.
+                    inputs.values.forEach { runCatching { it.close() } }
                 }
                 if (next == eosId) break
                 gen.add(next.toLong())
