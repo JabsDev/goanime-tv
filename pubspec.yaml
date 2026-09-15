@@ -1,7 +1,7 @@
 name: goanime_tv
 description: "GoAnime TV - Android TV anime streaming app"
 publish_to: 'none'
-version: 1.2.0+1000053
+version: 1.2.0+1000054
 
 environment:
   sdk: ^3.12.0
