@@ -230,10 +230,10 @@ void main() {
         lastIdx = idx;
       }
     });
-    test('falha vira failed com mensagem PT-BR (não trava no 0%)', () async {
+    test('falha traz stack curta p/ diagnóstico no aparelho', () async {
       final mgr = SubtitleJobManager.instance;
       await mgr.enqueueTranscribe(
-        animeKey: 'haibane', ep: 4, videoUrl: 'http://x/ep4.mp4',
+        animeKey: 'haibane', ep: 6, videoUrl: 'http://x/ep6.mp4',
         sttFor: () => _FakeStt(), mt: _FakeMt(),
         download: (_, __, ___) =>
             throw const SocketException('sem rede'),
@@ -241,7 +241,24 @@ void main() {
         jobsDirForTest: jobs, subsDirForTest: subs, tmpDirForTest: tmp);
       await _waitIdle(mgr);
       expect(mgr.state.value.phase, JobPhase.failed);
-      expect(mgr.state.value.error, contains('internet'));
+      final err = mgr.state.value.error ?? '';
+      expect(err, contains('internet'));
+      expect(err, contains('\n')); // + frames da stack
+    });
+
+    test('enqueue apaga job obsoleto da mesma chave', () async {
+      final mgr = SubtitleJobManager.instance;
+      final stale = File('${jobs.path}/haibane_ep7.1.job.json');
+      await stale.writeAsString('{"kind":"transcribe","phase":"transcribing"}');
+      await mgr.enqueueTranscribe(
+        animeKey: 'haibane', ep: 7, videoUrl: 'http://x/ep7.mp4',
+        sttFor: () => _FakeStt(), mt: _FakeMt(), download: _fakeDownload, extract: _fakeExtract,
+        jobsDirForTest: jobs, subsDirForTest: subs, tmpDirForTest: tmp);
+      final during =
+          await jobs.list().where((e) => e.path.endsWith('.job.json')).toList();
+      expect(during, hasLength(1)); // só o novo; obsoleto sumiu
+      expect(during.single.path, isNot(contains('ep7.1.')));
+      await _waitIdle(mgr);
     });
 
     test('áudio-only pula o download do vídeo cheio', () async {

@@ -183,16 +183,21 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
       return;
     }
     MtProvider? mt;
+    SttProvider? sttFinal = stt;
     if (stt.id == 'whisper-tiny-ja') {
       mt = await AiProviders.makeMt(
           engine: _mtId == 'completa' ? 'completa' : 'leve');
     } else {
-      // Transcrição gera JA: só NLLB traduz.
+      // Transcrição gera JA: só NLLB traduz. Sem ele, cai p/ tiny+Marian
+      // avisando (antes era beco sem saída com snackbar).
       mt = await AiProviders.makeMtForTranscribe();
       if (mt == null) {
-        _snack('Transcrição JA pede NLLB (aparelho forte). '
-            'Ou use a voz leve (tiny).');
-        return;
+        _snack('Sem NLLB neste aparelho — usando voz leve (tiny) + Marian.');
+        final tiny = await AiProviders.makeStt(stt: 'tiny');
+        mt = tiny == null
+            ? null
+            : await AiProviders.makeMt(engine: 'leve');
+        if (tiny != null && mt != null) sttFinal = tiny;
       }
     }
     if (mt == null) {
@@ -205,7 +210,7 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
       ep: widget.episode.number,
       videoUrl: src.url,
       headers: src.headers,
-      sttFor: () => stt,
+      sttFor: () => sttFinal!,
       mt: mt,
     );
   }

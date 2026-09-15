@@ -181,6 +181,7 @@ class SubtitleJobManager {
       subsDirForTest: subsDirForTest,
     );
     await job.save();
+    await _dropStale(dir, animeKey, ep, job.file);
     _queue.add(job);
     _pump();
   }
@@ -218,6 +219,7 @@ class SubtitleJobManager {
       tmpDirForTest: tmpDirForTest,
     );
     await job.save();
+    await _dropStale(dir, animeKey, ep, job.file);
     _queue.add(job);
     _pump();
   }
@@ -236,13 +238,32 @@ class SubtitleJobManager {
       } else {
         await _runTranslate(job);
       }
-    } catch (e) {
-      debugPrint('[SubtitleJob] fail: $e');
+    } catch (e, st) {
+      debugPrint('[SubtitleJob] fail: $e\n$st');
       await job.delete(); // falhou: não resume (re-tentativa é manual)
-      _set(JobPhase.failed, progress.value, 'Falhou', error: friendlyError(e));
+      // Stack encurtado junto p/ diagnóstico no aparelho (sem logcat).
+      final frames =
+          st.toString().split('\n').take(4).join('\n');
+      _set(JobPhase.failed, progress.value, 'Falhou',
+          error: '${friendlyError(e)}\n$frames');
     } finally {
       _current = null;
       _pump(); // FIFO: próximo da fila
+    }
+  }
+
+  /// Apaga jobs obsoletos da mesma chave (kill anterior, retry). Sem isto o
+  /// banner de crash e o resume ressuscitam fantasmas junto do job novo.
+  Future<void> _dropStale(
+      Directory dir, String animeKey, int ep, File? keep) async {
+    final prefix = '${SubtitleStore.sanitizeKey(animeKey)}_ep$ep.';
+    await for (final e in dir.list()) {
+      if (e is! File || !e.path.endsWith('.job.json')) continue;
+      if (!e.path.split('/').last.startsWith(prefix)) continue;
+      if (keep != null && e.path == keep.path) continue;
+      try {
+        await e.delete();
+      } catch (_) {}
     }
   }
 
