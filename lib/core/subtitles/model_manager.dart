@@ -97,6 +97,17 @@ final aiModelCatalog = <String, AiModelSpec>{
       repo: 'onnx-community/LFM2-350M-ENJP-MT-ONNX',
       remoteFiles: ['onnx/model_q4f16.onnx', 'onnx/model_q4f16.onnx_data', 'tokenizer.json', 'tokenizer_config.json', 'config.json', 'generation_config.json'],
       files: ['model.onnx', 'model.onnx_data', 'tokenizer.json', 'tokenizer_config.json', 'config.json', 'generation_config.json']),
+  // MT JA→PT direta via llama.cpp (pivô plano-acao-ort-duplicado-v5 §6):
+  // Hy-MT2-1.8B requant Q3_K_M comunitário, 6/6 no gate. GGUF auto-contido
+  // (tokenizer embutido). Runtime (Fase 1) ainda não implementado — entrada
+  // permite pré-baixar.
+  'hymt-ja-pt-q3km': AiModelSpec(
+      id: 'hymt-ja-pt-q3km', label: 'Tradução JA→PT (Hy-MT2)',
+      hint: '~907 MB · JA→PT direto via llama.cpp (em breve)',
+      mb: 907, sha256: 'PINAR', strongOnly: false,
+      repo: 'Jabs2/Hy-MT2-1.8B-Q3_K_M-GGUF',
+      remoteFiles: ['Hy-MT2-1.8B-Q3_K_M.gguf'],
+      files: ['model.gguf']),
   // MT completa: NLLB int8 com decoder + decoder_with_past SEPARADOS (nunca
   // decoder_merged — crash Reshape no ORT Android, plano §L2).
   'nllb-600M-int8': AiModelSpec(

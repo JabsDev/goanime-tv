@@ -275,6 +275,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         modelId: 'lfm-ja-en',
                         label: 'Tradução JA→EN (LFM2)'),
                     _ModelRow(
+                        modelId: 'hymt-ja-pt-q3km',
+                        label: 'Tradução JA→PT (Hy-MT2, em breve)'),
+                    _ModelRow(
                         modelId: 'nllb-600M-int8',
                         label: 'Tradução completa (NLLB)'),
                     const SizedBox(height: 32),

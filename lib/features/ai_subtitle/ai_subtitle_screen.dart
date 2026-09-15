@@ -61,6 +61,11 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
     'small': 'whisper-small',
   };
 
+  /// LFM-ONNX nunca funcionou no aparelho (conflito de .so nativos —
+  /// plano-acao-ort-duplicado-v5). Linha oculta até o pivô llama.cpp;
+  /// reverta p/ true para reexibir. Reversível, sem efeito no job.
+  static const _lfmEnabled = false;
+
   @override
   void initState() {
     super.initState();
@@ -326,7 +331,7 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
                 ? 'nllb-600M-int8'
                 : 'marian-en-pt-int8'),
           ),
-          if (_route == 'transcribe')
+          if (_route == 'transcribe' && _lfmEnabled)
             _ModelOptionRow(
               modelId: 'lfm-ja-en',
               selectLabel: 'LFM JA→EN (p/ voz base/small)',
