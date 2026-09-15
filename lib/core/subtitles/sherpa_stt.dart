@@ -33,22 +33,25 @@ class SherpaSttEngine implements SttEngine {
   _SttWorker? _worker;
   bool _hasVad = false;
 
+  /// 'whisper' (tiny/base/small) ou 'sensevoice' (JA dedicado).
+  final String sttKind;
+  SherpaSttEngine({this.sttKind = 'whisper'});
+
   @override
   Future<void> init(String modelDir,
       {required String task, int threads = 2}) async {
     // Guarda anti-crash nativo: sherpa estoura sem mensagem se faltar arquivo.
-    for (final f in const [
-      'encoder.int8.onnx',
-      'decoder.int8.onnx',
-      'tokens.txt'
-    ]) {
+    final needed = sttKind == 'sensevoice'
+        ? const ['model.int8.onnx', 'tokens.txt']
+        : const ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt'];
+    for (final f in needed) {
       if (!await File('$modelDir/$f').exists()) {
         throw StateError('Modelo de voz incompleto (falta $f). Baixe de novo.');
       }
     }
     _hasVad = await File('$modelDir/vad.onnx').exists();
-    _worker =
-        await _SttWorker.spawn(modelDir, task: task, withVad: _hasVad, threads: threads);
+    _worker = await _SttWorker.spawn(modelDir,
+        task: task, withVad: _hasVad, threads: threads, sttKind: sttKind);
   }
 
   @override
@@ -101,7 +104,8 @@ class _SttWorker {
   static Future<_SttWorker> spawn(String modelDir,
       {required String task,
       required bool withVad,
-      int threads = 2}) async {
+      int threads = 2,
+      String sttKind = 'whisper'}) async {
     final ready = ReceivePort();
     final errors = ReceivePort();
     ReceivePort? resp;
@@ -109,7 +113,7 @@ class _SttWorker {
     try {
       try {
         iso = await Isolate.spawn(
-            _entry, [ready.sendPort, modelDir, task, withVad, threads],
+            _entry, [ready.sendPort, modelDir, task, withVad, threads, sttKind],
             debugName: 'stt-worker', onError: errors.sendPort);
       } catch (e) {
         ready.close();
@@ -205,28 +209,46 @@ class _SttWorker {
     final task = args[2] as String;
     final withVad = args[3] as bool;
     final threads = args[4] as int;
+    final sttKind = args.length > 5 ? args[5] as String : 'whisper';
     // Qualquer throw aqui (binding, modelo corrompido) vira mensagem
     // de erro no handshake — nunca morte silenciosa do isolate.
     late final sherpa.OfflineRecognizer recognizer;
     sherpa.VoiceActivityDetector? vad;
     try {
       sherpa.initBindings();
-      recognizer = sherpa.OfflineRecognizer(
-        sherpa.OfflineRecognizerConfig(
-          model: sherpa.OfflineModelConfig(
-            whisper: sherpa.OfflineWhisperModelConfig(
-              encoder: '$modelDir/encoder.int8.onnx',
-              decoder: '$modelDir/decoder.int8.onnx',
-              language: 'ja',
-              task: task,
+      if (sttKind == 'sensevoice') {
+        // JA dedicado: encoder direto (sem decoder autoregressivo).
+        recognizer = sherpa.OfflineRecognizer(
+          sherpa.OfflineRecognizerConfig(
+            model: sherpa.OfflineModelConfig(
+              senseVoice: sherpa.OfflineSenseVoiceModelConfig(
+                model: '$modelDir/model.int8.onnx',
+                language: 'ja',
+              ),
+              tokens: '$modelDir/tokens.txt',
+              numThreads: threads,
+              debug: false,
             ),
-            tokens: '$modelDir/tokens.txt',
-            modelType: 'whisper',
-            numThreads: threads,
-            debug: false,
           ),
-        ),
-      );
+        );
+      } else {
+        recognizer = sherpa.OfflineRecognizer(
+          sherpa.OfflineRecognizerConfig(
+            model: sherpa.OfflineModelConfig(
+              whisper: sherpa.OfflineWhisperModelConfig(
+                encoder: '$modelDir/encoder.int8.onnx',
+                decoder: '$modelDir/decoder.int8.onnx',
+                language: 'ja',
+                task: task,
+              ),
+              tokens: '$modelDir/tokens.txt',
+              modelType: 'whisper',
+              numThreads: threads,
+              debug: false,
+            ),
+          ),
+        );
+      }
     } catch (e) {
       main.send({'error': '$e'});
       return;
@@ -324,13 +346,17 @@ class SherpaSttProvider extends SttProvider {
 
   /// 'translate' (L1 tiny-ja ja→en) ou 'transcribe' (L2 base ja).
   final String task;
+
+  /// 'whisper' ou 'sensevoice' (JA dedicado, sempre transcribe).
+  final String sttKind;
   SttEngine? _engine;
 
   SherpaSttProvider(this.modelDir,
-      {this.task = 'translate', this.engineForTest});
+      {this.task = 'translate', this.engineForTest, this.sttKind = 'whisper'});
 
   @override
   String get id {
+    if (sttKind == 'sensevoice') return 'sensevoice-ja';
     final base = modelDir.split('/').last;
     if (base.contains('small')) return 'whisper-small';
     if (task == 'transcribe') return 'whisper-base';
@@ -339,7 +365,7 @@ class SherpaSttProvider extends SttProvider {
 
   @override
   Future<void> load() async {
-    _engine = engineForTest ?? SherpaSttEngine();
+    _engine = engineForTest ?? SherpaSttEngine(sttKind: sttKind);
     final low = await DeviceCapability.isLowEnd();
     await _engine!.init(modelDir, task: task, threads: low ? 1 : 2);
   }

@@ -46,16 +46,17 @@ class AiSubtitleScreen extends StatefulWidget {
 
 class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
   late String _route; // 'translate' | 'transcribe'
-  late String _sttId; // tiny | base | small
+  late String _sttId; // tiny | base | small | sensevoice
   late String _mtId; // leve | completa
   Future<File?>? _cached;
   final Map<String, double> _downloading = {};
   List<SubtitleRef> _cands = [];
   bool _sawDone = false;
 
-  static const _sttModels = ['tiny', 'base', 'small'];
+  static const _sttModels = ['tiny', 'sensevoice', 'base', 'small'];
   static const _sttModelIds = {
     'tiny': 'whisper-tiny-ja',
+    'sensevoice': 'sensevoice-ja',
     'base': 'whisper-base',
     'small': 'whisper-small',
   };
@@ -188,9 +189,12 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
       mt = await AiProviders.makeMt(
           engine: _mtId == 'completa' ? 'completa' : 'leve');
     } else {
-      // Transcrição gera JA: só NLLB traduz. Sem ele, cai p/ tiny+Marian
-      // avisando (antes era beco sem saída com snackbar).
+      // Transcrição gera JA: NLLB direto; senão cadeia LFM+Marian;
+      // sem eles, cai p/ tiny+Marian avisando.
       mt = await AiProviders.makeMtForTranscribe();
+      if (mt == null) {
+        mt = await AiProviders.makeMtChainJaPt();
+      }
       if (mt == null) {
         _snack('Sem NLLB neste aparelho — usando voz leve (tiny) + Marian.');
         final tiny = await AiProviders.makeStt(stt: 'tiny');
@@ -322,6 +326,15 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
                 ? 'nllb-600M-int8'
                 : 'marian-en-pt-int8'),
           ),
+          if (_route == 'transcribe')
+            _ModelOptionRow(
+              modelId: 'lfm-ja-en',
+              selectLabel: 'LFM JA→EN (p/ voz base/small)',
+              selected: true,
+              onSelect: () {},
+              downloading: _downloading['lfm-ja-en'],
+              onDownload: () => _downloadModel('lfm-ja-en'),
+            ),
           const SizedBox(height: 24),
           _SectionTitle('3 · Gerar'),
           FutureBuilder<String?>(

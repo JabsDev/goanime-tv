@@ -265,11 +265,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 8),
                     _ModelRow(modelId: 'whisper-tiny-ja', label: 'Voz leve (tiny)'),
+                    _ModelRow(modelId: 'sensevoice-ja', label: 'Voz JA dedicada (SenseVoice)'),
                     _ModelRow(modelId: 'whisper-base', label: 'Voz completa (base)'),
                     _ModelRow(modelId: 'silero-vad', label: 'VAD silero (opcional)'),
                     _ModelRow(
                         modelId: 'marian-en-pt-int8',
                         label: 'Tradução leve (Marian)'),
+                    _ModelRow(
+                        modelId: 'lfm-ja-en',
+                        label: 'Tradução JA→EN (LFM2)'),
                     _ModelRow(
                         modelId: 'nllb-600M-int8',
                         label: 'Tradução completa (NLLB)'),

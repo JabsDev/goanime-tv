@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:goanime_tv/core/subtitles/marian_mt.dart';
@@ -45,5 +47,25 @@ void main() {
       expect(() => mt.translate('hi', src: 'en', tgt: 'pt'),
           throwsA(isA<StateError>()));
     });
+
+    test('nativo mudo vira timeout com mensagem (sem hang)', () async {
+      final mt = MarianMtProvider('dir',
+          channelForTest: _HangMarian(),
+          translateTimeout: const Duration(milliseconds: 200));
+      await mt.load();
+      expect(() => mt.translate('hi', src: 'en', tgt: 'pt'),
+          throwsA(isA<StateError>()));
+      await mt.dispose();
+    });
   });
+}
+
+class _HangMarian implements MarianChannel {
+  @override
+  Future<String> translate(String modelDir, String text,
+          {String? targetPrefix}) =>
+      Completer<String>().future;
+
+  @override
+  Future<void> dispose() async {}
 }
