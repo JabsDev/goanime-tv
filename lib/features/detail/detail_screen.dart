@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -7,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/navigation/route_observer.dart';
 import '../../core/subtitles/hls_subtitle_probe.dart';
-import '../../core/subtitles/subtitle_job_manager.dart';
 import '../../core/subtitles/subtitle_store.dart';
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
@@ -1196,6 +1194,10 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   /// Null = ainda não escolheu (ou a fonte só tem um áudio — passo pulado).
   String? _selectedAudio;
 
+  /// Qualidade escolhida (índice na lista visível). Escolher NÃO navega:
+  /// abre a etapa Legenda (Sem legenda / Legenda IA) — nada baixa sozinho.
+  int? _selectedQualityIdx;
+
   /// Latency (ms) per resolved provider. Absent = still measuring; -1 = timeout.
   final Map<AnimeSource, int> _pings = {};
 
@@ -1206,6 +1208,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   void initState() {
     super.initState();
     _resolveProviders();
+    _maybePrune();
     // Best-effort backfill: if the anime never got enriched (no airing info),
     // fetch it in background so the "ainda não lançado" state can show the
     // predicted date. Enrichment is session-cached, so repeats are cheap.
@@ -1257,8 +1260,11 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
       _matchedUnavailable = resolution.matchedUnavailable;
       _errored = resolution.errored;
       if (resolution.providers.isNotEmpty) {
-        // Troca de fonte invalida o áudio escolhido (era de outra lista).
-        if (nextBest != _selectedProvider) _selectedAudio = null;
+        // Troca de fonte invalida o áudio e a qualidade (eram de outra lista).
+        if (nextBest != _selectedProvider) {
+          _selectedAudio = null;
+          _resetQualitySelection();
+        }
         _providers = resolution.providers;
         _selectedProvider = nextBest;
         _loading = false;
@@ -1652,6 +1658,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
             setState(() {
               _selectedProvider = e.key;
               _selectedAudio = null;
+              _resetQualitySelection();
             });
           },
         ),
@@ -1677,7 +1684,10 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
               padding: const EdgeInsets.symmetric(vertical: 5),
               child: _QualityItem(
                 quality: _audioLabel(a),
-                onTap: () => setState(() => _selectedAudio = a),
+                onTap: () => setState(() {
+                  _selectedAudio = a;
+                  _resetQualitySelection();
+                }),
                 selected: _selectedAudio == a,
               ),
             )),
@@ -1690,11 +1700,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
       if (audios.length > 1 && _selectedAudio == null) {
         return const [];
       }
-      final visible = audios.length <= 1
-          ? sources
-          : sources
-              .where((s) => s.audio?.trim().toLowerCase() == _selectedAudio)
-              .toList();
+      final visible = _visibleSources(sources);
       if (visible.isEmpty) return const [];
       return [
         const Divider(color: ThemeConstants.surfaceLight),
@@ -1713,11 +1719,46 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
             padding: const EdgeInsets.symmetric(vertical: 5),
             child: _QualityItem(
               quality: q.value.quality,
-              onTap: () =>
-                  _navigateToPlayer(selected!, idx, visibleSources: visible),
+              selected: _selectedQualityIdx == idx,
+              onTap: () => setState(() => _selectedQualityIdx = idx),
             ),
           );
         }),
+      ];
+    }
+
+    /// Etapa Legenda (card separado, opt-in): só aparece após escolher a
+    /// qualidade. "Sem legenda" toca direto; "Legenda IA…" abre a tela
+    /// dedicada (nada baixa sem toque explícito).
+    List<Widget> subtitleStep(List<VideoSource> visible) {
+      final idx = _selectedQualityIdx;
+      if (idx == null || idx >= visible.length) return const [];
+      return [
+        const Divider(color: ThemeConstants.surfaceLight),
+        const Text(
+          'Legenda',
+          style: TextStyle(
+            color: ThemeConstants.textSecondary,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: _QualityItem(
+            quality: 'Sem legenda',
+            onTap: () =>
+                _navigateToPlayer(selected!, idx, visibleSources: visible),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: _QualityItem(
+            quality: 'Legenda IA…',
+            onTap: () => _openAiScreen(visible),
+          ),
+        ),
       ];
     }
 
@@ -1740,63 +1781,19 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           ...providerList,
           ...audioSection(providers[selected]!),
           ...qualitySection(providers[selected]!),
-          ...subtitleSection(providers[selected]!),
+          ...subtitleStep(_visibleSources(providers[selected]!)),
         ],
       ],
     );
   }
 
-  /// Entrada da legenda IA (D-pad): atalho p/ a tela dedicada
-  /// [AiSubtitleScreen] (rota, modelos, progresso, erros) + hit de cache
-  /// (PT-BR pronta toca direto). Throttle 24h do prune, fire-and-forget.
-  List<Widget> subtitleSection(List<VideoSource> sources) {
-    _maybePrune();
-    return [
-      const Divider(color: ThemeConstants.surfaceLight),
-      const Text(
-        'Legenda',
-        style: TextStyle(
-          color: ThemeConstants.textSecondary,
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      const SizedBox(height: 8),
-      FutureBuilder<File?>(
-        future: _cachedAiSub(),
-        builder: (ctx, snap) {
-          final cached = snap.data;
-          if (cached != null) {
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 5),
-              child: _QualityItem(
-                quality: 'PT-BR (IA) — pronta',
-                onTap: () => _playWithAiSub(sources, cached),
-              ),
-            );
-          }
-          return ValueListenableBuilder<JobState>(
-            valueListenable: SubtitleJobManager.instance.state,
-            builder: (ctx, st, _) {
-              final busy =
-                  SubtitleJobManager.instance.isBusy;
-              final label = busy
-                  ? 'Gerando… ${(st.progress * 100).toInt()}% · ${st.message}'
-                  : st.phase == JobPhase.failed
-                      ? 'Legenda IA — falhou. Toque p/ ver o erro'
-                      : 'Legenda IA…';
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: _QualityItem(
-                  quality: label,
-                  onTap: () => _openAiScreen(sources),
-                ),
-              );
-            },
-          );
-        },
-      ),
-    ];
+  /// Fontes visíveis após o filtro de áudio (mesma regra do passo qualidade).
+  List<VideoSource> _visibleSources(List<VideoSource> sources) {
+    final audios = _audiosFor(sources);
+    if (audios.length <= 1) return sources;
+    return sources
+        .where((s) => s.audio?.trim().toLowerCase() == _selectedAudio)
+        .toList();
   }
 
   /// Abre a tela dedicada com a mesma visibilidade do passo qualidade.
@@ -1824,35 +1821,6 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     );
   }
 
-  /// Primeira tag IA válida em cache (TTL já aplicado no get).
-  Future<File?> _cachedAiSub() async {
-    for (final tag in const ['en-ai', 'es-ai', 'ja-ai']) {
-      final f = await SubtitleStore.get(
-        animeKey: widget.anime.name,
-        ep: widget.episode.number,
-        tag: tag,
-      );
-      if (f != null) return f;
-    }
-    return null;
-  }
-
-  void _playWithAiSub(List<VideoSource> sources, File srt) {
-    // Mesma visibilidade do passo qualidade (filtro de áudio), legenda
-    // anexada a todas; toca a primeira qualidade (usuário troca no player).
-    final audios = _audiosFor(sources);
-    final visible = audios.length <= 1
-        ? sources
-        : sources
-            .where((s) => s.audio?.trim().toLowerCase() == _selectedAudio)
-            .toList();
-    if (visible.isEmpty || _selectedProvider == null) return;
-    final sub = SubtitleRef(
-        label: 'PT-BR (IA)', lang: 'pt', uri: srt.path, isAI: true);
-    _navigateToPlayer(_selectedProvider!, 0,
-        visibleSources: visible.map((s) => s.withSubtitle(sub)).toList());
-  }
-
   bool _pruneScheduled = false;
 
   /// pruneExpired ao abrir o Detail, throttle 24h, fire-and-forget.
@@ -1869,6 +1837,11 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           SubtitleStore.prunePrefsKey,
           DateTime.now().millisecondsSinceEpoch));
     });
+  }
+
+  /// Reseta a qualidade escolhida ao trocar de fonte/áudio (era de outra lista).
+  void _resetQualitySelection() {
+    _selectedQualityIdx = null;
   }
 }
 

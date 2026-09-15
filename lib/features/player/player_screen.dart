@@ -334,9 +334,10 @@ class _PlayerScreenState extends State<PlayerScreen>
         Media(playUrl, httpHeaders: headers),
         play: true,
       );
-      // Fase 0: anexa a primeira legenda externa da fonte (pronta do job IA
-      // ou candidata do provider). mpv exige setSubtitleTrack pós-open.
-      _subIndex = src.subtitleUrls.isEmpty ? -1 : 0;
+      // Fase 0: legenda externa começa DESLIGADA (opt-in no botão);
+      // só auto-liga quando a fonte já traz legenda IA (fluxo "Assistir
+      // com IA" da tela dedicada). Candidatas do provider: botão ciclos.
+      _subIndex = src.subtitleUrls.indexWhere((s) => s.isAI);
       _subDelay = 0;
       if (_subIndex >= 0) await _applySubtitle(src);
       if (!mounted) return;

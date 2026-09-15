@@ -190,12 +190,12 @@ void main() {
       final fakeJob = File('${jobs.path}/x_ep1.123.job.json');
       await fakeJob.writeAsString(
           '{"kind":"transcribe","animeKey":"haibane","ep":1,"phase":"transcribing"}');
-      final hint = await SubtitleJobManager.lastCrashHint(
+      final hint = await SubtitleJobManager.consumeCrashHint(
           jobsDirForTest: jobs);
       expect(hint, contains('transcrição'));
       expect(hint, contains('memória'));
-      await fakeJob.delete();
-      expect(await SubtitleJobManager.lastCrashHint(
+      expect(await fakeJob.exists(), isFalse); // consumiu e apagou
+      expect(await SubtitleJobManager.consumeCrashHint(
           jobsDirForTest: jobs), isNull);
     });
 

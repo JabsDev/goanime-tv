@@ -261,14 +261,16 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
     }
   }
 
-  /// Carrega a primeira legenda de [src] (falha aberta: null sem legenda).
+  /// Carrega a primeira legenda IA de [src] (falha aberta: null = sem legenda).
+  /// Candidatas do provider NÃO auto-ligam (opt-in só no mpv, que tem botão).
   /// `.vtt` → WebVTTCaptionFile, demais → SubRipCaptionFile. Suporta
   /// arquivo local (job IA) e URL remota (com headers da fonte).
   Future<ClosedCaptionFile>? _loadCaption(VideoSource src) {
-    if (src.subtitleUrls.isEmpty) return null;
-    final sub = src.subtitleUrls.first;
+    final ai = src.subtitleUrls.where((s) => s.isAI).toList();
+    if (ai.isEmpty) return null;
+    final sub = ai.first;
     _subLabel = sub.label;
-    _subIsAI = sub.isAI;
+    _subIsAI = true;
     return _fetchCaptionText(sub.uri, src.headers).then((text) {
       if (text == null) return SubRipCaptionFile('');
       return sub.uri.toLowerCase().endsWith('.vtt')

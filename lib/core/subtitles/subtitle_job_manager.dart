@@ -83,26 +83,37 @@ class SubtitleJobManager {
     }
   }
 
-  /// Dica de crash: job file pendente = morte no meio (kill/OOM).
+  /// Dica de crash CONSUMÍVEL: lê o job pendente e apaga os arquivos.
+  /// Nada recomeça sozinho — re-tentativa é sempre toque explícito.
   /// Retorna a fase em português ou null se nada pendente.
-  static Future<String?> lastCrashHint({Directory? jobsDirForTest}) async {
+  static Future<String?> consumeCrashHint({Directory? jobsDirForTest}) async {
     final dir = await _jobsDirStatic(forTest: jobsDirForTest);
     if (!await dir.exists()) return null;
+    String? hint;
     await for (final e in dir.list()) {
       if (e is! File || !e.path.endsWith('.job.json')) continue;
       try {
-        final m = jsonDecode(await e.readAsString()) as Map;
-        final phase = m['phase'] as String? ?? '';
-        final anime = m['animeKey'] ?? '?';
-        final ep = m['ep'] ?? '?';
-        if (phase.isEmpty || phase == 'idle') continue;
-        return 'O app fechou durante ${_phaseLabel(phase)} '
-            '($anime EP$ep). Provável falta de memória — '
-            'tente o modelo de voz leve (tiny).';
-      } catch (_) {}
+        if (hint == null) {
+          final m = jsonDecode(await e.readAsString()) as Map;
+          final phase = m['phase'] as String? ?? '';
+          final anime = m['animeKey'] ?? '?';
+          final ep = m['ep'] ?? '?';
+          if (phase.isNotEmpty && phase != 'idle') {
+            hint = 'O app fechou durante ${_phaseLabel(phase)} '
+                '($anime EP$ep). Provável falta de memória — '
+                'tente o modelo de voz leve (tiny).';
+          }
+        }
+        await e.delete();
+      } catch (_) {
+        try {
+          await e.delete();
+        } catch (_) {}
+      }
     }
-    return null;
+    return hint;
   }
+
 
   static String _phaseLabel(String phase) {
     switch (phase) {
@@ -422,55 +433,6 @@ class SubtitleJobManager {
 
   void cancelCurrent() => _current?.cancelled = true;
 
-  /// Resume após kill: re-enfileira jobs com arquivo pendente.
-  Future<void> resumePending({
-    required MtProvider Function(String mtId) mtFor,
-    SttProvider Function(String sttId)? sttFor,
-    Directory? jobsDirForTest,
-    Directory? subsDirForTest,
-  }) async {
-    final dir = await _jobsDir(forTest: jobsDirForTest);
-    if (!await dir.exists()) return;
-    await for (final e in dir.list()) {
-      if (e is! File || !e.path.endsWith('.job.json')) continue;
-      try {
-        final m = jsonDecode(await e.readAsString()) as Map;
-        final kind = m['kind'] as String? ?? 'translate';
-        if (kind == 'transcribe' && sttFor != null) {
-          _queue.add(_Job.transcribe(
-            animeKey: m['animeKey'] as String,
-            ep: (m['ep'] as num).toInt(),
-            videoUrl: m['videoUrl'] as String,
-            headers: Map<String, String>.from(m['headers'] as Map? ?? {}),
-            sttFor: () => sttFor(m['sttId'] as String? ?? 'whisper-tiny-ja'),
-            mt: mtFor(m['mtId'] as String? ?? 'marian'),
-            jobsDir: dir,
-            subsDirForTest: subsDirForTest,
-            file: e,
-          ));
-        } else if (kind == 'translate') {
-          _queue.add(_Job.translate(
-            animeKey: m['animeKey'] as String,
-            ep: (m['ep'] as num).toInt(),
-            srcSrt: m['srcSrt'] as String,
-            srcLang: m['srcLang'] as String,
-            mt: mtFor(m['mtId'] as String? ?? 'passthrough'),
-            jobsDir: dir,
-            subsDirForTest: subsDirForTest,
-            file: e,
-          ));
-        } else {
-          await e.delete();
-        }
-      } catch (_) {
-        try {
-          await e.delete();
-        } catch (_) {}
-      }
-    }
-    _pump();
-  }
-
   /// @visibleForTesting
   int queueLengthForTest() => _queue.length;
 }
@@ -507,7 +469,6 @@ class _Job {
     required this.mt,
     required this.jobsDir,
     this.subsDirForTest,
-    this.file,
   })  : kind = 'translate',
         videoUrl = '',
         headers = const {},
@@ -530,7 +491,6 @@ class _Job {
     this.audioOnlyForTest,
     this.subsDirForTest,
     this.tmpDirForTest,
-    this.file,
   })  : kind = 'transcribe',
         srcSrt = '',
         srcLang = 'en',

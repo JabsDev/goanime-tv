@@ -325,7 +325,7 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
           const SizedBox(height: 24),
           _SectionTitle('3 · Gerar'),
           FutureBuilder<String?>(
-            future: SubtitleJobManager.lastCrashHint(),
+            future: SubtitleJobManager.consumeCrashHint(),
             builder: (context, snap) {
               if (snap.data == null) return const SizedBox.shrink();
               return Padding(
