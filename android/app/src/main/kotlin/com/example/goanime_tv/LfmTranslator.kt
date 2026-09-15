@@ -4,6 +4,7 @@ import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import ai.onnxruntime.TensorInfo
 import android.os.Handler
 import android.os.Looper
 import io.flutter.plugin.common.BinaryMessenger
@@ -170,24 +171,28 @@ class LfmTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandle
 
     private fun zeroTensor(sess: OrtSession, name: String, shape: LongArray): OnnxTensor {
         val n = shape.fold(1L) { a, d -> a * d }.toInt()
-        return when (sess.inputInfo[name]!!.info.type) {
+        val info = sess.inputInfo[name]!!.info as TensorInfo
+        return when (info.type) {
             OnnxJavaType.FLOAT -> OnnxTensor.createTensor(env, FloatBuffer.allocate(n), shape)
-            OnnxJavaType.FLOAT16 -> OnnxTensor.createTensor(env, ShortBuffer.allocate(n), shape)
+            OnnxJavaType.FLOAT16 -> OnnxTensor.createTensor(
+                env, ShortBuffer.allocate(n), shape, OnnxJavaType.FLOAT16)
             OnnxJavaType.INT64 -> OnnxTensor.createTensor(env, LongBuffer.allocate(n), shape)
-            else -> throw IllegalArgumentException("past $name: tipo inesperado")
+            else -> throw IllegalArgumentException("past $name: tipo ${info.type}")
         }
     }
 
     private fun collectPast(sess: OrtSession, out: OrtSession.Result): Map<String, OnnxTensor> {
+        // Nomes de saída derivados dos de entrada (Result não lista outputs).
         val into = mutableMapOf<String, OnnxTensor>()
-        for (name in out.outputNames) {
-            val pastName = when {
-                name.startsWith("present_conv") -> name.replace("present_conv", "past_conv")
-                name.startsWith("present.") -> name.replace("present.", "past_key_values.")
+        for (pastName in sess.inputNames) {
+            val presentName = when {
+                pastName.startsWith("past_conv") ->
+                    pastName.replace("past_conv", "present_conv")
+                pastName.startsWith("past_key_values.") ->
+                    pastName.replace("past_key_values.", "present.")
                 else -> continue
             }
-            if (!sess.inputNames.contains(pastName)) continue
-            val opt = runCatching { out.get(name) }.getOrNull() ?: continue
+            val opt = runCatching { out.get(presentName) }.getOrNull() ?: continue
             if (!opt.isPresent) continue
             (opt.get() as? OnnxTensor)?.let { into[pastName] = it }
         }
