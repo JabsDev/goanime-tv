@@ -36,6 +36,33 @@ std::string jstr(JNIEnv * env, jstring s) {
     return out;
 }
 
+// NewStringUTF com byte inválido = ART aborta a VM (morte sem exceção).
+// O teto de 128 tokens pode partir um char multibyte (japonês!) bem no
+// fim — e o crash caía na 1ª frase com breadcrumb de "carregamento".
+// Limpa a cauda partida e troca byte inválido por U+FFFD antes do JNI.
+std::string utf8_clean(const std::string & s) {
+    std::string o;
+    o.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        const unsigned char c = s[i];
+        size_t len = 1;
+        if ((c & 0x80) == 0x00) len = 1;
+        else if ((c & 0xE0) == 0xC0) len = 2;
+        else if ((c & 0xF0) == 0xE0) len = 3;
+        else if ((c & 0xF8) == 0xF0) len = 4;
+        else { o.append("\xEF\xBF\xBD"); ++i; continue; }
+        if (i + len > s.size()) break;  // cauda partida: descarta
+        bool ok = true;
+        for (size_t k = 1; k < len; ++k) {
+            if ((s[i + k] & 0xC0) != 0x80) { ok = false; break; }
+        }
+        if (!ok) { o.append("\xEF\xBF\xBD"); ++i; continue; }
+        o.append(s, i, len);
+        i += len;
+    }
+    return o;
+}
+
 }  // namespace
 
 extern "C" {
@@ -124,7 +151,7 @@ Java_com_example_goanime_1tv_LlmBridge_nativeGenerate(
         ++gen;
         if ((int) out.size() > 4096) break;
     }
-    return env->NewStringUTF(out.c_str());
+    return env->NewStringUTF(utf8_clean(out).c_str());
 }
 
 JNIEXPORT void JNICALL

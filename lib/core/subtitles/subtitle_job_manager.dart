@@ -448,6 +448,9 @@ class SubtitleJobManager {
       await Future.delayed(const Duration(seconds: 2));
       final mt = job.mt;
       await mt.load();
+      // Breadcrumb fino: crash na 1ª frase antes aparecia como
+      // "carregamento" (o _set(translating) só roda após cada frase).
+      await job.save(progress: 0.73, phase: 'translating');
       try {
         final out = <SrtCue>[];
         for (var i = 0; i < srcCues.length; i++) {
