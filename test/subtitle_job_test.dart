@@ -49,4 +49,22 @@ void main() {
       await subs.delete(recursive: true);
     }
   });
+
+  group('friendlyError LLM (EP3)', () {
+    test('CORRUPT/OOM/legada viram PT-BR sem stack', () {
+      for (final e in [
+        StateError('LLM_CORRUPT: /m/model.gguf'),
+        StateError('LLM_OOM: /m/model.gguf'),
+        StateError('falha ao carregar /m/model.gguf'),
+      ]) {
+        final msg = SubtitleJobManager.friendlyError(e);
+        expect(msg, isNot(contains('model.gguf')));
+        expect(msg, isNot(contains('#0')));
+      }
+      expect(SubtitleJobManager.friendlyError(StateError('LLM_CORRUPT: x')),
+          contains('corrompido'));
+      expect(SubtitleJobManager.friendlyError(StateError('LLM_OOM: x')),
+          contains('Memória'));
+    });
+  });
 }

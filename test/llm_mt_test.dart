@@ -60,6 +60,12 @@ void main() {
       await mt.dispose();
     });
 
+    test('load sem channel valida GGUF (fail-fast EP3)', () async {
+      final mt = LlmMtProvider('/nao/existe/model.gguf');
+      expect(() => mt.load(), throwsA(predicate((e) =>
+          e is StateError && e.toString().contains('LLM_CORRUPT'))));
+    });
+
     test('nativo mudo vira timeout com mensagem', () async {
       final mt = LlmMtProvider('x',
           channelForTest: _HangLlm(),

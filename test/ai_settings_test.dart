@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:goanime_tv/core/storage/local_storage.dart';
 import 'package:goanime_tv/core/storage/settings_service.dart';
 import 'package:goanime_tv/core/subtitles/ai_providers.dart';
+import 'package:goanime_tv/core/subtitles/model_manager.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -65,7 +66,17 @@ void main() {
       final dir = Directory('${root.path}/$id');
       await dir.create(recursive: true);
       for (final f in files) {
-        await File('${dir.path}/$f').writeAsString('x');
+        final file = File('${dir.path}/$f');
+        if (f.endsWith('.gguf')) {
+          // GGUF válido p/ isValidGguf: magic + tamanho esparso (~96%).
+          final raf = await file.open(mode: FileMode.write);
+          await raf.writeFrom(const [0x47, 0x47, 0x55, 0x46]);
+          final mb = aiModelCatalog[id]?.mb ?? 900;
+          await raf.truncate((mb * 1048576 * 0.96).round());
+          await raf.close();
+        } else {
+          await file.writeAsString('x');
+        }
       }
     }
 

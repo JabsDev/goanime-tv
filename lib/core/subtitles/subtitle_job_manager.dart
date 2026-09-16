@@ -164,6 +164,20 @@ class SubtitleJobManager {
       return 'Tradução local indisponível neste aparelho. '
           'Use um aparelho 64-bit.';
     }
+    // GGUF truncado ("instalado" mas nativo retorna 0) ou sem RAM (ret -1).
+    if (s.contains('LLM_CORRUPT')) {
+      return 'Modelo de tradução corrompido ou incompleto. '
+          'Apague e baixe de novo no Wi-Fi.';
+    }
+    if (s.contains('LLM_OOM')) {
+      return 'Memória insuficiente p/ tradução. '
+          'Feche apps e tente de novo (Q3 leve).';
+    }
+    // Compat: string legada do Kotlin antes dos códigos LLM_*.
+    if (s.contains('falha ao carregar')) {
+      return 'Modelo de tradução corrompido ou memória insuficiente. '
+          'Baixe de novo no Wi-Fi; se persistir, feche apps.';
+    }
     if (s.contains('404')) {
       return 'Vídeo indisponível (erro 404). A fonte pode ter saído do ar.';
     }
@@ -282,6 +296,8 @@ class SubtitleJobManager {
       final technical = !(msg.startsWith('Falha interna') ||
           msg.startsWith('Falha nas bibliotecas') ||
           msg.startsWith('Tradução local') ||
+          msg.startsWith('Modelo de tradução') ||
+          msg.startsWith('Memória insuficiente') ||
           msg.startsWith('Voz '));
       final frames =
           st.toString().split('\n').take(4).join('\n');
