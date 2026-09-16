@@ -125,6 +125,8 @@ class SubtitleJobManager {
         return 'o carregamento da voz';
       case 'transcribing':
         return 'a transcrição';
+      case 'disposingVoice':
+        return 'a liberação da voz';
       case 'loadingMt':
         return 'o carregamento da tradução';
       case 'translating':
@@ -433,11 +435,17 @@ class SubtitleJobManager {
               detail: '${(p * 100).toInt()}% do áudio');
         });
       } finally {
+        // Breadcrumb fino: sem isto, morte dentro do free nativo aparece
+        // como "transcrição" e é indistinguível de morte transcrevendo.
+        await job.save(progress: 0.72, phase: 'disposingVoice');
         await stt.dispose(); // NUNCA ambos residentes
       }
       if (_checkCancel(job)) return;
       _set(JobPhase.loadingMt, 0.73, 'Carregando tradução…',
           detail: 'voz liberada da memória');
+      // Respiro p/ o SO reclamar as páginas do STT antes do GGUF de ~1 GB:
+      // sem isto o pico STT-residual + MT tomava LMK-kill (app só fechava).
+      await Future.delayed(const Duration(seconds: 2));
       final mt = job.mt;
       await mt.load();
       try {

@@ -54,7 +54,13 @@ Java_com_example_goanime_1tv_LlmBridge_nativeLoad(JNIEnv * env, jobject, jstring
     }
 
     llama_context_params cparams = llama_context_default_params();
-    cparams.n_ctx = 2048;  // cues curtas; KV pequeno (RAM de TV)
+    cparams.n_ctx = 1024;  // cues curtas; KV pequeno (RAM de TV). 2048 tomava
+    // LMK-kill em stick fraco no pico STT-residual + MT — 1024 corta o KV
+    // quase à metade sem afetar frase a frase (teto 128 tokens novos).
+    // KV em Q8_0 em vez do padrão F16: metade da RAM de novo, perda
+    // irrelevante p/ frase curta (só os 2 campos, resto nem percebe).
+    cparams.type_k = GGML_TYPE_Q8_0;
+    cparams.type_v = GGML_TYPE_Q8_0;
     cparams.n_threads = n_threads();
     cparams.n_threads_batch = n_threads();
     llama_context * ctx = llama_init_from_model(model, cparams);

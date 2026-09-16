@@ -194,8 +194,12 @@ class _SttWorker {
   }
 
   Future<void> close() async {
+    // Free LONGO de propósito: sob pressão de memória o sherpa demora a
+    // soltar o recognizer; timeout curto matava o isolate com o nativo
+    // ainda alocado (vazamento) e o MT de ~1 GB logo depois tomava LMK-kill
+    // (app "só fecha" na fase Carregando tradução). 30s garante free real.
     try {
-      await _call('free', null).timeout(const Duration(seconds: 5));
+      await _call('free', null).timeout(const Duration(seconds: 30));
     } catch (_) {}
     await _errSub.cancel();
     _errPort.close();
@@ -289,11 +293,21 @@ class _SttWorker {
           case 'decode':
             final samples = m['arg'] as Float32List;
             final stream = recognizer.createStream();
-            stream.acceptWaveform(samples: samples, sampleRate: 16000);
-            recognizer.decode(stream);
-            final text = recognizer.getResult(stream).text.trim();
-            stream.free();
-            reply.send({'id': id, 'value': text});
+            // finally de propósito: chunk com erro vazava o stream e o
+            // recognizer.free() depois derrubava o processo (SIGSEGV no
+            // dispose — app "só fechava" entre voz e tradução, sem breadcrumb).
+            try {
+              stream.acceptWaveform(samples: samples, sampleRate: 16000);
+              recognizer.decode(stream);
+              final text = recognizer.getResult(stream).text.trim();
+              reply.send({'id': id, 'value': text});
+            } catch (e) {
+              reply.send({'id': id, 'value': _error(e)});
+            } finally {
+              try {
+                stream.free();
+              } catch (_) {}
+            }
           case 'free':
             vad?.free();
             recognizer.free();
