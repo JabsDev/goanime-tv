@@ -75,5 +75,15 @@ void main() {
           throwsA(isA<StateError>()));
       await mt.dispose();
     });
+    test('peça patológica fatia em ≤500 chars sem perder texto', () {
+      final long = List.filled(40, 'この物語は小さな村から始まります').join('、');
+      final ps = LlmMtProvider.pieces(long).toList();
+      expect(ps.length, greaterThan(1));
+      expect(ps.every((p) => p.length <= LlmMtProvider.maxPieceChars),
+          isTrue);
+      expect(ps.join(''), long); // nada perdido
+      expect(LlmMtProvider.pieces('今日は良い天気です。').toList(),
+          ['今日は良い天気です。']); // curta intacta
+    });
   });
 }

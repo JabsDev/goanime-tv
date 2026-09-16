@@ -319,10 +319,13 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
           FutureBuilder<String?>(
             future: SubtitleJobManager.consumeCrashHint(),
             builder: (context, snap) {
-              if (snap.data == null) return const SizedBox.shrink();
+              // Arquivo some no retry (_dropStale preserva em memória).
+              final hint =
+                  snap.data ?? SubtitleJobManager.instance.lastCrashHint;
+              if (hint == null) return const SizedBox.shrink();
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Text(snap.data!,
+                child: Text(hint,
                     style: const TextStyle(
                         color: Colors.orangeAccent, fontSize: 15)),
               );

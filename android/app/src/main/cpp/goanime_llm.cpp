@@ -133,23 +133,37 @@ Java_com_example_goanime_1tv_LlmBridge_nativeGenerate(
 
     std::string out;
     const int cap = maxTokens > 0 ? (int) maxTokens : 128;
+    // Teto do contexto: prompt + geração precisam caber no n_ctx (1024).
+    // Sem isto, cue patológica (alucinação longa do STT) estourava o KV.
+    if ((int) ids.size() > 1024 - cap) {
+        __android_log_print(ANDROID_LOG_ERROR, "GoAnimeLLM",
+                            "prompt longo (%d tokens), truncado", (int) ids.size());
+        ids.resize(1024 - cap);
+    }
+    // Prefill em pedaços de 512: batch único maior que n_batch =
+    // GGML_ASSERT em llama_decode → SIGABRT sem exceção (app "só fecha",
+    // visto no EP3). Padrão dos clientes llama.cpp; KV acumula igual.
+    bool ok = true;
+    for (size_t off = 0; off < ids.size(); off += 512) {
+        const size_t chunk = std::min<size_t>(512, ids.size() - off);
+        llama_batch pre = llama_batch_get_one(ids.data() + off, (int) chunk);
+        if (llama_decode(h->ctx, pre) != 0) { ok = false; break; }
+    }
     int gen = 0;
-    bool first = true;
-    llama_token cur = -1;
-    while (gen < cap) {
-        // Prefill na 1ª iteração; depois 1 token por vez (KV reutilizado).
-        llama_batch cur_batch = first
-            ? llama_batch_get_one(ids.data(), (int) ids.size())
-            : llama_batch_get_one(&cur, 1);
-        first = false;
-        if (llama_decode(h->ctx, cur_batch) != 0) break;
-        cur = llama_sampler_sample(h->sampler, h->ctx, -1);
+    // 1º token sai dos logits do prefill (batch_get_one marca o último).
+    llama_token cur =
+        ok ? llama_sampler_sample(h->sampler, h->ctx, -1) : eos;
+    while (ok && gen < cap) {
         if (cur == eos) break;
         char buf[256];
         const int len = llama_token_to_piece(vocab, cur, buf, sizeof(buf), 0, false);
         if (len > 0) out.append(buf, len);
         ++gen;
         if ((int) out.size() > 4096) break;
+        // 1 token por vez (KV reutilizado).
+        llama_batch cur_batch = llama_batch_get_one(&cur, 1);
+        if (llama_decode(h->ctx, cur_batch) != 0) break;
+        cur = llama_sampler_sample(h->sampler, h->ctx, -1);
     }
     return env->NewStringUTF(utf8_clean(out).c_str());
 }

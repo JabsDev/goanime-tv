@@ -93,17 +93,8 @@ class SubtitleJobManager {
     await for (final e in dir.list()) {
       if (e is! File || !e.path.endsWith('.job.json')) continue;
       try {
-        if (hint == null) {
-          final m = jsonDecode(await e.readAsString()) as Map;
-          final phase = m['phase'] as String? ?? '';
-          final anime = m['animeKey'] ?? '?';
-          final ep = m['ep'] ?? '?';
-          if (phase.isNotEmpty && phase != 'idle') {
-            hint = 'O app fechou durante ${_phaseLabel(phase)} '
-                '($anime EP$ep). Provável falta de memória — '
-                'tente o modelo de voz leve (tiny).';
-          }
-        }
+        hint ??= _hintFromJson(
+            jsonDecode(await e.readAsString()) as Map);
         await e.delete();
       } catch (_) {
         try {
@@ -113,6 +104,23 @@ class SubtitleJobManager {
     }
     return hint;
   }
+
+  /// Job file → frase PT-BR ou null (sem fase = job novo, não crash).
+  static String? _hintFromJson(Map m) {
+    final phase = m['phase'] as String? ?? '';
+    if (phase.isEmpty || phase == 'idle') return null;
+    final anime = m['animeKey'] ?? '?';
+    final ep = m['ep'] ?? '?';
+    return 'O app fechou durante ${_phaseLabel(phase)} '
+        '($anime EP$ep). Provável falta de memória — '
+        'tente o modelo de voz leve (tiny).';
+  }
+
+  /// Dica de crash preservada em memória: o retry apaga os job files
+  /// (_dropStale) antes da tela ler — sem isto, tocar "Gerar" de novo
+  /// destruía a evidência e o app abria "sem mensagem".
+  /// Limpa no próximo sucesso (_finish); falha mostra o próprio erro.
+  String? lastCrashHint;
 
 
   static String _phaseLabel(String phase) {
@@ -311,8 +319,9 @@ class SubtitleJobManager {
     }
   }
 
-  /// Apaga jobs obsoletos da mesma chave (kill anterior, retry). Sem isto o
-  /// banner de crash e o resume ressuscitam fantasmas junto do job novo.
+  /// Apaga jobs obsoletos da mesma chave (kill anterior, retry) mas antes
+  /// preserva a dica de crash em [lastCrashHint] — sem isto o retry
+  /// destruía a evidência antes da tela exibir ("sem mensagem").
   Future<void> _dropStale(
       Directory dir, String animeKey, int ep, File? keep) async {
     final prefix = '${SubtitleStore.sanitizeKey(animeKey)}_ep$ep.';
@@ -320,6 +329,10 @@ class SubtitleJobManager {
       if (e is! File || !e.path.endsWith('.job.json')) continue;
       if (!e.path.split('/').last.startsWith(prefix)) continue;
       if (keep != null && e.path == keep.path) continue;
+      try {
+        lastCrashHint ??= _hintFromJson(
+            jsonDecode(await e.readAsString()) as Map);
+      } catch (_) {}
       try {
         await e.delete();
       } catch (_) {}
@@ -344,6 +357,7 @@ class SubtitleJobManager {
     );
     await SubtitleStore.pruneExpired(subsDirForTest: job.subsDirForTest);
     await job.delete();
+    lastCrashHint = null; // sucesso supera a dica de crash anterior
     _set(JobPhase.done, 1, 'Legenda pronta');
   }
 

@@ -255,6 +255,34 @@ void main() {
       expect(err, contains('\n')); // + frames da stack
     });
 
+    test('retry preserva dica de crash em memória (sem "sem mensagem")', () async {
+      final mgr = SubtitleJobManager.instance;
+      mgr.lastCrashHint = null;
+      final stale = File('${jobs.path}/haibane_ep8.1.job.json');
+      await stale.writeAsString(
+          '{"kind":"transcribe","animeKey":"haibane","ep":8,"phase":"loadingMt"}');
+      // Falha rápida: evidencia preservada mesmo sem sucesso.
+      await mgr.enqueueTranscribe(
+        animeKey: 'haibane', ep: 8, videoUrl: 'http://x/ep8.mp4',
+        sttFor: () => _FakeStt(), mt: _FakeMt(),
+        download: (_, __, ___) =>
+            throw const SocketException('sem rede'),
+        extract: _fakeExtract,
+        jobsDirForTest: jobs, subsDirForTest: subs, tmpDirForTest: tmp);
+      await _waitIdle(mgr);
+      expect(mgr.state.value.phase, JobPhase.failed);
+      expect(mgr.lastCrashHint, contains('carregamento da tradução'));
+      expect(mgr.lastCrashHint, contains('haibane EP8'));
+      // Sucesso posterior limpa a dica.
+      await mgr.enqueueTranscribe(
+        animeKey: 'haibane', ep: 8, videoUrl: 'http://x/ep8.mp4',
+        sttFor: () => _FakeStt(), mt: _FakeMt(), download: _fakeDownload, extract: _fakeExtract,
+        jobsDirForTest: jobs, subsDirForTest: subs, tmpDirForTest: tmp);
+      await _waitIdle(mgr);
+      expect(mgr.state.value.phase, JobPhase.done);
+      expect(mgr.lastCrashHint, isNull);
+    });
+
     test('enqueue apaga job obsoleto da mesma chave', () async {
       final mgr = SubtitleJobManager.instance;
       final stale = File('${jobs.path}/haibane_ep7.1.job.json');

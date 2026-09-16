@@ -77,6 +77,34 @@ class LlmMtProvider extends MtProvider {
 
   static final _sentSplit = RegExp(r'(?<=[.!?…])\s+');
 
+  /// Peça única nunca passa de ~500 chars (~360 tokens JA): cabe folgada
+  /// no contexto sem truncar. Sem isto, alucinação longa do STT ia inteira
+  /// num batch e o nativo abortava (SIGABRT do EP3).
+  static const maxPieceChars = 500;
+  static final _pieceCut = RegExp(r'[、，,．.\s]');
+
+  static Iterable<String> pieces(String text) sync* {
+    for (final s in text.split(_sentSplit).map((s) => s.trim()).where(
+        (s) => s.isNotEmpty)) {
+      if (s.length <= maxPieceChars) {
+        yield s;
+        continue;
+      }
+      var start = 0;
+      while (start < s.length) {
+        var end = (start + maxPieceChars).clamp(0, s.length);
+        if (end < s.length) {
+          final cut = s.lastIndexOf(_pieceCut, end);
+          if (cut > start) end = cut + 1;
+        }
+        final piece = s.substring(start, end).trim();
+        if (piece.isNotEmpty) yield piece;
+        if (end <= start) break; // sem âncora: nunca gira parado
+        start = end;
+      }
+    }
+  }
+
   static String _llmCode(String lang) => switch (lang) {
         'ja' => 'ja',
         'en' => 'en',
@@ -95,7 +123,7 @@ class LlmMtProvider extends MtProvider {
     final srcCode = _llmCode(src);
     final tgtCode = _llmCode(tgt);
     if (srcCode == tgtCode) return text;
-    final parts = text.split(_sentSplit).where((s) => s.trim().isNotEmpty);
+    final parts = pieces(text);
     final out = <String>[];
     for (final p in parts) {
       out.add(await ch
