@@ -6,11 +6,6 @@
     <!-- Auto-update (sideload): instalação via PackageInstaller + confirm -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
-    <!-- Camera permissions for QR Code scanning -->
-    <uses-permission android:name="android.permission.CAMERA"/>
-    <uses-feature android:name="android.hardware.camera" android:required="false"/>
-    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
-
     <!-- Android TV permissions -->
     <uses-feature android:name="android.software.leanback"
                   android:required="false"/>
