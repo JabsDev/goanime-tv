@@ -10,6 +10,8 @@
 #include <thread>
 #include <vector>
 
+#include <android/log.h>
+
 #include "llama.h"
 
 namespace {
@@ -43,7 +45,13 @@ Java_com_example_goanime_1tv_LlmBridge_nativeLoad(JNIEnv * env, jobject, jstring
     const std::string path = jstr(env, modelPath);
     llama_model_params mparams = llama_model_default_params();
     llama_model * model = llama_model_load_from_file(path.c_str(), mparams);
-    if (!model) return 0;
+    // 0 = arquivo inexistente/truncado; -1 = sem RAM p/ contexto.
+    // O Kotlin converte em LLM_CORRUPT / LLM_OOM (mensagem PT-BR no Dart).
+    if (!model) {
+        __android_log_print(ANDROID_LOG_ERROR, "GoAnimeLLM",
+                            "model_open falhou: %s", path.c_str());
+        return 0;
+    }
 
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = 2048;  // cues curtas; KV pequeno (RAM de TV)
@@ -52,7 +60,9 @@ Java_com_example_goanime_1tv_LlmBridge_nativeLoad(JNIEnv * env, jobject, jstring
     llama_context * ctx = llama_init_from_model(model, cparams);
     if (!ctx) {
         llama_model_free(model);
-        return 0;
+        __android_log_print(ANDROID_LOG_ERROR, "GoAnimeLLM",
+                            "ctx_init falhou (OOM?): %s", path.c_str());
+        return -1;
     }
 
     auto * h = new Handle{model, ctx, nullptr};

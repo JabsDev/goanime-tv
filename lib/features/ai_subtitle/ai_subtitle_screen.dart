@@ -300,7 +300,7 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
             modelId:
                 _mtId == 'completa' ? 'hymt-ja-pt-q4' : 'hymt-ja-pt-q3km',
             selectLabel:
-                _mtId == 'completa' ? 'Hy-MT2 Q4 (1,1 GB)' : 'Hy-MT2 Q3 (907 MB)',
+                _mtId == 'completa' ? 'Hy-MT2 Q4' : 'Hy-MT2 Q3',
             selected: true,
             onSelect: () {
               final next = _mtId == 'completa' ? 'leve' : 'completa';

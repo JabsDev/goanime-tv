@@ -68,8 +68,17 @@ class LlmTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandle
         try {
             if (handle != 0L && loadedPath == modelPath) return
             disposeLocked()
-            handle = LlmBridge.nativeLoad(modelPath)
-            if (handle == 0L) throw IllegalStateException("falha ao carregar $modelPath")
+            // Variável local: -1 (OOM) nunca é persistido no field —
+            // nativeFree(-1) seria crash (ponteiro inválido).
+            val f = java.io.File(modelPath)
+            val exists = try { f.exists() } catch (_: Throwable) { false }
+            val bytes = try { f.length() } catch (_: Throwable) { -1L }
+            val h = LlmBridge.nativeLoad(modelPath)
+            if (h == 0L) throw IllegalStateException(
+                "LLM_CORRUPT: $modelPath (existe=$exists bytes=$bytes)")
+            if (h == -1L) throw IllegalStateException(
+                "LLM_OOM: $modelPath (bytes=$bytes)")
+            handle = h
             loadedPath = modelPath
         } finally {
             lock.unlock()
@@ -113,8 +122,10 @@ class LlmTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandle
     }
 
     private fun disposeLocked() {
-        if (handle != 0L) {
+        if (handle != 0L && handle != -1L) {
             runCatching { LlmBridge.nativeFree(handle) }
+            handle = 0
+        } else if (handle == -1L) {
             handle = 0
         }
         loadedPath = null

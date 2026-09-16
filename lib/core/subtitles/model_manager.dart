@@ -108,12 +108,41 @@ class ModelManager {
     return Directory('${base.path}/models');
   }
 
+  /// GGUF válido = existe + tamanho >= 95% do catálogo + magic "GGUF".
+  /// `exists()` sozinho marcava download truncado como "instalado" e o
+  /// nativo falhava com "falha ao carregar" (ver screenshot EP3).
+  /// ponytail: piso 95% de spec.mb + magic, sem sha completo até pinar HF.
+  static Future<bool> isValidGguf(File f, int specMb) async {
+    try {
+      if (!await f.exists()) return false;
+      if (await f.length() < (specMb * 1048576 * 0.95).round()) return false;
+      final raf = await f.open(mode: FileMode.read);
+      try {
+        final m = await raf.read(4);
+        return m.length == 4 &&
+            m[0] == 0x47 &&
+            m[1] == 0x47 &&
+            m[2] == 0x55 &&
+            m[3] == 0x46;
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> isReady(String id) async {
     final spec = aiModelCatalog[id];
     if (spec == null) return false;
     final dir = Directory('${(await modelsDir()).path}/$id');
     for (final f in spec.files) {
-      if (!await File('${dir.path}/$f').exists()) return false;
+      final file = File('${dir.path}/$f');
+      if (f.endsWith('.gguf')) {
+        if (!await isValidGguf(file, spec.mb)) return false;
+      } else if (!await file.exists()) {
+        return false;
+      }
     }
     return true;
   }
@@ -179,6 +208,16 @@ class ModelManager {
           : (got, total) =>
               onProgress(total <= 0 ? 0 : got / total),
     );
+    final mb = aiModelCatalog[modelId]?.mb;
+    if (filename.endsWith('.gguf') && mb != null) {
+      if (!await isValidGguf(dest, mb)) {
+        try {
+          await dest.delete();
+        } catch (_) {}
+        throw const ModelDownloadException(
+            'Modelo incompleto ou corrompido — baixe de novo no Wi-Fi.');
+      }
+    }
     if (expectedSha256 != 'PINAR') {
       final digest = sha256.convert(await dest.readAsBytes()).toString();
       if (digest != expectedSha256) {
@@ -220,6 +259,7 @@ class ModelManager {
         throw ModelDownloadException('HTTP ${resp.statusCode} em $url');
       }
       if (resp.statusCode == 200 && start > 0) start = 0; // sem resume
+      final knownLen = resp.contentLength >= 0;
       final total =
           (resp.contentLength < 0 ? 0 : resp.contentLength) + start;
       final sink = dest.openWrite(
@@ -233,6 +273,12 @@ class ModelManager {
         }
       } finally {
         await sink.close();
+      }
+      // Download interrompido parecia "completo" (causa do EP3): só confia
+      // no total quando o servidor informou Content-Length.
+      if (knownLen && got != total) {
+        throw ModelDownloadException(
+            'Download incompleto ($got/$total bytes). Tente de novo no Wi-Fi.');
       }
       return dest;
     } finally {

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -25,6 +27,41 @@ void main() {
         expect(spec.files, ['model.gguf']);
         expect(spec.remoteFiles.single.endsWith('.gguf'), isTrue);
       }
+    });
+  });
+
+  group('ModelManager.isValidGguf', () {
+    late Directory tmp;
+    setUp(() async => tmp = await Directory.systemTemp.createTemp('gguf'));
+    tearDown(() async => tmp.delete(recursive: true));
+
+    Future<File> gguf(String name, List<int> head, {int? size}) async {
+      final f = File('${tmp.path}/$name');
+      final raf = await f.open(mode: FileMode.write);
+      await raf.writeFrom(head);
+      if (size != null) await raf.truncate(size);
+      await raf.close();
+      return f;
+    }
+
+    test('inexistente é inválido', () async {
+      expect(await ModelManager.isValidGguf(File('${tmp.path}/x.gguf'), 1),
+          isFalse);
+    });
+
+    test('pequeno ou magic errado é inválido', () async {
+      final small = await gguf('s.gguf', const [0x47, 0x47, 0x55, 0x46],
+          size: 10);
+      expect(await ModelManager.isValidGguf(small, 1), isFalse);
+      final bad =
+          await gguf('b.gguf', const [1, 2, 3, 4], size: 2 * 1048576);
+      expect(await ModelManager.isValidGguf(bad, 1), isFalse);
+    });
+
+    test('magic + tamanho ok é válido', () async {
+      final ok = await gguf('ok.gguf', const [0x47, 0x47, 0x55, 0x46],
+          size: 2 * 1048576);
+      expect(await ModelManager.isValidGguf(ok, 1), isTrue);
     });
   });
 

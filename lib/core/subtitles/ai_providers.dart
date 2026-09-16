@@ -20,7 +20,12 @@ class AiProviders {
     final spec = aiModelCatalog[modelId];
     if (spec == null) return false;
     for (final f in spec.files) {
-      if (!await File('$modelDir/$f').exists()) return false;
+      final file = File('$modelDir/$f');
+      if (f.endsWith('.gguf')) {
+        if (!await ModelManager.isValidGguf(file, spec.mb)) return false;
+      } else if (!await file.exists()) {
+        return false;
+      }
     }
     return true;
   }
@@ -64,7 +69,8 @@ class AiProviders {
     final root = await modelsRoot(forTest: modelRootForTest);
     final dir = modelDirForTest ?? '${root.path}/$modelId';
     if (!await _ready(dir, modelId)) return null;
-    return LlmMtProvider('$dir/model.gguf');
+    return LlmMtProvider('$dir/model.gguf',
+        expectedMb: aiModelCatalog[modelId]!.mb);
   }
 
   /// Rota S (EN/ES→PT) e transcribe (JA→PT) usam o mesmo provider Hy-MT2.

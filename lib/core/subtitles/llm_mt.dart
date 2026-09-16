@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 
+import 'model_manager.dart';
 import 'mt_provider.dart';
 
 /// Canal do tradutor llama.cpp Kotlin (injetável p/ teste sem nativo).
@@ -33,6 +36,9 @@ class MethodLlmChannel implements LlmChannel {
 class LlmMtProvider extends MtProvider {
   final String modelPath;
   final LlmChannel? channelForTest;
+  /// Tamanho esperado (MB) p/ validar o GGUF no load; injetado pelo
+  /// catálogo via AiProviders (fallback inferido pelo nome do dir).
+  final int? expectedMb;
   /// LLM é lento por frase (pior no stick): teto 10 min.
   final Duration translateTimeout;
   LlmChannel? _ch;
@@ -40,6 +46,7 @@ class LlmMtProvider extends MtProvider {
 
   LlmMtProvider(this.modelPath,
       {this.channelForTest,
+      this.expectedMb,
       this.translateTimeout = const Duration(minutes: 10)});
 
   @override
@@ -47,8 +54,25 @@ class LlmMtProvider extends MtProvider {
 
   @override
   Future<void> load() async {
+    // Fail-fast: GGUF truncado falhava só na 1ª frase (depois de baixar
+    // vídeo/transcrever). Só valida no aparelho real (teste usa fake path).
+    if (channelForTest == null) {
+      final mb = expectedMb ?? _inferMb();
+      if (!await ModelManager.isValidGguf(File(modelPath), mb)) {
+        throw StateError('LLM_CORRUPT: $modelPath');
+      }
+    }
     _ch = channelForTest ?? MethodLlmChannel();
     _loaded = true;
+  }
+
+  int _inferMb() {
+    try {
+      final dir = File(modelPath).parent.path.split('/').last;
+      final mb = aiModelCatalog[dir]?.mb;
+      if (mb != null) return mb;
+    } catch (_) {}
+    return 850; // fallback p/ construção avulsa fora do catálogo
   }
 
   static final _sentSplit = RegExp(r'(?<=[.!?…])\s+');
