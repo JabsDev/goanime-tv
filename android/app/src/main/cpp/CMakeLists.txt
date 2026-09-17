@@ -27,9 +27,16 @@ if(ANDROID_ABI STREQUAL "arm64-v8a" OR ANDROID_ABI STREQUAL "x86_64")
     set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
     set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
     set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
-    if(ANDROID_ABI STREQUAL "arm64-v8a")
-        set(GGML_CPU_ARM_ARCH "armv8.5-a+fp16+i8mm" CACHE STRING "" FORCE)
-    endif()
+    # SEM GGML_CPU_ARM_ARCH de propósito (SIGILL no Edge 30/SD778G):
+    # a flag antiga "armv8.5-a+fp16+i8mm" emitia stlur (LRCPC2/3) + smmla
+    # fora do baseline da CPU (tombstones SIGILL ILL_ILLOPC, PC 0x3e6d4,
+    # BuildId libggml-cpu.so 5ef021c5). Sem a var = baseline do NDK
+    # (armv8-a, NEON puro): seguro em A78/A55 e em sticks A53 (v8.0, sem
+    # dotprod). Sem dispatch dinâmico (BACKEND_DL=OFF) — perda de
+    # dotprod/i8mm até prova em contrário. NÃO forçar armv8.2+dotprod
+    # (quebra A53) nem armv8-a+fp16 (+fp16 vetorial é v8.2+, não v8.0).
+    # KLEIDIAI travado em OFF: os ukernels *_neon_i8mm.c só entram com ON.
+    set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(llama)
 
     add_library(goanime_llm SHARED goanime_llm.cpp)

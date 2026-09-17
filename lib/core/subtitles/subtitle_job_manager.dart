@@ -106,14 +106,17 @@ class SubtitleJobManager {
   }
 
   /// Job file → frase PT-BR ou null (sem fase = job novo, não crash).
+  /// Mensagem genérica de propósito: após morte nativa (SIGILL/SIGABRT) ou
+  /// LMK-kill o processo morre sem registrar sinal — o job file só tem
+  /// phase/animeKey/ep, então a fase NÃO distingue falta de memória de
+  /// instrução ilegal. Não prometer causa sem fonte de verdade.
   static String? _hintFromJson(Map m) {
     final phase = m['phase'] as String? ?? '';
     if (phase.isEmpty || phase == 'idle') return null;
     final anime = m['animeKey'] ?? '?';
     final ep = m['ep'] ?? '?';
     return 'O app fechou durante ${_phaseLabel(phase)} '
-        '($anime EP$ep). Provável falta de memória — '
-        'tente o modelo de voz leve (tiny).';
+        '($anime EP$ep). Atualize o app e tente de novo.';
   }
 
   /// Dica de crash preservada em memória: o retry apaga os job files

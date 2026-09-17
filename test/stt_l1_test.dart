@@ -202,7 +202,7 @@ void main() {
       final hint = await SubtitleJobManager.consumeCrashHint(
           jobsDirForTest: jobs);
       expect(hint, contains('transcrição'));
-      expect(hint, contains('memória'));
+      expect(hint, contains('Atualize o app'));
       expect(await fakeJob.exists(), isFalse); // consumiu e apagou
       expect(await SubtitleJobManager.consumeCrashHint(
           jobsDirForTest: jobs), isNull);

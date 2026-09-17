@@ -25,7 +25,9 @@ fun loadReleaseKeystore(): Properties? {
 android {
     namespace = "com.example.goanime_tv"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Pinado (SIGILL Edge 30): o codegen do NDK muda entre versões — o mesmo
+    // CMakeLists pode emitir instruções diferentes. Build validada com r28c.
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
