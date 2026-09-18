@@ -234,9 +234,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       builder: (context, mt, _) => Column(
                         children: [
                           _ModeOption(
+                            label: 'Tradução mínima',
+                            description:
+                                'Qwen 0.6B Q4_K_M (378 MB) — cabe em qualquer lugar, qualidade simples',
+                            selected: mt == 'minima',
+                            onTap: () => SettingsService.instance
+                                .setMtEngine('minima'),
+                          ),
+                          _ModeOption(
                             label: 'Tradução leve (padrão)',
                             description:
-                                'LFM 1.2B (541 MB) — qualquer aparelho, qualidade básica',
+                                'LFM 1.2B IQ3_M (541 MB) — qualquer aparelho, qualidade básica',
                             selected: mt == 'leve',
                             onTap: () => SettingsService.instance
                                 .setMtEngine('leve'),
@@ -244,7 +252,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _ModeOption(
                             label: 'Tradução intermediária',
                             description:
-                                'Hy-MT2 IQ3 (859 MB) — qualidade alta em arquivo menor',
+                                'Hy-MT2 IQ3_M (859 MB) — qualidade alta em arquivo menor',
                             selected: mt == 'media',
                             onTap: () => SettingsService.instance
                                 .setMtEngine('media'),
@@ -252,7 +260,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _ModeOption(
                             label: 'Tradução completa',
                             description:
-                                'Hy-MT2 Q4 (1,13 GB) — máxima qualidade, aparelho forte',
+                                'Hy-MT2 Q4_K_M (1,13 GB) — máxima qualidade, aparelho forte',
                             selected: mt == 'completa',
                             onTap: () => SettingsService.instance
                                 .setMtEngine('completa'),
@@ -286,17 +294,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _ModelRow(modelId: 'whisper-small', label: 'Voz superior (small)'),
                     const _ModelGroupTitle('Tradução — leva p/ português'),
                     _ModelRow(
+                        modelId: 'qwen06-ja-pt-q4',
+                        label: 'Tradução mínima (Qwen 0.6B Q4_K_M)'),
+                    _ModelRow(
                         modelId: 'lfm12b-ja-pt-iq3m',
-                        label: 'Tradução leve (LFM 1.2B)'),
+                        label: 'Tradução leve (LFM 1.2B IQ3_M)'),
                     _ModelRow(
                         modelId: 'hymt-ja-pt-iq3m',
-                        label: 'Tradução intermediária (Hy-MT2 IQ3)'),
+                        label: 'Tradução intermediária (Hy-MT2 IQ3_M)'),
                     _ModelRow(
                         modelId: 'hymt-ja-pt-q3km',
-                        label: 'Tradução JA→PT (Hy-MT2 Q3)'),
+                        label: 'Tradução JA→PT (Hy-MT2 Q3_K_M)'),
                     _ModelRow(
                         modelId: 'hymt-ja-pt-q4',
-                        label: 'Tradução JA→PT (Hy-MT2 Q4)'),
+                        label: 'Tradução JA→PT (Hy-MT2 Q4_K_M)'),
                     const _ModelGroupTitle('Áudio — ajuda a transcrição'),
                     _ModelRow(modelId: 'silero-vad', label: 'VAD silero (opcional)'),
                     const SizedBox(height: 32),
@@ -415,36 +426,36 @@ class _ModelRowState extends State<_ModelRow> {
         future: _ready,
         builder: (context, snap) {
           final ready = snap.data ?? false;
-          return Row(
+          // Coluna em vez de linha espremida: título + status numa tela
+          // estreita quebravam em 3 linhas e colidiam com o botão.
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${widget.label} — ${ready ? 'instalado' : 'faltando'} '
-                      '(${spec.mb} MB)',
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 16),
-                    ),
-                    if (_progress != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: LinearProgressIndicator(
-                            value: _progress,
-                            backgroundColor: Colors.white24,
-                            valueColor: const AlwaysStoppedAnimation(
-                                ThemeConstants.primary)),
-                      ),
-                  ],
+              Text(widget.label,
+                  style: const TextStyle(
+                      color: Colors.white, fontSize: 16)),
+              const SizedBox(height: 2),
+              Text(
+                  '${ready ? 'instalado' : 'faltando'} · ${spec.mb} MB',
+                  style: const TextStyle(
+                      color: ThemeConstants.textSecondary,
+                      fontSize: 14)),
+              if (_progress != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: LinearProgressIndicator(
+                      value: _progress,
+                      backgroundColor: Colors.white24,
+                      valueColor: const AlwaysStoppedAnimation(
+                          ThemeConstants.primary)),
                 ),
-              ),
-              const SizedBox(width: 12),
               if (!ready && _progress == null)
-                TVButton(
-                  label: 'Baixar',
-                  width: 160,
-                  onPressed: _download,
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: TVButton(
+                    label: 'Baixar',
+                    onPressed: _download,
+                  ),
                 ),
             ],
           );

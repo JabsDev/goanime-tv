@@ -101,6 +101,13 @@ Java_com_example_goanime_1tv_LlmBridge_nativeLoad(JNIEnv * env, jobject, jstring
     auto * h = new Handle{model, ctx, nullptr};
     auto schain = llama_sampler_chain_init(llama_sampler_chain_default_params());
     llama_sampler_chain_add(schain, llama_sampler_init_temp(0.0f));  // greedy
+    // Anti-runaway ("lalala…", "!!!!…"): cue patológica do STT (música/efeito
+    // alucinado) entrava em loop até o teto de 128 tokens e virava legenda.
+    // repeat 1.18 nas últimas 64: não muda tradução normal (já medida no
+    // gate), só quebra o ciclo degenerado. freq/present zerados (greedy).
+    const llama_vocab * v = llama_model_get_vocab(model);
+    llama_sampler_chain_add(schain, llama_sampler_init_penalties(
+        llama_vocab_n_tokens(v), 64, 1.18f, 0.0f, 0.0f));
     llama_sampler_chain_add(schain, llama_sampler_init_dist(0));
     h->sampler = schain;
     return reinterpret_cast<jlong>(h);

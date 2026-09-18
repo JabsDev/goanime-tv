@@ -373,8 +373,9 @@ class SubtitleJobManager {
     final out = <SrtCue>[];
     for (var i = 0; i < cues.length; i++) {
       if (_checkCancel(job)) return;
-      out.add(cues[i].withText(
-          await job.mt.translate(cues[i].text, src: job.srcLang, tgt: 'pt')));
+      final t =
+          await job.mt.translate(cues[i].text, src: job.srcLang, tgt: 'pt');
+      if (t.trim().isNotEmpty) out.add(cues[i].withText(t));
       final p = total == 0 ? 1.0 : (i + 1) / total;
       _set(JobPhase.translating, 0.05 + 0.9 * p, 'Traduzindo…',
           detail: total == 0 ? '' : '${i + 1}/$total falas');
@@ -475,8 +476,10 @@ class SubtitleJobManager {
         final out = <SrtCue>[];
         for (var i = 0; i < srcCues.length; i++) {
           if (_checkCancel(job)) return;
-          out.add(srcCues[i].withText(
-              await mt.translate(srcCues[i].text, src: mtSrc, tgt: 'pt')));
+          // Cue degenerada (só "!!!", eco, runaway): tradução vazia não
+          // vira legenda — espelha o `continue` do lado STT.
+          final t = await mt.translate(srcCues[i].text, src: mtSrc, tgt: 'pt');
+          if (t.trim().isNotEmpty) out.add(srcCues[i].withText(t));
           final p = (i + 1) / (srcCues.isEmpty ? 1 : srcCues.length);
           _set(JobPhase.translating, 0.73 + 0.24 * p, 'Traduzindo…',
               detail: srcCues.isEmpty ? '' : '${i + 1}/${srcCues.length} falas');

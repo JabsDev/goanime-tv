@@ -109,6 +109,13 @@ void main() {
       expect(stt?.id, 'whisper-tiny-ja');
     });
 
+    test('mt minima (Qwen 0.6B) pronto quando arquivo existe', () async {
+      await _fakeModel('qwen06-ja-pt-q4', ['model.gguf']);
+      final mt = await AiProviders.makeMt(
+          modelRootForTest: root, engine: 'minima');
+      expect(mt?.id, 'hymt-llm');
+    });
+
     test('mt leve (LFM 1.2B) pronto quando arquivo existe', () async {
       await _fakeModel('lfm12b-ja-pt-iq3m', ['model.gguf']);
       final mt = await AiProviders.makeMt(modelRootForTest: root);

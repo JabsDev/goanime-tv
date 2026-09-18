@@ -17,7 +17,7 @@ class SettingsService {
   static const _kOnboardingSeen = 'settings_onboarding_seen';
   static const _kAutoSkipIntro = 'settings_auto_skip_intro';
   static const _kSttModel = 'settings_ai_stt'; // 'tiny' | 'base'
-  static const _kMtEngine = 'settings_ai_mt'; // 'leve' | 'media' | 'completa'
+  static const _kMtEngine = 'settings_ai_mt'; // 'minima'|'leve'|'media'|'completa'
 
   bool? _userPref;
   bool _autoLite = false;
@@ -44,8 +44,9 @@ class SettingsService {
   ValueListenable<String> get sttModelListenable => _sttModelVN;
   String get sttModel => _sttModel;
 
-  /// Legenda IA: MT 'leve' (LFM 1.2B ~541MB, 5/6), 'media' (Hy-MT2 IQ3
-  /// ~859MB, 6/6) ou 'completa' (Hy-MT2 Q4 ~1,13GB, 6/6, via llama.cpp).
+  /// Legenda IA: MT 'minima' (Qwen 0.6B ~378MB, 4/6), 'leve' (LFM 1.2B
+  /// ~541MB, 5/6), 'media' (Hy-MT2 IQ3 ~859MB, 6/6) ou 'completa' (Hy-MT2
+  /// Q4 ~1,13GB, 6/6, via llama.cpp).
   String _mtEngine = 'leve';
   final ValueNotifier<String> _mtEngineVN = ValueNotifier<String>('leve');
   ValueListenable<String> get mtEngineListenable => _mtEngineVN;
@@ -127,7 +128,7 @@ class SettingsService {
   }
 
   Future<void> setMtEngine(String v) async {
-    _mtEngine = (v == 'completa' || v == 'media') ? v : 'leve';
+    _mtEngine = (v == 'minima' || v == 'media' || v == 'completa') ? v : 'leve';
     _mtEngineVN.value = _mtEngine;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kMtEngine, _mtEngine);

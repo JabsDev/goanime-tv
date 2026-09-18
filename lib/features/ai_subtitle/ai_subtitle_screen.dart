@@ -60,17 +60,19 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
     'small': 'whisper-small',
   };
 
-  /// Tradução em escada leve→media→completa (mesmo mapa do AiProviders).
-  static const _mtModels = ['leve', 'media', 'completa'];
+  /// Tradução em escada minima→leve→media→completa (mesmo mapa do AiProviders).
+  static const _mtModels = ['minima', 'leve', 'media', 'completa'];
   static const _mtModelIds = {
+    'minima': 'qwen06-ja-pt-q4',
     'leve': 'lfm12b-ja-pt-iq3m',
     'media': 'hymt-ja-pt-iq3m',
     'completa': 'hymt-ja-pt-q4',
   };
   static const _mtLabels = {
-    'leve': 'LFM 1.2B',
-    'media': 'Hy-MT2 IQ3',
-    'completa': 'Hy-MT2 Q4',
+    'minima': 'Qwen 0.6B Q4_K_M',
+    'leve': 'LFM 1.2B IQ3_M',
+    'media': 'Hy-MT2 IQ3_M',
+    'completa': 'Hy-MT2 Q4_K_M',
   };
 
   @override
@@ -558,31 +560,28 @@ class _ModelOptionRow extends StatelessWidget {
         future: const ModelManager().isReady(modelId),
         builder: (context, snap) {
           final ready = snap.data ?? false;
-          return Row(
+          final status = downloading != null
+              ? 'Baixando… ${(downloading! * 100).toInt()}%'
+              : '${ready ? 'instalado' : 'faltando'} · ${spec.mb} MB';
+          // Coluna em vez de card espremido ao lado do botão: em tela
+          // estreita o texto quebrava e colidia com o "Baixar".
+          return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: _OptionRow(
-                  label:
-                      '${selectLabel ?? spec.label} — ${ready ? 'instalado' : 'faltando'} (${spec.mb} MB)',
-                  description: downloading != null
-                      ? 'Baixando… ${(downloading! * 100).toInt()}%'
-                      : spec.hint,
-                  selected: selected,
-                  onTap: onSelect,
-                ),
+              _OptionRow(
+                label: '${selectLabel ?? spec.label}',
+                description: status,
+                selected: selected,
+                onTap: onSelect,
               ),
-              if (!ready && downloading == null) ...[
-                const SizedBox(width: 12),
+              if (!ready && downloading == null)
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  padding: const EdgeInsets.only(top: 8),
                   child: TVButton(
                     label: 'Baixar',
-                    width: 150,
                     onPressed: onDownload,
                   ),
                 ),
-              ],
             ],
           );
         },

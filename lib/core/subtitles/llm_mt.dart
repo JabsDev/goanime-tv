@@ -77,6 +77,33 @@ class LlmMtProvider extends MtProvider {
 
   static final _sentSplit = RegExp(r'(?<=[.!?…])\s+');
 
+  /// Peça sem conteúdo traduzível (só pontuação/símbolos — ex. "!!!" que
+  /// o STT alucina em música/efeito): nem entra no modelo, que ecoaria ou
+  /// introduziria ("Você é um útil assistente…"). JA/EN/PT com letra passa.
+  static final _hasContent =
+      RegExp(r'[A-Za-z\u00c0-\u00ff\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]');
+  static bool isJunk(String piece) => !_hasContent.hasMatch(piece);
+
+  /// Saída degenerada (runaway repetitivo tipo "lalala…" ou eco de "!!!"):
+  /// 20+ chars onde uma unidade de até 8 chars cobre ≥90% do texto
+  /// (case-insensitive) ou no máximo 2 distintos. Legenda real nunca
+  /// parece isso; risada longa ("hahaha…") cai aqui de propósito — é
+  /// ruído, não fala.
+  static bool isDegenerate(String text) {
+    final t = text.trim().toLowerCase();
+    if (t.length < 20) return false;
+    if (t.split('').toSet().length <= 2) return true;
+    for (var u = 1; u <= 8; u++) {
+      final unit = t.substring(0, u);
+      var i = 0;
+      while (i + u <= t.length && t.substring(i, i + u) == unit) {
+        i += u;
+      }
+      if (i / t.length >= 0.9) return true;
+    }
+    return false;
+  }
+
   /// Peça única nunca passa de ~500 chars (~360 tokens JA): cabe folgada
   /// no contexto sem truncar. Sem isto, alucinação longa do STT ia inteira
   /// num batch e o nativo abortava (SIGABRT do EP3).
@@ -123,16 +150,17 @@ class LlmMtProvider extends MtProvider {
     final srcCode = _llmCode(src);
     final tgtCode = _llmCode(tgt);
     if (srcCode == tgtCode) return text;
-    final parts = pieces(text);
+    final parts = pieces(text).where((p) => !isJunk(p));
     final out = <String>[];
     for (final p in parts) {
-      out.add(await ch
+      final t = await ch
           .translate(modelPath, p.trim(), srcLang: srcCode, tgtLang: tgtCode)
           .timeout(translateTimeout, onTimeout: () {
         throw StateError(
             'Tradução travou (timeout ${translateTimeout.inMinutes} min). '
             'Aparelho sem memória? Tente de novo.');
-      }));
+      });
+      if (!isDegenerate(t)) out.add(t);
     }
     return out.join(' ');
   }

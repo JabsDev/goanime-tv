@@ -53,11 +53,13 @@ class AiProviders {
   }
 
   /// MT via llama.cpp, em escada de tamanho/qualidade (gate próprio, 6 frases):
-  /// 'leve' = LFM 1.2B IQ3 (~541 MB, 5/6), 'media' = Hy-MT2 IQ3 (~859 MB,
-  /// 6/6), 'completa' = Hy-MT2 Q4 (~1,13 GB, 6/6). Q3 (~907 MB) segue no
-  /// catálogo p/ quem já baixou, mas sem engine (superado pelo IQ3).
+  /// 'minima' = Qwen 0.6B Q4 (~378 MB, 4/6), 'leve' = LFM 1.2B IQ3 (~541 MB,
+  /// 5/6), 'media' = Hy-MT2 IQ3 (~859 MB, 6/6), 'completa' = Hy-MT2 Q4
+  /// (~1,13 GB, 6/6). Q3 (~907 MB) segue no catálogo p/ quem já baixou,
+  /// mas sem engine (superado pelo IQ3).
   /// Todos cobrem JA→PT direto e EN→PT (Rota S).
   static const _mtIds = {
+    'minima': 'qwen06-ja-pt-q4',
     'leve': 'lfm12b-ja-pt-iq3m',
     'media': 'hymt-ja-pt-iq3m',
     'completa': 'hymt-ja-pt-q4',

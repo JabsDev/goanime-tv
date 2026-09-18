@@ -85,5 +85,29 @@ void main() {
       expect(LlmMtProvider.pieces('今日は良い天気です。').toList(),
           ['今日は良い天気です。']); // curta intacta
     });
+
+    test('isJunk: pontuação pura não entra no modelo', () {
+      expect(LlmMtProvider.isJunk('!!!'), isTrue);
+      expect(LlmMtProvider.isJunk('... ...'), isTrue);
+      expect(LlmMtProvider.isJunk('おはよう'), isFalse);
+      expect(LlmMtProvider.isJunk('Hello!'), isFalse);
+      expect(LlmMtProvider.isJunk(' Judiciário? '), isFalse);
+    });
+
+    test('isDegenerate: runaway repetitivo é lixo', () {
+      expect(LlmMtProvider.isDegenerate('Lalalalalalalalalalala'), isTrue);
+      expect(LlmMtProvider.isDegenerate('!!!!!!!!!!!!!!!!!!!!'), isTrue);
+      expect(LlmMtProvider.isDegenerate('Bom dia, tudo bem?'), isFalse);
+      expect(LlmMtProvider.isDegenerate('Oi!'), isFalse); // curta passa
+    });
+
+    test('peça lixo nem chama o nativo (vira string vazia)', () async {
+      final ch = _FakeLlm();
+      final mt = LlmMtProvider('/m/model.gguf', channelForTest: ch);
+      await mt.load();
+      expect(await mt.translate('!!! ... !!!', src: 'ja', tgt: 'pt'), '');
+      expect(ch.seenPath, isNull); // nativo nunca chamado
+      await mt.dispose();
+    });
   });
 }

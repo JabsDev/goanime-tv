@@ -26,7 +26,8 @@ void main() {
         'hymt-ja-pt-q3km',
         'hymt-ja-pt-q4',
         'hymt-ja-pt-iq3m',
-        'lfm12b-ja-pt-iq3m'
+        'lfm12b-ja-pt-iq3m',
+        'qwen06-ja-pt-q4'
       ]) {
         final spec = aiModelCatalog[id]!;
         expect(spec.files, ['model.gguf']);

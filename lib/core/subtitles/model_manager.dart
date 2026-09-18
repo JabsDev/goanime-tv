@@ -81,14 +81,14 @@ final aiModelCatalog = <String, AiModelSpec>{
   // MT JA→PT direta via llama.cpp (GGUF auto-contido, tokenizer embutido).
   // Q3_K_M comunitário (Jabs2, 6/6 no gate) e Q4_K_M oficial (tencent).
   'hymt-ja-pt-q3km': AiModelSpec(
-      id: 'hymt-ja-pt-q3km', label: 'Tradução JA→PT (Hy-MT2 Q3)',
+      id: 'hymt-ja-pt-q3km', label: 'Tradução JA→PT (Hy-MT2 Q3_K_M)',
       hint: 'Tradução · leva japonês ou inglês p/ português (passo 2 de 2)',
       mb: 907, sha256: 'PINAR', strongOnly: false,
       repo: 'Jabs2/Hy-MT2-1.8B-Q3_K_M-GGUF',
       remoteFiles: ['Hy-MT2-1.8B-Q3_K_M.gguf'],
       files: ['model.gguf']),
   'hymt-ja-pt-q4': AiModelSpec(
-      id: 'hymt-ja-pt-q4', label: 'Tradução JA→PT (Hy-MT2 Q4)',
+      id: 'hymt-ja-pt-q4', label: 'Tradução JA→PT (Hy-MT2 Q4_K_M)',
       hint: 'Tradução · igual ao Q3, com mais qualidade (passo 2 de 2)',
       mb: 1133, sha256: 'PINAR', strongOnly: false,
       repo: 'tencent/Hy-MT2-1.8B-GGUF',
@@ -97,7 +97,7 @@ final aiModelCatalog = <String, AiModelSpec>{
   // MT intermediária: Hy-MT2 com imatrix em dado JA-PT (gate 6/6 igual ao
   // Q4, ~274 MB menor). Repositório próprio (Jabs2) c/ README do gate.
   'hymt-ja-pt-iq3m': AiModelSpec(
-      id: 'hymt-ja-pt-iq3m', label: 'Tradução JA→PT (Hy-MT2 IQ3)',
+      id: 'hymt-ja-pt-iq3m', label: 'Tradução intermediária (Hy-MT2 IQ3_M)',
       hint: 'Tradução · qualidade do Q4 num arquivo menor (passo 2 de 2)',
       mb: 859, sha256: 'PINAR', strongOnly: false,
       repo: 'Jabs2/Hy-MT2-1.8B-IQ3_M-GGUF',
@@ -106,11 +106,21 @@ final aiModelCatalog = <String, AiModelSpec>{
   // MT leve: LFM2.5-1.2B com fine-tune JA-PT próprio (QLoRA 6000 steps,
   // gate 5/6; JA2 com honorífico ainda falha). Repositório próprio (Jabs2).
   'lfm12b-ja-pt-iq3m': AiModelSpec(
-      id: 'lfm12b-ja-pt-iq3m', label: 'Tradução leve (LFM 1.2B)',
+      id: 'lfm12b-ja-pt-iq3m', label: 'Tradução leve (LFM 1.2B IQ3_M)',
       hint: 'Tradução · menor e mais rápida, qualidade básica (passo 2 de 2)',
       mb: 541, sha256: 'PINAR', strongOnly: false,
       repo: 'Jabs2/LFM2.5-1.2B-JAPT-GGUF',
       remoteFiles: ['LFM2.5-1.2B-JAPT-IQ3_M.gguf'],
+      files: ['model.gguf']),
+  // MT mínima: Qwen3-0.6B com fine-tune JA-PT próprio (QLoRA 6000 steps,
+  // gate 4/6 sem alucinações bizarras — só trocas de palavra). A menor
+  // opção p/ aparelho fraco ou pouco disco. Repositório próprio (Jabs2).
+  'qwen06-ja-pt-q4': AiModelSpec(
+      id: 'qwen06-ja-pt-q4', label: 'Tradução mínima (Qwen 0.6B Q4_K_M)',
+      hint: 'Tradução · a menor opção, qualidade simples (passo 2 de 2)',
+      mb: 378, sha256: 'PINAR', strongOnly: false,
+      repo: 'Jabs2/Qwen3-0.6B-JAPT-GGUF',
+      remoteFiles: ['Qwen3-0.6B-JAPT-Q4_K_M.gguf'],
       files: ['model.gguf']),
 };
 
