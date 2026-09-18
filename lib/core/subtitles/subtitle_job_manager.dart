@@ -382,7 +382,10 @@ class SubtitleJobManager {
     }
     try {
       if (!_checkCancel(job)) {
-        await _finish(job, '${job.srcLang}-ai', SrtParser.format(out),
+        // Rewrap 42x2: fonte externa pode ter linha única longa; mpv não
+        // quebra sozinho (encolhe a fonte — ver QA sensevoice/VAD).
+        final fitted = SrtParser.postprocess(out);
+        await _finish(job, '${job.srcLang}-ai', SrtParser.format(fitted),
             SubtitleStore.sha256Of(job.srcSrt));
       }
     } finally {
@@ -478,7 +481,10 @@ class SubtitleJobManager {
           _set(JobPhase.translating, 0.73 + 0.24 * p, 'Traduzindo…',
               detail: srcCues.isEmpty ? '' : '${i + 1}/${srcCues.length} falas');
         }
-        await _finish(job, 'ja-ai', SrtParser.format(out),
+        // Pós STT+sensevoice: rewrap 42x2 + split proporcional do chunk
+        // (2ª frase não aparece adiantada) + shift +150ms do pré-roll VAD.
+        final fitted = SrtParser.postprocess(out, fromStt: true);
+        await _finish(job, 'ja-ai', SrtParser.format(fitted),
             SubtitleStore.sha256Of(job.videoUrl));
       } finally {
         await mt.dispose();

@@ -139,8 +139,9 @@ void main() {
       expect(f, isNotNull);
       final cues = SrtParser.parse(await f!.readAsString());
       expect(cues, hasLength(2));
-      expect(cues[0].start, const Duration(seconds: 1));
-      expect(cues[0].end, const Duration(seconds: 2));
+      // postprocess STT: +150ms do pré-roll VAD, duração clamp [1s, 7s].
+      expect(cues[0].start, const Duration(milliseconds: 1150));
+      expect(cues[0].end, const Duration(milliseconds: 2150));
       expect(cues[1].text, 'PT:Hello');
       expect(await jobs.list().toList(), isEmpty); // job file limpo
     });

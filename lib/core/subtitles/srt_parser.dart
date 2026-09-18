@@ -79,6 +79,174 @@ class SrtParser {
     return sb.toString();
   }
 
+  /// Formatação estilo legenda TV: no máx 2 linhas de ~42 chars.
+  /// Determinístico (não depende do humor do LLM): quebra por palavra,
+  /// equilibra as 2 linhas pelo ponto mais próximo do meio.
+  static const maxLineChars = 42;
+  static const maxLines = 2;
+
+  /// Compensação do pré-roll do VAD (silero entrega o chunk com ~100-200ms
+  /// de silêncio antes da fala → legenda "adiantada"). Só no path STT;
+  /// Rota S preserva os tempos da fonte.
+  static const sttLeadCompensation = Duration(milliseconds: 150);
+
+  static String rewrap(String text) {
+    final words =
+        text.replaceAll(RegExp(r'\s+'), ' ').trim().split(' ').where((w) => w.isNotEmpty).toList();
+    if (words.isEmpty) return '';
+    final lines = <String>[];
+    var cur = StringBuffer();
+    for (final w in words) {
+      // Palavra gigante (URL, onomatopeia JA): quebra dura, sem loop infinito.
+      var word = w;
+      while (word.length > maxLineChars) {
+        if (cur.isNotEmpty) {
+          lines.add(cur.toString());
+          cur = StringBuffer();
+        }
+        lines.add(word.substring(0, maxLineChars));
+        word = word.substring(maxLineChars);
+      }
+      final add = (cur.isEmpty ? '' : ' ') + word;
+      if (cur.length + add.length <= maxLineChars) {
+        cur.write(add);
+      } else {
+        lines.add(cur.toString());
+        cur = StringBuffer(word);
+      }
+    }
+    if (cur.isNotEmpty) lines.add(cur.toString());
+    if (lines.length <= maxLines) {
+      if (lines.length == 2) return _balance(lines[0], lines[1]);
+      return lines.join('\n');
+    }
+    // >2 linhas: não joga fora, só reembala em 2 (o split proporcional
+    // abaixo cuida de dividir a cue quando couber). Fallback honesto.
+    return _balance(lines.sublist(0, lines.length ~/ 2).join(' '),
+        lines.sublist(lines.length ~/ 2).join(' '));
+  }
+
+  /// Junta 2 metades movendo a fronteira p/ o espaço mais perto do meio.
+  static String _balance(String a, String b) {
+    final full = ('$a $b').replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (full.length <= maxLineChars + 1) return full.replaceFirst(' ', '\n');
+    final mid = full.length ~/ 2;
+    var best = -1;
+    var bestDist = 1 << 30;
+    for (var i = 0; i < full.length; i++) {
+      if (full[i] != ' ') continue;
+      final d = (i - mid).abs();
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    if (best < 0) return full; // sem espaço: linha única longa (raro)
+    final l1 = full.substring(0, best);
+    final l2 = full.substring(best + 1);
+    if (l1.length <= maxLineChars && l2.length <= maxLineChars) {
+      return '$l1\n$l2';
+    }
+    return full; // excede mesmo: split proporcional divide a cue adiante
+  }
+
+  /// Pós-processamento aplicado antes de salvar o .srt:
+  /// rewrap 42x2 + divide cue longa em N cues de ≤2 linhas com tempo
+  /// proporcional aos chars + clamp [1s, 7s] + (STT) shift +150ms.
+  /// Resolve os 2 sintomas do QA: linha única gigante (mpv encolhe a fonte
+  /// p/ caber) e 2ª frase do chunk aparecendo adiantada.
+  static List<SrtCue> postprocess(List<SrtCue> cues, {bool fromStt = false}) {
+    final out = <SrtCue>[];
+    for (final c in cues) {
+      var start = c.start;
+      if (fromStt) {
+        start += sttLeadCompensation;
+        if (start >= c.end - const Duration(milliseconds: 400)) {
+          start = c.start; // chunk curtíssimo: não inverte
+        }
+      }
+      final chunks = _splitGroups(c.text);
+      if (chunks.length <= 1) {
+        final dur = _clampDur(c.end - start);
+        out.add(SrtCue(
+            index: 0, start: start, end: start + dur, text: chunks.single));
+        continue;
+      }
+      final total = chunks.fold(0, (n, g) => n + g.length);
+      var cursor = start;
+      final span = c.end - start;
+      for (var i = 0; i < chunks.length; i++) {
+        final share = total == 0 ? 1 / chunks.length : chunks[i].length / total;
+        var dur = Duration(
+            milliseconds: (span.inMilliseconds * share).round());
+        dur = _clampDur(dur);
+        if (i == chunks.length - 1) {
+          // Última parte: estica até o fim do chunk (sem ultrapassar 7s).
+          final rest = c.end - cursor;
+          if (rest < dur) dur = _clampDur(rest);
+        }
+        if (cursor + dur > c.end) dur = c.end - cursor;
+        if (dur.inMilliseconds < 400) dur = const Duration(milliseconds: 400);
+        out.add(SrtCue(index: 0, start: cursor, end: cursor + dur, text: chunks[i]));
+        cursor += dur + const Duration(milliseconds: 80);
+        if (cursor >= c.end) break;
+      }
+    }
+    // Reindexa + evita sobreposição com a próxima cue (shift pode colar).
+    for (var i = 0; i < out.length; i++) {
+      final c = out[i];
+      var end = c.end;
+      if (i + 1 < out.length && end > out[i + 1].start) {
+        end = out[i + 1].start - const Duration(milliseconds: 80);
+        if (end <= c.start + const Duration(milliseconds: 400)) {
+          end = c.start + const Duration(milliseconds: 400);
+        }
+      }
+      out[i] = SrtCue(index: i + 1, start: c.start, end: end, text: c.text);
+    }
+    return out;
+  }
+
+  /// Quebra o texto em grupos de ≤2 linhas balanceadas (cada grupo vira 1 cue).
+  static List<String> _splitGroups(String text) {
+    final words =
+        text.replaceAll(RegExp(r'\s+'), ' ').trim().split(' ').where((w) => w.isNotEmpty).toList();
+    if (words.isEmpty) return [''];
+    final lines = <String>[];
+    var cur = StringBuffer();
+    for (final w in words) {
+      var word = w;
+      while (word.length > maxLineChars) {
+        if (cur.isNotEmpty) {
+          lines.add(cur.toString());
+          cur = StringBuffer();
+        }
+        lines.add(word.substring(0, maxLineChars));
+        word = word.substring(maxLineChars);
+      }
+      final add = (cur.isEmpty ? '' : ' ') + word;
+      if (cur.length + add.length <= maxLineChars) {
+        cur.write(add);
+      } else {
+        lines.add(cur.toString());
+        cur = StringBuffer(word);
+      }
+    }
+    if (cur.isNotEmpty) lines.add(cur.toString());
+    final groups = <String>[];
+    for (var i = 0; i < lines.length; i += maxLines) {
+      final g = lines.sublist(i, (i + maxLines).clamp(0, lines.length));
+      groups.add(g.length == 2 ? _balance(g[0], g[1]) : g.single);
+    }
+    return groups;
+  }
+
+  static Duration _clampDur(Duration d) {
+    if (d < const Duration(seconds: 1)) return const Duration(seconds: 1);
+    if (d > const Duration(seconds: 7)) return const Duration(seconds: 7);
+    return d;
+  }
+
   /// Detecta idioma da legenda: tag explícita > nome do arquivo > null.
   /// Retorna 'en', 'es', 'ja' ou null (picker manual no dialog).
   static String? detectLang({String? tag, String? filename}) {

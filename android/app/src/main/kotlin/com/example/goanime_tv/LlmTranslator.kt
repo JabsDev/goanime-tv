@@ -99,7 +99,8 @@ class LlmTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandle
         )[tgtLang]
             ?: throw IllegalArgumentException("alvo $tgtLang sem suporte")
         val prompt = "<|im_start|>user\n" +
-            "Translate the following text into $tgt. " +
+            "Translate the following subtitle text into $tgt. " +
+            "Keep it concise, as subtitles: at most 2 short lines. " +
             "Note that you should only output the translated result " +
             "without any additional explanation:\n\n$text<|im_end|>\n" +
             "<|im_start|>assistant\n"
