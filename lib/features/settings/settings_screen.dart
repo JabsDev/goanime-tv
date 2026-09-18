@@ -236,15 +236,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _ModeOption(
                             label: 'Tradução leve (padrão)',
                             description:
-                                'Marian EN→PT (120 MB) — qualquer aparelho',
+                                'LFM 1.2B (541 MB) — qualquer aparelho, qualidade básica',
                             selected: mt == 'leve',
                             onTap: () => SettingsService.instance
                                 .setMtEngine('leve'),
                           ),
                           _ModeOption(
+                            label: 'Tradução intermediária',
+                            description:
+                                'Hy-MT2 IQ3 (859 MB) — qualidade alta em arquivo menor',
+                            selected: mt == 'media',
+                            onTap: () => SettingsService.instance
+                                .setMtEngine('media'),
+                          ),
+                          _ModeOption(
                             label: 'Tradução completa',
                             description:
-                                'NLLB JA→PT direto (1.28 GB) — só aparelho forte com 2 GB livres',
+                                'Hy-MT2 Q4 (1,13 GB) — máxima qualidade, aparelho forte',
                             selected: mt == 'completa',
                             onTap: () => SettingsService.instance
                                 .setMtEngine('completa'),
@@ -277,6 +285,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _ModelRow(modelId: 'whisper-base', label: 'Voz completa (base)'),
                     _ModelRow(modelId: 'whisper-small', label: 'Voz superior (small)'),
                     const _ModelGroupTitle('Tradução — leva p/ português'),
+                    _ModelRow(
+                        modelId: 'lfm12b-ja-pt-iq3m',
+                        label: 'Tradução leve (LFM 1.2B)'),
+                    _ModelRow(
+                        modelId: 'hymt-ja-pt-iq3m',
+                        label: 'Tradução intermediária (Hy-MT2 IQ3)'),
                     _ModelRow(
                         modelId: 'hymt-ja-pt-q3km',
                         label: 'Tradução JA→PT (Hy-MT2 Q3)'),

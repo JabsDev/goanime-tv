@@ -46,7 +46,7 @@ class AiSubtitleScreen extends StatefulWidget {
 class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
   late String _route; // 'translate' | 'transcribe'
   late String _sttId; // tiny | base | small | sensevoice
-  late String _mtId; // leve | completa
+  late String _mtId; // leve | media | completa
   Future<File?>? _cached;
   final Map<String, double> _downloading = {};
   List<SubtitleRef> _cands = [];
@@ -58,6 +58,19 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
     'sensevoice': 'sensevoice-ja',
     'base': 'whisper-base',
     'small': 'whisper-small',
+  };
+
+  /// Tradução em escada leve→media→completa (mesmo mapa do AiProviders).
+  static const _mtModels = ['leve', 'media', 'completa'];
+  static const _mtModelIds = {
+    'leve': 'lfm12b-ja-pt-iq3m',
+    'media': 'hymt-ja-pt-iq3m',
+    'completa': 'hymt-ja-pt-q4',
+  };
+  static const _mtLabels = {
+    'leve': 'LFM 1.2B',
+    'media': 'Hy-MT2 IQ3',
+    'completa': 'Hy-MT2 Q4',
   };
 
   @override
@@ -183,8 +196,7 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
       return;
     }
     // Hy-MT2 cobre JA→PT direto e EN→PT (tiny) no mesmo provider.
-    final mt = await AiProviders.makeMt(
-        engine: _mtId == 'completa' ? 'completa' : 'leve');
+    final mt = await AiProviders.makeMt(engine: _mtId);
     if (mt == null) {
       _snack('Modelo de tradução não instalado. Baixe abaixo.');
       return;
@@ -297,22 +309,19 @@ class _AiSubtitleScreenState extends State<AiSubtitleScreen> {
           ],
           const _SubTitle('Tradução — leva o texto p/ português'),
           _ModelOptionRow(
-            modelId:
-                _mtId == 'completa' ? 'hymt-ja-pt-q4' : 'hymt-ja-pt-q3km',
-            selectLabel:
-                _mtId == 'completa' ? 'Hy-MT2 Q4' : 'Hy-MT2 Q3',
+            modelId: _mtModelIds[_mtId] ?? _mtModelIds['leve']!,
+            selectLabel: _mtLabels[_mtId] ?? _mtLabels['leve']!,
             selected: true,
             onSelect: () {
-              final next = _mtId == 'completa' ? 'leve' : 'completa';
+              final i = _mtModels.indexOf(_mtId);
+              final next = _mtModels[(i + 1) % _mtModels.length];
               setState(() => _mtId = next);
               SettingsService.instance.setMtEngine(next);
             },
-            downloading: _downloading[_mtId == 'completa'
-                ? 'hymt-ja-pt-q4'
-                : 'hymt-ja-pt-q3km'],
-            onDownload: () => _downloadModel(_mtId == 'completa'
-                ? 'hymt-ja-pt-q4'
-                : 'hymt-ja-pt-q3km'),
+            downloading: _downloading[
+                _mtModelIds[_mtId] ?? _mtModelIds['leve']!],
+            onDownload: () => _downloadModel(
+                _mtModelIds[_mtId] ?? _mtModelIds['leve']!),
           ),
           const SizedBox(height: 24),
           _SectionTitle('3 · Gerar'),

@@ -43,6 +43,14 @@ void main() {
       await SettingsService.instance.setSttModel('tiny');
     });
 
+    test('mt media é válido e persiste', () async {
+      await SettingsService.instance.setMtEngine('media');
+      expect(SettingsService.instance.mtEngine, 'media');
+      await SettingsService.instance.init();
+      expect(SettingsService.instance.mtEngine, 'media');
+      await SettingsService.instance.setMtEngine('leve');
+    });
+
     test('valor inválido cai no padrão', () async {
       await SettingsService.instance.setSttModel('xxx');
       await SettingsService.instance.setMtEngine('yyy');
@@ -101,9 +109,16 @@ void main() {
       expect(stt?.id, 'whisper-tiny-ja');
     });
 
-    test('mt leve (Hy-MT2 Q3) pronto quando arquivo existe', () async {
-      await _fakeModel('hymt-ja-pt-q3km', ['model.gguf']);
+    test('mt leve (LFM 1.2B) pronto quando arquivo existe', () async {
+      await _fakeModel('lfm12b-ja-pt-iq3m', ['model.gguf']);
       final mt = await AiProviders.makeMt(modelRootForTest: root);
+      expect(mt?.id, 'hymt-llm');
+    });
+
+    test('mt media (Hy-MT2 IQ3) pronto quando arquivo existe', () async {
+      await _fakeModel('hymt-ja-pt-iq3m', ['model.gguf']);
+      final mt = await AiProviders.makeMt(
+          modelRootForTest: root, engine: 'media');
       expect(mt?.id, 'hymt-llm');
     });
 

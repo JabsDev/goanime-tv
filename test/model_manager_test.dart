@@ -22,7 +22,12 @@ void main() {
     });
 
     test('GGUF Hy-MT2 auto-contido (1 arquivo → model.gguf)', () {
-      for (final id in ['hymt-ja-pt-q3km', 'hymt-ja-pt-q4']) {
+      for (final id in [
+        'hymt-ja-pt-q3km',
+        'hymt-ja-pt-q4',
+        'hymt-ja-pt-iq3m',
+        'lfm12b-ja-pt-iq3m'
+      ]) {
         final spec = aiModelCatalog[id]!;
         expect(spec.files, ['model.gguf']);
         expect(spec.remoteFiles.single.endsWith('.gguf'), isTrue);

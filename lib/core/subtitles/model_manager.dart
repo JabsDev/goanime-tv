@@ -94,6 +94,24 @@ final aiModelCatalog = <String, AiModelSpec>{
       repo: 'tencent/Hy-MT2-1.8B-GGUF',
       remoteFiles: ['Hy-MT2-1.8B-Q4_K_M.gguf'],
       files: ['model.gguf']),
+  // MT intermediária: Hy-MT2 com imatrix em dado JA-PT (gate 6/6 igual ao
+  // Q4, ~274 MB menor). Repositório próprio (Jabs2) c/ README do gate.
+  'hymt-ja-pt-iq3m': AiModelSpec(
+      id: 'hymt-ja-pt-iq3m', label: 'Tradução JA→PT (Hy-MT2 IQ3)',
+      hint: 'Tradução · qualidade do Q4 num arquivo menor (passo 2 de 2)',
+      mb: 859, sha256: 'PINAR', strongOnly: false,
+      repo: 'Jabs2/Hy-MT2-1.8B-IQ3_M-GGUF',
+      remoteFiles: ['Hy-MT2-1.8B-IQ3_M.gguf'],
+      files: ['model.gguf']),
+  // MT leve: LFM2.5-1.2B com fine-tune JA-PT próprio (QLoRA 6000 steps,
+  // gate 5/6; JA2 com honorífico ainda falha). Repositório próprio (Jabs2).
+  'lfm12b-ja-pt-iq3m': AiModelSpec(
+      id: 'lfm12b-ja-pt-iq3m', label: 'Tradução leve (LFM 1.2B)',
+      hint: 'Tradução · menor e mais rápida, qualidade básica (passo 2 de 2)',
+      mb: 541, sha256: 'PINAR', strongOnly: false,
+      repo: 'Jabs2/LFM2.5-1.2B-JAPT-GGUF',
+      remoteFiles: ['LFM2.5-1.2B-JAPT-IQ3_M.gguf'],
+      files: ['model.gguf']),
 };
 
 /// Download de modelos: só Wi-Fi (flag do chamador), Range/resume, sha256.

@@ -52,10 +52,14 @@ class AiProviders {
     return SherpaSttProvider(dir, task: spec.$2, sttKind: spec.$3);
   }
 
-  /// MT Hy-MT2 via llama.cpp: 'leve' = Q3_K_M (~907 MB), 'completa' = Q4_K_M
-  /// (~1,13 GB). Mesmo provider cobre JA→PT direto e EN→PT (Rota S).
+  /// MT via llama.cpp, em escada de tamanho/qualidade (gate próprio, 6 frases):
+  /// 'leve' = LFM 1.2B IQ3 (~541 MB, 5/6), 'media' = Hy-MT2 IQ3 (~859 MB,
+  /// 6/6), 'completa' = Hy-MT2 Q4 (~1,13 GB, 6/6). Q3 (~907 MB) segue no
+  /// catálogo p/ quem já baixou, mas sem engine (superado pelo IQ3).
+  /// Todos cobrem JA→PT direto e EN→PT (Rota S).
   static const _mtIds = {
-    'leve': 'hymt-ja-pt-q3km',
+    'leve': 'lfm12b-ja-pt-iq3m',
+    'media': 'hymt-ja-pt-iq3m',
     'completa': 'hymt-ja-pt-q4',
   };
 
