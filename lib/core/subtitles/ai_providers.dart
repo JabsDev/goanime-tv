@@ -32,11 +32,41 @@ class AiProviders {
 
   /// Mapeamento Settings → (modelo, task, kind). tiny traduz ja→en (rápido);
   /// base/small/sensevoice transcrevem ja (melhor; depois Hy-MT2 direto).
-  static const _sttKinds = {
-    'tiny': ('whisper-tiny-ja', 'translate', 'whisper'),
-    'base': ('whisper-base', 'transcribe', 'whisper'),
-    'small': ('whisper-small', 'transcribe', 'whisper'),
-    'sensevoice': ('sensevoice-ja', 'transcribe', 'sensevoice'),
+  /// Mapa publicado (fonte única de verdade — telas consomem, nunca copiam).
+  static const sttTiers = <String, ({String id, String task, String kind})>{
+    'tiny': (id: 'whisper-tiny-ja', task: 'translate', kind: 'whisper'),
+    'sensevoice': (id: 'sensevoice-ja', task: 'transcribe', kind: 'sensevoice'),
+    'base': (id: 'whisper-base', task: 'transcribe', kind: 'whisper'),
+    'small': (id: 'whisper-small', task: 'transcribe', kind: 'whisper'),
+  };
+  static const sttTierOrder = ['tiny', 'sensevoice', 'base', 'small'];
+
+  /// Labels curtos p/ as linhas de modelo (o `label` do catálogo é longo).
+  static const sttTierLabels = {
+    'tiny': 'Whisper tiny',
+    'sensevoice': 'SenseVoice',
+    'base': 'Whisper base',
+    'small': 'Whisper small',
+  };
+
+  /// MT via llama.cpp, em escada de tamanho/qualidade (gate próprio, 6 frases):
+  /// 'minima' = Qwen 0.6B Q4 (~378 MB, 4/6), 'leve' = LFM 1.2B IQ3 (~541 MB,
+  /// 5/6), 'media' = Hy-MT2 IQ3 (~859 MB, 6/6), 'completa' = Hy-MT2 Q4
+  /// (~1,13 GB, 6/6). Q3 (~907 MB) segue no catálogo p/ quem já baixou,
+  /// mas sem engine (superado pelo IQ3).
+  /// Todos cobrem JA→PT direto e EN→PT (Rota S).
+  static const mtTiers = <String, String>{
+    'minima': 'qwen06-ja-pt-q4',
+    'leve': 'lfm12b-ja-pt-iq3m',
+    'media': 'hymt-ja-pt-iq3m',
+    'completa': 'hymt-ja-pt-q4',
+  };
+  static const mtTierOrder = ['minima', 'leve', 'media', 'completa'];
+  static const mtTierLabels = {
+    'minima': 'Qwen 0.6B Q4_K_M',
+    'leve': 'LFM 1.2B IQ3_M',
+    'media': 'Hy-MT2 IQ3_M',
+    'completa': 'Hy-MT2 Q4_K_M',
   };
 
   static Future<SttProvider?> makeStt({
@@ -45,11 +75,11 @@ class AiProviders {
     String? modelDirForTest,
   }) async {
     final kind = stt ?? SettingsService.instance.sttModel;
-    final spec = _sttKinds[kind] ?? _sttKinds['tiny']!;
+    final spec = sttTiers[kind] ?? sttTiers['tiny']!;
     final root = await modelsRoot(forTest: modelRootForTest);
-    final dir = modelDirForTest ?? '${root.path}/${spec.$1}';
-    if (!await _ready(dir, spec.$1)) return null;
-    return SherpaSttProvider(dir, task: spec.$2, sttKind: spec.$3);
+    final dir = modelDirForTest ?? '${root.path}/${spec.id}';
+    if (!await _ready(dir, spec.id)) return null;
+    return SherpaSttProvider(dir, task: spec.task, sttKind: spec.kind);
   }
 
   /// MT via llama.cpp, em escada de tamanho/qualidade (gate próprio, 6 frases):
@@ -58,25 +88,38 @@ class AiProviders {
   /// (~1,13 GB, 6/6). Q3 (~907 MB) segue no catálogo p/ quem já baixou,
   /// mas sem engine (superado pelo IQ3).
   /// Todos cobrem JA→PT direto e EN→PT (Rota S).
-  static const _mtIds = {
-    'minima': 'qwen06-ja-pt-q4',
-    'leve': 'lfm12b-ja-pt-iq3m',
-    'media': 'hymt-ja-pt-iq3m',
-    'completa': 'hymt-ja-pt-q4',
-  };
-
   static Future<MtProvider?> makeMt({
     Directory? modelRootForTest,
     String? engine,
     String? modelDirForTest,
   }) async {
     final kind = engine ?? SettingsService.instance.mtEngine;
-    final modelId = _mtIds[kind] ?? _mtIds['leve']!;
+    final modelId = mtTiers[kind] ?? mtTiers['leve']!;
     final root = await modelsRoot(forTest: modelRootForTest);
     final dir = modelDirForTest ?? '${root.path}/$modelId';
     if (!await _ready(dir, modelId)) return null;
     return LlmMtProvider('$dir/model.gguf',
         expectedMb: aiModelCatalog[modelId]!.mb);
+  }
+
+  /// 1 único probe p/ todos os tiers (tela e card não re-probam por linha
+  /// — antes cada `_ModelRow`/`_ModelOptionRow` rodava um FutureBuilder de
+  /// IO por build). Falha de IO vira "faltando" (nunca quebra a tela).
+  static Future<Map<String, bool>> readyMap(
+    Iterable<String> ids, {
+    Directory? modelRootForTest,
+  }) async {
+    final root = await modelsRoot(forTest: modelRootForTest);
+    final out = <String, bool>{};
+    for (final id in ids) {
+      final dir = '${root.path}/$id';
+      try {
+        out[id] = await _ready(dir, id);
+      } catch (_) {
+        out[id] = false;
+      }
+    }
+    return out;
   }
 
   /// Rota S (EN/ES→PT) e transcribe (JA→PT) usam o mesmo provider Hy-MT2.

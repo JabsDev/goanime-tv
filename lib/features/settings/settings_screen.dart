@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
+import '../../core/subtitles/ai_providers.dart';
 import '../../core/subtitles/model_manager.dart';
 import '../../core/subtitles/subtitle_store.dart';
 import '../../core/updater/update_service.dart';
+import '../../core/utils/device_capability.dart';
 import '../../core/utils/nsfw_filter.dart';
 import '../../shared/widgets/app_top_bar.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import '../../shared/widgets/tv_button.dart';
+import '../ai_subtitle/ai_model_row.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -18,6 +21,50 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  /// 1 único probe p/ todos os tiers (linha NÃO re-proba por build).
+  Future<Map<String, bool>> _aiStatuses = AiProviders.readyMap(
+      AiProviders.sttTiers.values.map((t) => t.id)
+          .followedBy(AiProviders.mtTiers.values));
+  final Map<String, double> _downloading = {};
+
+  @override
+  void initState() {
+    super.initState();
+    DeviceCapability.isLowEnd().then((low) {
+      if (mounted) setState(() => _lowEnd = low);
+    });
+  }
+
+  bool? _lowEnd;
+
+  Future<void> _download(String modelId) async {
+    setState(() => _downloading[modelId] = 0);
+    try {
+      await const ModelManager().downloadModel(
+        modelId,
+        onProgress: (_, p) {
+          if (mounted) setState(() => _downloading[modelId] = p);
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _aiStatuses = AiProviders.readyMap(
+              AiProviders.sttTiers.values.map((t) => t.id)
+                  .followedBy(AiProviders.mtTiers.values));
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Modelo pronto.')));
+      }
+    } on ModelDownloadException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _downloading.remove(modelId));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -200,30 +247,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           SettingsService.instance.sttModelListenable,
                       builder: (context, stt, _) => Column(
                         children: [
-                          _ModeOption(
-                            label: 'Transcrição leve (padrão)',
-                            description:
-                                'Whisper tiny-ja (78 MB) — roda no stick fraco',
-                            selected: stt == 'tiny',
-                            onTap: () => SettingsService.instance
-                                .setSttModel('tiny'),
-                          ),
-                          _ModeOption(
-                            label: 'Transcrição completa',
-                            description:
-                                'Whisper base (170 MB) — japonês melhor, aparelho médio+',
-                            selected: stt == 'base',
-                            onTap: () => SettingsService.instance
-                                .setSttModel('base'),
-                          ),
-                          _ModeOption(
-                            label: 'Transcrição superior',
-                            description:
-                                'Whisper small (380 MB) — bem melhor em JA, só aparelho forte',
-                            selected: stt == 'small',
-                            onTap: () => SettingsService.instance
-                                .setSttModel('small'),
-                          ),
+                          for (final tier in AiProviders.sttTierOrder)
+                            AiModelRow(
+                              heading: 'Voz',
+                              tiers: [tier],
+                              tierIds: {
+                                for (final e in AiProviders.sttTiers.entries)
+                                  e.key: e.value.id,
+                              },
+                              tierLabels: AiProviders.sttTierLabels,
+                              selected: tier,
+                              marked: stt == tier,
+                              onSelect: (_) =>
+                                  SettingsService.instance.setSttModel(tier),
+                              statuses: _aiStatuses,
+                              downloading: _downloading,
+                              onDownload: _download,
+                              lowEnd: _lowEnd ?? false,
+                            ),
                         ],
                       ),
                     ),
@@ -233,38 +274,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           SettingsService.instance.mtEngineListenable,
                       builder: (context, mt, _) => Column(
                         children: [
-                          _ModeOption(
-                            label: 'Tradução mínima',
-                            description:
-                                'Qwen 0.6B Q4_K_M (378 MB) — cabe em qualquer lugar, qualidade simples',
-                            selected: mt == 'minima',
-                            onTap: () => SettingsService.instance
-                                .setMtEngine('minima'),
-                          ),
-                          _ModeOption(
-                            label: 'Tradução leve (padrão)',
-                            description:
-                                'LFM 1.2B IQ3_M (541 MB) — qualquer aparelho, qualidade básica',
-                            selected: mt == 'leve',
-                            onTap: () => SettingsService.instance
-                                .setMtEngine('leve'),
-                          ),
-                          _ModeOption(
-                            label: 'Tradução intermediária',
-                            description:
-                                'Hy-MT2 IQ3_M (859 MB) — qualidade alta em arquivo menor',
-                            selected: mt == 'media',
-                            onTap: () => SettingsService.instance
-                                .setMtEngine('media'),
-                          ),
-                          _ModeOption(
-                            label: 'Tradução completa',
-                            description:
-                                'Hy-MT2 Q4_K_M (1,13 GB) — máxima qualidade, aparelho forte',
-                            selected: mt == 'completa',
-                            onTap: () => SettingsService.instance
-                                .setMtEngine('completa'),
-                          ),
+                          for (final tier in AiProviders.mtTierOrder)
+                            AiModelRow(
+                              heading: 'Tradução',
+                              tiers: [tier],
+                              tierIds: AiProviders.mtTiers,
+                              tierLabels: AiProviders.mtTierLabels,
+                              selected: tier,
+                              marked: mt == tier,
+                              onSelect: (_) =>
+                                  SettingsService.instance.setMtEngine(tier),
+                              statuses: _aiStatuses,
+                              downloading: _downloading,
+                              onDownload: _download,
+                              lowEnd: _lowEnd ?? false,
+                            ),
                         ],
                       ),
                     ),
@@ -272,44 +296,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _AiStorageRow(),
                     const SizedBox(height: 16),
                     const Text(
-                      'Modelos (HuggingFace, só Wi-Fi)',
+                      'Áudio — ajuda a transcrição',
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: 15,
                         fontWeight: FontWeight.bold,
-                        color: ThemeConstants.white,
-                      ),
-                    ),
-                    const Text(
-                      'Voz transforma áudio em texto; tradução leva p/ português.',
-                      style: TextStyle(
-                        fontSize: 14,
                         color: ThemeConstants.textSecondary,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    const _ModelGroupTitle('Voz — transcreve o áudio'),
-                    _ModelRow(modelId: 'whisper-tiny-ja', label: 'Voz leve (tiny)'),
-                    _ModelRow(modelId: 'sensevoice-ja', label: 'Voz JA dedicada (SenseVoice)'),
-                    _ModelRow(modelId: 'whisper-base', label: 'Voz completa (base)'),
-                    _ModelRow(modelId: 'whisper-small', label: 'Voz superior (small)'),
-                    const _ModelGroupTitle('Tradução — leva p/ português'),
-                    _ModelRow(
-                        modelId: 'qwen06-ja-pt-q4',
-                        label: 'Tradução mínima (Qwen 0.6B Q4_K_M)'),
-                    _ModelRow(
-                        modelId: 'lfm12b-ja-pt-iq3m',
-                        label: 'Tradução leve (LFM 1.2B IQ3_M)'),
-                    _ModelRow(
-                        modelId: 'hymt-ja-pt-iq3m',
-                        label: 'Tradução intermediária (Hy-MT2 IQ3_M)'),
-                    _ModelRow(
-                        modelId: 'hymt-ja-pt-q3km',
-                        label: 'Tradução JA→PT (Hy-MT2 Q3_K_M)'),
-                    _ModelRow(
-                        modelId: 'hymt-ja-pt-q4',
-                        label: 'Tradução JA→PT (Hy-MT2 Q4_K_M)'),
-                    const _ModelGroupTitle('Áudio — ajuda a transcrição'),
-                    _ModelRow(modelId: 'silero-vad', label: 'VAD silero (opcional)'),
+                    AiModelRow(
+                      heading: 'Áudio',
+                      tiers: const ['vad'],
+                      tierIds: const {'vad': 'silero-vad'},
+                      tierLabels: const {'vad': 'VAD silero (opcional)'},
+                      selected: 'vad',
+                      onSelect: (_) {},
+                      statuses: _aiStatuses,
+                      downloading: _downloading,
+                      onDownload: _download,
+                    ),
                     const SizedBox(height: 32),
                     const Text(
                       'Atualizações',
@@ -343,123 +347,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Subtítulo de categoria na lista de modelos.
-class _ModelGroupTitle extends StatelessWidget {
-  final String text;
-  const _ModelGroupTitle(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 10, bottom: 2),
-      child: Text(text,
-          style: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-            color: ThemeConstants.textSecondary,
-          )),
-    );
-  }
-}
-
-/// Linha de status + download de um modelo (D-pad: TVButton focável).
-/// Mostra Instalado/Faltando + MB do catálogo; baixa do HF só no Wi-Fi
-/// (ModelManager recusa rede metered) com resume + progresso.
-class _ModelRow extends StatefulWidget {
-  final String modelId;
-  final String label;
-  const _ModelRow({required this.modelId, required this.label});
-
-  @override
-  State<_ModelRow> createState() => _ModelRowState();
-}
-
-class _ModelRowState extends State<_ModelRow> {
-  Future<bool>? _ready;
-  double? _progress;
-
-  @override
-  void initState() {
-    super.initState();
-    _check();
-  }
-
-  void _check() {
-    setState(() {
-      _progress = null;
-      _ready = const ModelManager().isReady(widget.modelId);
-    });
-  }
-
-  Future<void> _download() async {
-    setState(() => _progress = 0);
-    try {
-      await const ModelManager().downloadModel(
-        widget.modelId,
-        onProgress: (_, p) {
-          if (mounted) setState(() => _progress = p);
-        },
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${widget.label} pronto.')));
-    } on ModelDownloadException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
-    } finally {
-      if (mounted) _check();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final spec = aiModelCatalog[widget.modelId]!;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: FutureBuilder<bool>(
-        future: _ready,
-        builder: (context, snap) {
-          final ready = snap.data ?? false;
-          // Coluna em vez de linha espremida: título + status numa tela
-          // estreita quebravam em 3 linhas e colidiam com o botão.
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(widget.label,
-                  style: const TextStyle(
-                      color: Colors.white, fontSize: 16)),
-              const SizedBox(height: 2),
-              Text(
-                  '${ready ? 'instalado' : 'faltando'} · ${spec.mb} MB',
-                  style: const TextStyle(
-                      color: ThemeConstants.textSecondary,
-                      fontSize: 14)),
-              if (_progress != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: LinearProgressIndicator(
-                      value: _progress,
-                      backgroundColor: Colors.white24,
-                      valueColor: const AlwaysStoppedAnimation(
-                          ThemeConstants.primary)),
-                ),
-              if (!ready && _progress == null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: TVButton(
-                    label: 'Baixar',
-                    onPressed: _download,
-                  ),
-                ),
-            ],
-          );
-        },
       ),
     );
   }

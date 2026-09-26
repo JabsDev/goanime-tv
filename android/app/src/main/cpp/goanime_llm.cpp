@@ -36,6 +36,32 @@ std::string jstr(JNIEnv * env, jstring s) {
     return out;
 }
 
+// Qwen3 vem por padrão com modo "thinking" (<think>…</think>): o raciocínio
+// estoura o teto de 128 tokens e a tradução real nunca sai (estudo §2.5/H2).
+// Remove os blocos ANTES do utf8_clean; truncado sem fechar também cai.
+std::string strip_think(const std::string & s) {
+    std::string out;
+    size_t pos = 0;
+    bool removed = false;
+    while (true) {
+        const size_t open = s.find("<think>", pos);
+        if (open == std::string::npos) {
+            out.append(s, pos, s.size() - pos);
+            break;
+        }
+        removed = true;
+        out.append(s, pos, open - pos);
+        const size_t close = s.find("</think>", open);
+        if (close == std::string::npos) break; // truncado: nada mais sai
+        pos = close + 8;
+    }
+    if (removed) {
+        __android_log_print(ANDROID_LOG_INFO, "GoAnimeLLM",
+                            "bloco <think> removido da resposta");
+    }
+    return out;
+}
+
 // NewStringUTF com byte inválido = ART aborta a VM (morte sem exceção).
 // O teto de 128 tokens pode partir um char multibyte (japonês!) bem no
 // fim — e o crash caía na 1ª frase com breadcrumb de "carregamento".
@@ -172,7 +198,7 @@ Java_com_example_goanime_1tv_LlmBridge_nativeGenerate(
         if (llama_decode(h->ctx, cur_batch) != 0) break;
         cur = llama_sampler_sample(h->sampler, h->ctx, -1);
     }
-    return env->NewStringUTF(utf8_clean(out).c_str());
+    return env->NewStringUTF(utf8_clean(strip_think(out)).c_str());
 }
 
 JNIEXPORT void JNICALL

@@ -80,6 +80,14 @@ void main() {
           throwsA(isA<ModelDownloadException>()));
     });
 
+    test('aceita ethernet além de Wi-Fi', () async {
+      const mgr = ModelManager();
+      expect(
+          () => mgr.downloadModel('inexistente',
+              connectivityForTest: () async => [ConnectivityResult.ethernet]),
+          throwsA(isA<ArgumentError>()));
+    });
+
     test('modelo desconhecido falha alto', () async {
       const mgr = ModelManager();
       expect(

@@ -22,7 +22,7 @@ import '../../shared/widgets/app_top_bar.dart';
 import '../../shared/widgets/tv_button.dart';
 import '../player/player_screen.dart';
 import '../player/exo_dash_player_screen.dart';
-import '../ai_subtitle/ai_subtitle_screen.dart';
+import '../ai_subtitle/ai_subtitle_card.dart';
 import '../settings/settings_screen.dart';
 
 class DetailScreen extends StatefulWidget {
@@ -1198,6 +1198,10 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   /// abre a etapa Legenda (Sem legenda / Legenda IA) — nada baixa sozinho.
   int? _selectedQualityIdx;
 
+  /// Card IA aberto inline na etapa Legenda (sem Navigator.push — decisão
+  /// completa dentro do picker, estudo §3.2).
+  bool _aiStepOpen = false;
+
   /// Latency (ms) per resolved provider. Absent = still measuring; -1 = timeout.
   final Map<AnimeSource, int> _pings = {};
 
@@ -1728,8 +1732,8 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     }
 
     /// Etapa Legenda (card separado, opt-in): só aparece após escolher a
-    /// qualidade. "Sem legenda" toca direto; "Legenda IA…" abre a tela
-    /// dedicada (nada baixa sem toque explícito).
+    /// qualidade. "Sem legenda" toca direto; "Legenda IA…" abre o card
+    /// inline (nada baixa sem toque explícito).
     List<Widget> subtitleStep(List<VideoSource> visible) {
       final idx = _selectedQualityIdx;
       if (idx == null || idx >= visible.length) return const [];
@@ -1756,9 +1760,22 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: _QualityItem(
             quality: 'Legenda IA…',
-            onTap: () => _openAiScreen(visible),
+            selected: _aiStepOpen,
+            onTap: () => setState(() => _aiStepOpen = !_aiStepOpen),
           ),
         ),
+        if (_aiStepOpen)
+          Padding(
+            padding: const EdgeInsets.only(top: 8, left: 8, right: 8),
+            child: AiSubtitleCard(
+              anime: widget.anime,
+              episode: widget.episode,
+              episodeIndex: widget.episodeIndex,
+              episodeList: widget.episodeList,
+              provider: selected!,
+              sources: visible,
+            ),
+          ),
       ];
     }
 
@@ -1794,31 +1811,6 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     return sources
         .where((s) => s.audio?.trim().toLowerCase() == _selectedAudio)
         .toList();
-  }
-
-  /// Abre a tela dedicada com a mesma visibilidade do passo qualidade.
-  void _openAiScreen(List<VideoSource> sources) {
-    if (_selectedProvider == null) return;
-    final audios = _audiosFor(sources);
-    final visible = audios.length <= 1
-        ? sources
-        : sources
-            .where((s) => s.audio?.trim().toLowerCase() == _selectedAudio)
-            .toList();
-    if (visible.isEmpty) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AiSubtitleScreen(
-          anime: widget.anime,
-          episode: widget.episode,
-          episodeIndex: widget.episodeIndex,
-          episodeList: widget.episodeList,
-          provider: _selectedProvider!,
-          sources: visible,
-        ),
-      ),
-    );
   }
 
   bool _pruneScheduled = false;

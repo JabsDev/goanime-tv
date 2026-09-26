@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 
 import '../utils/device_capability.dart';
+import 'model_manager.dart';
 import 'mt_provider.dart';
 import 'srt_parser.dart';
 
@@ -14,6 +15,27 @@ class SpeechChunk {
   final double startSec;
   final Float32List samples;
   const SpeechChunk(this.startSec, this.samples);
+}
+
+/// Copia `models/silero-vad/vad.onnx` para dentro da pasta do modelo STT
+/// (o download grava em silero-vad/, o engine procura na pasta do modelo de
+/// voz — caminhos divergentes, estudo §2.1: VAD baixado nunca era usado).
+/// Best-effort: falha = janelas fixas de 30s (fallback seguro). Retorna true
+/// se `$modelDir/vad.onnx` existir ao final. `rootForTest` p/ teste.
+Future<bool> ensureVadInModelDir(String modelDir, {Directory? rootForTest}) async {
+  try {
+    if (await File('$modelDir/vad.onnx').exists()) return true;
+    final root = rootForTest ?? await const ModelManager().modelsDir();
+    final src = File('${root.path}/silero-vad/vad.onnx');
+    if (!await src.exists()) return false;
+    final tmp = File('$modelDir/vad.onnx.tmp');
+    await tmp.parent.create(recursive: true);
+    await src.copy(tmp.path); // renomear depois: cópia atômica no Android
+    await tmp.rename('$modelDir/vad.onnx');
+    return true;
+  } catch (_) {
+    return false; // nunca falhar o job por causa do VAD
+  }
 }
 
 /// Motor STT destacável (teste sem nativo). Produção = [SherpaSttEngine].
@@ -49,8 +71,9 @@ class SherpaSttEngine implements SttEngine {
         throw StateError('Modelo de voz incompleto (falta $f). Baixe de novo.');
       }
     }
-    _hasVad = await File('$modelDir/vad.onnx').exists();
-    _worker = await _SttWorker.spawn(modelDir,
+    // Log permanente: evidência de H1 (VAD na pasta certa) no logcat.
+    _hasVad = await ensureVadInModelDir(modelDir);
+    debugPrint('[SherpaStt] VAD: $_hasVad ($modelDir)');    _worker = await _SttWorker.spawn(modelDir,
         task: task, withVad: _hasVad, threads: threads, sttKind: sttKind);
   }
 
@@ -389,7 +412,8 @@ class SherpaSttProvider extends SttProvider {
   /// engine — OOM e morte do app em aparelho fraco. Pico agora ~4 MB + sherpa.
   @override
   Future<List<SrtCue>> transcribe(String pcm16kPath,
-      {void Function(double progress)? onProgress}) async {
+      {void Function(double progress)? onProgress,
+      bool Function()? isCancelled}) async {
     final engine = _engine;
     if (engine == null) throw StateError('SherpaSttProvider.load() antes');
     const sr = 16000;
@@ -402,6 +426,8 @@ class SherpaSttProvider extends SttProvider {
       final cues = <SrtCue>[];
       var done = 0;
       while (done < totalSamples) {
+        // Cancelado = cues parciais, sem throw (job manager vê o flag depois).
+        if (isCancelled?.call() ?? false) return cues;
         final n = (totalSamples - done).clamp(0, sliceSec * sr);
         final bytes = await raf.read(n * 2);
         final shorts = bytes.buffer.asInt16List();
@@ -410,7 +436,9 @@ class SherpaSttProvider extends SttProvider {
           pcm[i] = shorts[i] / 32768.0;
         }
         final baseSec = done / sr;
-        for (final chunk in await engine.segments(pcm)) {
+        final chunks = await engine.segments(pcm);
+        for (final chunk in chunks) {
+          if (isCancelled?.call() ?? false) return cues;
           final text = await engine.decode(chunk);
           if (text.trim().isEmpty) continue;
           final start = baseSec + chunk.startSec;

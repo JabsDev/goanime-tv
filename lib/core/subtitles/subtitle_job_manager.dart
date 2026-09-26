@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'audio_extract.dart';
 import 'hls_audio_only.dart';
+import 'llm_mt.dart';
 import 'model_manager.dart';
 import 'mt_provider.dart';
 import 'srt_parser.dart';
@@ -150,6 +151,10 @@ class SubtitleJobManager {
   /// Erro técnico → frase PT-BR acionável (a tela mostra + botão Tentar).
   static String friendlyError(Object e) {
     final s = e.toString();
+    // Sanity gate: mensagem já acionável — sem prefixo técnico e sem stack.
+    if (s.contains('0 falas traduzidas')) {
+      return RegExp('0 falas traduzidas.*').firstMatch(s)?.group(0) ?? s;
+    }
     if (e is SocketException) {
       return 'Sem internet. Verifique a rede e tente de novo.';
     }
@@ -311,7 +316,8 @@ class SubtitleJobManager {
           msg.startsWith('Tradução local') ||
           msg.startsWith('Modelo de tradução') ||
           msg.startsWith('Memória insuficiente') ||
-          msg.startsWith('Voz '));
+          msg.startsWith('Voz ') ||
+          msg.startsWith('0 falas traduzidas'));
       final frames =
           st.toString().split('\n').take(4).join('\n');
       _set(JobPhase.failed, progress.value, 'Falhou',
@@ -348,7 +354,44 @@ class SubtitleJobManager {
     return true;
   }
 
-  Future<void> _finish(_Job job, String tag, String srt, String srcHash) async {
+  /// Política anti-perda (estudo §2.2): tradução vazia/degenerada NÃO descarta
+  /// a cue — fallback ao texto fonte quando a fonte tem conteúdo (isJunk ==
+  /// false); fonte-lixo puro descarta (não é fala). Retorna (cues, traduzidas,
+  /// falas) p/ o sanity gate do item 3.
+  static (List<SrtCue>, int, int) _resolveCues(
+      List<SrtCue> src, List<String> translations) {
+    final out = <SrtCue>[];
+    var fallback = 0;
+    for (var i = 0; i < src.length; i++) {
+      final s = src[i];
+      if (LlmMtProvider.isJunk(s.text)) continue; // não é fala: descarta
+      final t = i < translations.length ? translations[i].trim() : '';
+      if (t.isEmpty) {
+        out.add(s); // mantém a cue com o texto fonte (melhor que sumir)
+        fallback++;
+        continue;
+      }
+      out.add(s.withText(t));
+    }
+    return (out, out.length - fallback, out.length);
+  }
+
+  /// Sanity gate (estudo §2.4): legenda com 0 cues nunca termina "Pronto".
+  /// Falha alta com mensagem acionável; senão devolve o rótulo de escassez.
+  static String _gateCues(int translated, int total) {
+    if (total <= 0) {
+      throw StateError(
+          '0 falas traduzidas — troque o modelo de voz (tiny→sensevoice/base) '
+          'e tente de novo.');
+    }
+    // <30% das falas traduzidas: salva igual, mas avisa honestamente.
+    return translated * 10 < total * 3
+        ? 'Legenda pronta — gerada com poucas falas: $translated de $total'
+        : 'Legenda pronta (+$translated de $total falas)';
+  }
+
+  Future<void> _finish(_Job job, String tag, String srt, String srcHash,
+      {String yieldLabel = 'Legenda pronta'}) async {
     _set(JobPhase.saving, 0.98, 'Salvando legenda…');
     await SubtitleStore.put(
       animeKey: job.animeKey,
@@ -361,7 +404,7 @@ class SubtitleJobManager {
     await SubtitleStore.pruneExpired(subsDirForTest: job.subsDirForTest);
     await job.delete();
     lastCrashHint = null; // sucesso supera a dica de crash anterior
-    _set(JobPhase.done, 1, 'Legenda pronta');
+    _set(JobPhase.done, 1, yieldLabel);
   }
 
   Future<void> _runTranslate(_Job job) async {
@@ -370,25 +413,42 @@ class SubtitleJobManager {
     await job.mt.load();
     final cues = SrtParser.parse(job.srcSrt);
     final total = cues.length;
-    final out = <SrtCue>[];
+    final translations = <String>[];
     for (var i = 0; i < cues.length; i++) {
       if (_checkCancel(job)) return;
-      final t =
-          await job.mt.translate(cues[i].text, src: job.srcLang, tgt: 'pt');
-      if (t.trim().isNotEmpty) out.add(cues[i].withText(t));
+      // Defesa em profundidade: erro residual do provider nunca mata o job —
+      // a cue ganha fallback ao texto fonte em _resolveCues.
+      String t = '';
+      try {
+        t = await job.mt.translate(cues[i].text, src: job.srcLang, tgt: 'pt');
+      } catch (e) {
+        debugPrint('[SubtitleJob] MT falhou na cue ${i + 1}: $e');
+      }
+      translations.add(t);
       final p = total == 0 ? 1.0 : (i + 1) / total;
       _set(JobPhase.translating, 0.05 + 0.9 * p, 'Traduzindo…',
           detail: total == 0 ? '' : '${i + 1}/$total falas');
       if (i % 10 == 0) await job.save(progress: p);
     }
+    if (_checkCancel(job)) return;
     try {
-      if (!_checkCancel(job)) {
-        // Rewrap 42x2: fonte externa pode ter linha única longa; mpv não
-        // quebra sozinho (encolhe a fonte — ver QA sensevoice/VAD).
-        final fitted = SrtParser.postprocess(out);
-        await _finish(job, '${job.srcLang}-ai', SrtParser.format(fitted),
-            SubtitleStore.sha256Of(job.srcSrt));
+      final (out, translated, falas) = _resolveCues(cues, translations);
+      debugPrint('[SubtitleJob] falas traduzidas $translated/$falas');
+      if (out.isEmpty) {
+        throw StateError(
+            '0 falas traduzidas — troque o modelo de voz (tiny→sensevoice/base) '
+            'e tente de novo.');
       }
+      // Rewrap 42x2: fonte externa pode ter linha única longa; mpv não
+      // quebra sozinho (encolhe a fonte — ver QA sensevoice/VAD).
+      final fitted = SrtParser.postprocess(out);
+      await _finish(
+        job,
+        '${job.srcLang}-ai',
+        SrtParser.format(fitted),
+        SubtitleStore.sha256Of(job.srcSrt),
+        yieldLabel: _gateCues(translated, falas),
+      );
     } finally {
       await job.mt.dispose();
     }
@@ -451,10 +511,13 @@ class SubtitleJobManager {
       });
       List<SrtCue> srcCues = [];
       try {
-        srcCues = await stt.transcribe(pcmPath, onProgress: (p) {
-          _set(JobPhase.transcribing, 0.3 + 0.42 * p, 'Transcrevendo áudio…',
-              detail: '${(p * 100).toInt()}% do áudio');
-        });
+        srcCues = await stt.transcribe(pcmPath,
+            onProgress: (p) {
+              _set(JobPhase.transcribing, 0.3 + 0.42 * p,
+                  'Transcrevendo áudio…',
+                  detail: '${(p * 100).toInt()}% do áudio');
+            },
+            isCancelled: () => job.cancelled);
       } finally {
         // Breadcrumb fino: sem isto, morte dentro do free nativo aparece
         // como "transcrição" e é indistinguível de morte transcrevendo.
@@ -473,22 +536,39 @@ class SubtitleJobManager {
       // "carregamento" (o _set(translating) só roda após cada frase).
       await job.save(progress: 0.73, phase: 'translating');
       try {
-        final out = <SrtCue>[];
+        final translations = <String>[];
         for (var i = 0; i < srcCues.length; i++) {
           if (_checkCancel(job)) return;
-          // Cue degenerada (só "!!!", eco, runaway): tradução vazia não
-          // vira legenda — espelha o `continue` do lado STT.
-          final t = await mt.translate(srcCues[i].text, src: mtSrc, tgt: 'pt');
-          if (t.trim().isNotEmpty) out.add(srcCues[i].withText(t));
+          // Defesa em profundidade: erro residual do provider nunca mata o
+          // job (antes 1 timeout abortava ~15 min de transcrição por 1 frase).
+          String t = '';
+          try {
+            t = await mt.translate(srcCues[i].text, src: mtSrc, tgt: 'pt');
+          } catch (e) {
+            debugPrint('[SubtitleJob] MT falhou na cue ${i + 1}: $e');
+          }
+          translations.add(t);
           final p = (i + 1) / (srcCues.isEmpty ? 1 : srcCues.length);
           _set(JobPhase.translating, 0.73 + 0.24 * p, 'Traduzindo…',
               detail: srcCues.isEmpty ? '' : '${i + 1}/${srcCues.length} falas');
         }
+        final (out, translated, falas) = _resolveCues(srcCues, translations);
+        debugPrint('[SubtitleJob] falas traduzidas $translated/$falas');
+        if (out.isEmpty) {
+          throw StateError(
+              '0 falas traduzidas — troque o modelo de voz (tiny→sensevoice/base) '
+              'e tente de novo.');
+        }
         // Pós STT+sensevoice: rewrap 42x2 + split proporcional do chunk
         // (2ª frase não aparece adiantada) + shift +150ms do pré-roll VAD.
         final fitted = SrtParser.postprocess(out, fromStt: true);
-        await _finish(job, 'ja-ai', SrtParser.format(fitted),
-            SubtitleStore.sha256Of(job.videoUrl));
+        await _finish(
+          job,
+          'ja-ai',
+          SrtParser.format(fitted),
+          SubtitleStore.sha256Of(job.videoUrl),
+          yieldLabel: _gateCues(translated, falas),
+        );
       } finally {
         await mt.dispose();
       }

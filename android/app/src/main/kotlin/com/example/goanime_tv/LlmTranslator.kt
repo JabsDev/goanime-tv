@@ -98,11 +98,16 @@ class LlmTranslator(messenger: BinaryMessenger) : MethodChannel.MethodCallHandle
             "es" to "Spanish",
         )[tgtLang]
             ?: throw IllegalArgumentException("alvo $tgtLang sem suporte")
-        val prompt = "<|im_start|>user\n" +
-            "Translate the following subtitle text into $tgt. " +
+        // Qwen3 abre modo thinking que come o teto de 128 tokens (H2):
+        // "/no_think" desliga no prompt (o strip_think no C++ cobre o resto).
+        val body = "Translate the following subtitle text into $tgt. " +
             "Keep it concise, as subtitles: at most 2 short lines. " +
             "Note that you should only output the translated result " +
-            "without any additional explanation:\n\n$text<|im_end|>\n" +
+            "without any additional explanation:\n\n$text"
+        val withHint = if (modelPath.contains("qwen", ignoreCase = true)) {
+            "$body /no_think"
+        } else body
+        val prompt = "<|im_start|>user\n$withHint<|im_end|>\n" +
             "<|im_start|>assistant\n"
         lock.lock()
         try {

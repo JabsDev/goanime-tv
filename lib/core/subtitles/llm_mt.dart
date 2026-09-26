@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'model_manager.dart';
@@ -140,6 +141,24 @@ class LlmMtProvider extends MtProvider {
         _ => throw StateError('LLM sem par p/ "$lang" (só ja/en/pt/es)'),
       };
 
+  /// Uma peça com retry 1×: timeout/erro do canal NÃO propaga — peça falhada
+  /// vira '' e a cue ganha fallback ao texto fonte (política "cue não se
+  /// descarta", estudo §2.2; antes 1 timeout matava o job inteiro).
+  Future<String> _translatePiece(LlmChannel ch, String piece,
+      String srcCode, String tgtCode) async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await ch
+            .translate(modelPath, piece, srcLang: srcCode, tgtLang: tgtCode)
+            .timeout(translateTimeout);
+      } catch (e) {
+        if (attempt == 0) continue; // 1 retry imediato
+        debugPrint('[LlmMt] peça falhou (retry tb) — cue terá fallback: $e');
+      }
+    }
+    return '';
+  }
+
   @override
   Future<String> translate(String text,
       {required String src, required String tgt}) async {
@@ -153,14 +172,8 @@ class LlmMtProvider extends MtProvider {
     final parts = pieces(text).where((p) => !isJunk(p));
     final out = <String>[];
     for (final p in parts) {
-      final t = await ch
-          .translate(modelPath, p.trim(), srcLang: srcCode, tgtLang: tgtCode)
-          .timeout(translateTimeout, onTimeout: () {
-        throw StateError(
-            'Tradução travou (timeout ${translateTimeout.inMinutes} min). '
-            'Aparelho sem memória? Tente de novo.');
-      });
-      if (!isDegenerate(t)) out.add(t);
+      final t = await _translatePiece(ch, p.trim(), srcCode, tgtCode);
+      if (!isDegenerate(t) && t.trim().isNotEmpty) out.add(t);
     }
     return out.join(' ');
   }

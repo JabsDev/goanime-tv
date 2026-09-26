@@ -129,4 +129,21 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
     await tester.pumpAndSettle();
   });
+
+  testWidgets('legenda IA: 4 tiers de voz, sem q3km (item 7)', (tester) async {
+    await pumpSettings(tester);
+    // Desce até a seção Legenda IA e verifica as linhas unificadas.
+    await tester.scrollUntilVisible(
+      find.text('Voz Whisper tiny'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Voz Whisper tiny'), findsOneWidget);
+    expect(find.text('Voz SenseVoice'), findsOneWidget);
+    expect(find.text('Voz Whisper base'), findsOneWidget);
+    expect(find.text('Voz Whisper small'), findsOneWidget);
+    // Entrada morta descontinuada (nenhum tier mapeia mais).
+    expect(find.textContaining('Q3_K_M'), findsNothing);
+  });
 }

@@ -188,7 +188,10 @@ class ModelManager {
     final conn = connectivityForTest != null
         ? await connectivityForTest()
         : await Connectivity().checkConnectivity();
-    if (!allowMetered && !conn.contains(ConnectivityResult.wifi)) {
+    // Ethernet é cabeado e geralmente não-metrado (ex.: emulador/TV box).
+    if (!allowMetered &&
+        !conn.contains(ConnectivityResult.wifi) &&
+        !conn.contains(ConnectivityResult.ethernet)) {
       throw const ModelDownloadException('Modelo só baixa no Wi-Fi.');
     }
     for (var i = 0; i < spec.files.length; i++) {

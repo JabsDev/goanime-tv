@@ -31,6 +31,23 @@ class _HangLlm implements LlmChannel {
   Future<void> dispose() async {}
 }
 
+/// Falha N vezes antes de responder (1 = retry conserta).
+class _FlakyLlm implements LlmChannel {
+  int calls = 0;
+  final int failures;
+  _FlakyLlm(this.failures);
+  @override
+  Future<String> translate(String modelPath, String text,
+      {required String srcLang, required String tgtLang}) async {
+    calls++;
+    if (calls <= failures) throw StateError('native boom');
+    return 'PT[$text]';
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
+
 void main() {
   group('LlmMtProvider (canal llama.cpp)', () {
     test('JA→PT passa códigos e modelPath', () async {
@@ -66,13 +83,32 @@ void main() {
           e is StateError && e.toString().contains('LLM_CORRUPT'))));
     });
 
-    test('nativo mudo vira timeout com mensagem', () async {
+    test('timeout duplo: peça vira "" sem exceção (não mata o job)', () async {
       final mt = LlmMtProvider('x',
           channelForTest: _HangLlm(),
           translateTimeout: const Duration(milliseconds: 200));
       await mt.load();
-      expect(() => mt.translate('hi', src: 'ja', tgt: 'pt'),
-          throwsA(isA<StateError>()));
+      // Política anti-perda (item 2): timeout da peça não propaga — a cue
+      // ganha fallback ao texto fonte; o job termina done.
+      expect(await mt.translate('hi', src: 'ja', tgt: 'pt'), '');
+      await mt.dispose();
+    });
+
+    test('erro na 1ª chamada: retry 1× usa a resposta do retry', () async {
+      final ch = _FlakyLlm(1);
+      final mt = LlmMtProvider('x', channelForTest: ch);
+      await mt.load();
+      expect(await mt.translate('hi', src: 'ja', tgt: 'pt'), 'PT[hi]');
+      expect(ch.calls, 2);
+      await mt.dispose();
+    });
+
+    test('erro duplo: peça vira "" sem exceção', () async {
+      final ch = _FlakyLlm(99);
+      final mt = LlmMtProvider('x', channelForTest: ch);
+      await mt.load();
+      expect(await mt.translate('hi', src: 'ja', tgt: 'pt'), '');
+      expect(ch.calls, 2); // exatamente 1 retry, sem loop
       await mt.dispose();
     });
     test('peça patológica fatia em ≤500 chars sem perder texto', () {

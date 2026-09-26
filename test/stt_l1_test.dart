@@ -37,6 +37,41 @@ class _FakeEngine implements SttEngine {
   }
 }
 
+/// Envolve um engine real-de-teste p/ simular cancelamento após a 1ª fatia.
+/// O provider checa `isCancelled` no início de cada fatia; cada fatia
+/// (60s) gera 2 chunks → cancela após o 2º decode = fim da 1ª fatia.
+class _SlicesEngine implements SttEngine {
+  final SttEngine inner;
+  int segmentCalls = 0;
+  int decodeCalls = 0;
+  bool _cancelled = false;
+  _SlicesEngine(this.inner);
+  bool get cancelled => _cancelled;
+
+  @override
+  Future<void> init(String modelDir,
+      {required String task, int threads = 2}) async {
+    await inner.init(modelDir, task: task, threads: threads);
+  }
+
+  @override
+  Future<List<SpeechChunk>> segments(Float32List pcm) async {
+    segmentCalls++;
+    return inner.segments(pcm);
+  }
+
+  @override
+  Future<String> decode(SpeechChunk chunk) async {
+    final t = await inner.decode(chunk);
+    decodeCalls++;
+    if (decodeCalls >= 2) _cancelled = true;
+    return t;
+  }
+
+  @override
+  Future<void> free() => inner.free();
+}
+
 class _FakeStt extends SttProvider {
   final SttEngine engine = _FakeEngine();
   @override
@@ -45,10 +80,12 @@ class _FakeStt extends SttProvider {
   Future<void> load() => engine.init('fake', task: 'translate');
   @override
   Future<List<SrtCue>> transcribe(String pcm16kPath,
-      {void Function(double progress)? onProgress}) async {
+      {void Function(double progress)? onProgress,
+      bool Function()? isCancelled}) async {
     final chunks = await engine.segments(Float32List(0));
     final cues = <SrtCue>[];
     for (var i = 0; i < chunks.length; i++) {
+      if (isCancelled?.call() ?? false) return cues;
       final text = await engine.decode(chunks[i]);
       onProgress?.call((i + 1) / chunks.length);
       cues.add(SrtCue(
@@ -185,6 +222,20 @@ void main() {
       final engine = SherpaSttEngine();
       expect(() => engine.init(tmp.path, task: 'translate'),
           throwsA(isA<StateError>()));
+    });
+
+    test('cancelamento por fatia: 1ª fatia devolve, sem ler as demais', () async {
+      final slow = _SlicesEngine(_FakeEngine());
+      final stt = SherpaSttProvider('fake', engineForTest: slow);
+      final pcm = await File('${tmp.path}/c.pcm')
+          .writeAsBytes(Int16List(150 * 16000).buffer.asUint8List());
+      await stt.load();
+      final cues =
+          await stt.transcribe(pcm.path, isCancelled: () => slow.cancelled);
+      await stt.dispose();
+      // Cues parciais da 1ª fatia, sem throw.
+      expect(cues, isNotEmpty);
+      expect(slow.segmentCalls, 1); // 2ª fatia nunca iniciada
     });
 
     test('sensevoice: id JA + guarda de arquivos próprios', () async {

@@ -40,7 +40,14 @@ class PassthroughMtProvider extends MtProvider {
 abstract class SttProvider {
   String get id;
   Future<void> load();
+
+  /// `isCancelled` checado no início de cada fatia (e entre decodes) —
+  /// cancelar encerra na fronteira da fatia em vez de rodar até o fim
+  /// (estudo §2.6). Null = nunca cancela (assinatura compatível).
+  /// Cancelado devolve cues parciais SEM throw; o job manager vê
+  /// `job.cancelled` logo depois.
   Future<List<SrtCue>> transcribe(String pcm16kPath,
-      {void Function(double progress)? onProgress});
+      {void Function(double progress)? onProgress,
+      bool Function()? isCancelled});
   Future<void> dispose();
 }

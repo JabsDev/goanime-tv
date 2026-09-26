@@ -16,8 +16,18 @@ class SettingsService {
   static const _kNsfwFilter = 'settings_nsfw_filter';
   static const _kOnboardingSeen = 'settings_onboarding_seen';
   static const _kAutoSkipIntro = 'settings_auto_skip_intro';
-  static const _kSttModel = 'settings_ai_stt'; // 'tiny' | 'base'
+  static const _kSttModel = 'settings_ai_stt'; // 'tiny'|'base'|'small'|'sensevoice'
   static const _kMtEngine = 'settings_ai_mt'; // 'minima'|'leve'|'media'|'completa'
+
+  /// Whitelist do setter (antes 'sensevoice' era descartado — persistência
+  /// quebrada, estudo §2.3/§item 4). Inválido → 'tiny'.
+  static const _sttTiers = {'tiny', 'base', 'small', 'sensevoice'};
+  static const _mtTiers = {'minima', 'leve', 'media', 'completa'};
+
+  /// Hook de teste do default por aparelho (padrão setClockForTest):
+  /// null = usa DeviceCapability.isLowEnd(); true = default 'sensevoice'.
+  @visibleForTesting
+  static bool? lowEndOverrideForTest;
 
   bool? _userPref;
   bool _autoLite = false;
@@ -65,12 +75,21 @@ class SettingsService {
     _nsfwFilterVN.value = _nsfwFilter;
     _autoSkipIntro = prefs.getBool(_kAutoSkipIntro) ?? false;
     _autoSkipIntroVN.value = _autoSkipIntro;
-    _sttModel = prefs.getString(_kSttModel) ?? 'tiny';
+    // Default honesto por aparelho (estudo §2.3): preferência AUSENTE em
+    // low-end pré-marca SenseVoice (JA dedicado, rápido no stick).
+    final stored = prefs.getString(_kSttModel);
+    _sttModel = _sttTiers.contains(stored) ? stored! : await _defaultStt();
     _sttModelVN.value = _sttModel;
-    _mtEngine = prefs.getString(_kMtEngine) ?? 'leve';
+    final storedMt = prefs.getString(_kMtEngine);
+    _mtEngine = _mtTiers.contains(storedMt) ? storedMt! : 'leve';
     _mtEngineVN.value = _mtEngine;
     debugPrint(
         '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value nsfw=$_nsfwFilter autoSkip=$_autoSkipIntro');
+  }
+
+  static Future<String> _defaultStt() async {
+    final low = lowEndOverrideForTest ?? await DeviceCapability.isLowEnd();
+    return low ? 'sensevoice' : 'tiny';
   }
 
   bool _resolveLite() {
@@ -121,14 +140,14 @@ class SettingsService {
   }
 
   Future<void> setSttModel(String v) async {
-    _sttModel = (v == 'base' || v == 'small') ? v : 'tiny';
+    _sttModel = _sttTiers.contains(v) ? v : 'tiny';
     _sttModelVN.value = _sttModel;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kSttModel, _sttModel);
   }
 
   Future<void> setMtEngine(String v) async {
-    _mtEngine = (v == 'minima' || v == 'media' || v == 'completa') ? v : 'leve';
+    _mtEngine = _mtTiers.contains(v) ? v : 'leve';
     _mtEngineVN.value = _mtEngine;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kMtEngine, _mtEngine);
