@@ -47,4 +47,31 @@
 
 ## 5. Veredicto
 
-**Pipeline end-to-end aprovado** (busca → AnimeGG → rota transcrever → Whisper → LFM → legenda PT-BR → playback). Publicação: release completa `v1.3.0+1000061`; o follow-up silero-vad ao vivo fica como melhoria registrada.
+**Pipeline end-to-end aprovado** (busca → AnimeGG → rota transcrever → Whisper → LFM → legenda PT-BR → playback). Publicação: release `v1.3.0+1000063`.
+
+---
+
+# Rodada 2 — relato do usuário: Haibane Renmei EP3 "várias falas sem legenda" (Moto G7 Play, Android 10/API 29)
+
+## 1. O que o aparelho tinha
+
+- App instalado era **1.0.21 (10/09)** — duas semanas desatualizado, **anterior a todas as correções do plano** (que entraram em 1.3.0). O relato foi feito com build sem *cue-nunca-perdida*, sem cópia do VAD, sem timeouts por fatia e sem portão de sanidade.
+- Episódio sem legenda nas fontes (só "JA cru"): archiveJp (archive.org) como fonte vencedora; AnimeGG sem candidatos. Rota = gerar do áudio japonês, igual ao Bocchi.
+
+## 2. Bugs achados testando no aparelho real (não apareceram no emulador)
+
+| # | Bug | Sintoma | Correção |
+|---|-----|---------|----------|
+| 1 | Queda de conexão no meio do corpo HTTP matava o download | `HttpException: Connection closed while receiving data` **sem tratamento** (Unhandled Exception no VM): SenseVoice e LFM voltavam a "faltando" **sem mensagem nenhuma** na tela | `fetchFile` com loop de 4 tentativas (backoff) + resume por `Range` já existente; `HttpException`/`SocketException`/`Download incompleto` viram `ModelDownloadException` com dica curta e acionável |
+| 2 | Erro de download exibia o erro cru | Tela mostrava "Falhou: Connection closed while receiving data, uri = https://ia601407.us.archive.org/…mp4" (regex guloso `^.*Exception: ` cortava até o último "Exception: " dentro da mensagem) | `friendlyError`: `ModelDownloadException` devolve a mensagem PT-BR direto, e sem stack |
+| 3 | Parcial do vídeo apagado na falha | 131 MB de vídeo caem sempre no 4G/Wi-Fi; cada toque em "Gerar" **recomeçava do zero** → o job nunca terminava (na prática, "ficava sem legenda") | O `finally` de `_runTranscribe` só apaga o vídeo no sucesso; na falha o parcial fica p/ a retomada por `Range` |
+
+**Validação ao vivo dos downloads:** SenseVoice 240 MB e LFM 541 MB instalaram no celular **depois** da correção (antes ambos voltavam a "faltando"); o vídeo de 131 MB do EP3 baixou e a transcrição começou (`[SherpaStt] VAD: false (…/sensevoice-ja)`).
+
+## 3. Cobertura das falas (o relato original)
+
+Rodada em andamento no Moto G7 Play: SenseVoice transcrevendo o EP3 inteiro (thread de inferência do onnx a 100% de um core), depois LFM traduzindo. Resultado da contagem de cues e do SRT: ver seção abaixo (atualizada ao fim do job).
+
+## 4. Nota de ambiente
+
+O cabo USB do aparelho desconecta a cada ~30–60 min (`adb` offline); reconectar com `adb kill-server && adb start-server` funciona, e o job em background segue rodando. Também: o source archiveJp é lento/fragmentado por natureza — a retomada por `Range` é obrigatório nesse caminho.

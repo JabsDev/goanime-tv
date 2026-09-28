@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -94,6 +95,52 @@ void main() {
           () => mgr.downloadModel('inexistente',
               connectivityForTest: () async => [ConnectivityResult.wifi]),
           throwsA(isA<ArgumentError>()));
+    });
+  });
+
+  group('ModelManager.fetchFile — queda no meio + resume', () {
+    late Directory tmp;
+    setUp(() async => tmp = await Directory.systemTemp.createTemp('fetch'));
+    tearDown(() async => tmp.delete(recursive: true));
+
+    // Servidor fake: 1ª conexão manda metade do corpo declarado e corta o
+    // socket (replica "Connection closed while receiving data" do HF no 4G).
+    // 2ª em diante (com Range) manda o resto via 206.
+    test('retoma e completa após queda no meio do corpo', () async {
+      final body = List<int>.generate(4096, (i) => i & 0xff);
+      var reqs = 0;
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((sock) {
+        sock.listen((data) {
+          final req = String.fromCharCodes(data);
+          if (!req.contains('\r\n\r\n')) return;
+          reqs++;
+          final rng = RegExp(r'bytes=(\d+)').firstMatch(req);
+          if (reqs == 1) {
+            final half = body.sublist(0, body.length ~/ 2);
+          sock.add(utf8.encode(
+              'HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\n\r\n'));
+            sock.add(half);
+            sock.destroy(); // queda abrupta antes do tamanho prometido
+          } else {
+            final start =
+                rng == null ? 0 : int.parse(rng.group(1)!);
+            final rest = body.sublist(start);
+            sock.add(utf8.encode(
+                'HTTP/1.1 206 Partial Content\r\n'
+                'Content-Length: ${rest.length}\r\n\r\n'));
+            sock.add(rest);
+            sock.close();
+          }
+        });
+      });
+      addTearDown(server.close);
+      final dest = File('${tmp.path}/model.bin');
+      final out = await ModelManager.fetchFile(
+          dest: dest, url: 'http://127.0.0.1:${server.port}/m.bin');
+      expect(out, dest);
+      expect(await dest.readAsBytes(), body);
+      expect(reqs, 2, reason: 'uma queda + uma retomada com Range');
     });
   });
 }

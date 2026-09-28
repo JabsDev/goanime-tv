@@ -155,6 +155,12 @@ class SubtitleJobManager {
     if (s.contains('0 falas traduzidas')) {
       return RegExp('0 falas traduzidas.*').firstMatch(s)?.group(0) ?? s;
     }
+    // Download já traduzido em PT-BR pelo ModelManager (queda de conexão,
+    // arquivo incompleto, HTTP): usa a mensagem direto. Sem isso o regex
+    // guloso lá embaixo cortava até o ÚLTIMO "Exception: " e sobrava o erro
+    // cru dentro dos parênteses (Haibane no 4G: "Connection closed while
+    // receiving data, uri = https://…").
+    if (e is ModelDownloadException) return e.message;
     if (e is SocketException) {
       return 'Sem internet. Verifique a rede e tente de novo.';
     }
@@ -317,7 +323,8 @@ class SubtitleJobManager {
           msg.startsWith('Modelo de tradução') ||
           msg.startsWith('Memória insuficiente') ||
           msg.startsWith('Voz ') ||
-          msg.startsWith('0 falas traduzidas'));
+          msg.startsWith('0 falas traduzidas')) &&
+          e is! ModelDownloadException;
       final frames =
           st.toString().split('\n').take(4).join('\n');
       _set(JobPhase.failed, progress.value, 'Falhou',
@@ -466,6 +473,7 @@ class SubtitleJobManager {
     final stt = job.sttFor!();
     // tiny traduz ja→en (MT recebe 'en'); base/small transcrevem ja (NLLB).
     final mtSrc = stt.id == 'whisper-tiny-ja' ? 'en' : 'ja';
+    var finished = false;
     try {
       String mediaPath = videoPath;
       final audioOnly = await _tryAudioOnly(job, audioOnlyPath);
@@ -569,11 +577,17 @@ class SubtitleJobManager {
           SubtitleStore.sha256Of(job.videoUrl),
           yieldLabel: _gateCues(translated, falas),
         );
+        finished = true;
       } finally {
         await mt.dispose();
       }
     } finally {
       for (final p in [videoPath, audioOnlyPath, pcmPath]) {
+        // Falha no meio do download: o PARCIAL do vídeo fica p/ a próxima
+        // tentativa retomar por Range (131 MB de 4G caem sempre; recomeçar do
+        // zero era o "várias falas sem legenda" na prática — o job nunca
+        // terminava). No sucesso (ou cancelamento) some normalmente.
+        if (!finished && p == videoPath) continue;
         try {
           await File(p).delete();
         } catch (_) {}

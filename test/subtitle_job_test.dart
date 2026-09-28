@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:goanime_tv/core/subtitles/model_manager.dart';
 import 'package:goanime_tv/core/subtitles/mt_provider.dart';
 import 'package:goanime_tv/core/subtitles/srt_parser.dart';
 import 'package:goanime_tv/core/subtitles/subtitle_job_manager.dart';
@@ -273,6 +274,18 @@ void main() {
           contains('corrompido'));
       expect(SubtitleJobManager.friendlyError(StateError('LLM_OOM: x')),
           contains('Memória'));
+    });
+
+    test('queda de conexão mostra a dica de retomar, não o erro cru', () {
+      // A mensagem precisa ser curta e acionável: o erro cru (com a URL
+      // inteira) ficava na tela e o regex gulento ".*Exception: " do
+      // fallback ainda cortava até ele.
+      final msg = SubtitleJobManager.friendlyError(const ModelDownloadException(
+          'Conexão caiu no meio do download. Toque em Gerar/ Baixar de novo — '
+          'retoma de onde parou.'));
+      expect(msg, contains('retoma de onde parou'));
+      expect(msg, isNot(contains('uri =')));
+      expect(msg, isNot(contains('Exception:')));
     });
   });
 }

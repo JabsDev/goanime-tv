@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:goanime_tv/core/subtitles/model_manager.dart';
 import 'package:goanime_tv/core/subtitles/mt_provider.dart';
 import 'package:goanime_tv/core/subtitles/sherpa_stt.dart';
 import 'package:goanime_tv/core/subtitles/srt_parser.dart';
@@ -193,6 +194,29 @@ void main() {
       expect(orderLog.indexOf('stt.dispose'),
           lessThan(orderLog.indexOf('mt.load')));
       expect(orderLog, containsAll(['stt.load', 'mt.load', 'mt.dispose']));
+    });
+
+    test('queda no download: o parcial do vídeo fica p/ retomar', () async {
+      // Sem isso, 131 MB de 4G caem sempre e cada toque em "Gerar" recomeça
+      // do zero (o job nunca termina → o usuário fica "sem legenda").
+      var out = '';
+      final mgr = SubtitleJobManager.instance;
+      await mgr.enqueueTranscribe(
+        animeKey: 'haibane', ep: 4, videoUrl: 'http://x/ep4.mp4',
+        sttFor: () => _FakeStt(),
+        mt: _FakeMt(),
+        download: (url, headers, outPath) async {
+          out = outPath;
+          await File(outPath).writeAsBytes(List.filled(4096, 7));
+          throw const ModelDownloadException('Conexão caiu no meio.');
+        },
+        extract: _fakeExtract,
+        jobsDirForTest: jobs, subsDirForTest: subs, tmpDirForTest: tmp);
+      await _waitIdle(mgr);
+      expect(out, isNotEmpty, reason: 'o job chegou a baixar');
+      expect(await File(out).exists(), isTrue,
+          reason: 'parcial preservado p/ o Range retomar na próxima');
+      expect(await File(out).length(), 4096);
     });
 
     test('SherpaSttProvider monta cues do engine (unidade)', () async {

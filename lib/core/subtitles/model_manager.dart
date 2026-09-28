@@ -266,55 +266,102 @@ class ModelManager {
     required String url,
     Map<String, String> headers = const {},
     void Function(int got, int total)? onProgress,
+    int maxAttempts = 4,
   }) async {
     await dest.parent.create(recursive: true);
-    var start = await dest.exists() ? await dest.length() : 0;
     final client = HttpClient();
     try {
-      final req = await client.getUrl(Uri.parse(url));
-      headers.forEach(req.headers.set);
-      // HF barra bots em alguns repos (401): UA de browser passa.
-      // Só quando o chamador não definiu um (não quebra anti-bot de vídeos).
-      if (req.headers.value(HttpHeaders.userAgentHeader) == null) {
-        req.headers.set(HttpHeaders.userAgentHeader,
-            'Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36');
-      }
-      if (start > 0) req.headers.set('Range', 'bytes=$start-');
-      var resp = await req.close();
-      if (resp.statusCode == 416) {
-        // Range além do fim = arquivo já completo.
-        onProgress?.call(start, start);
-        return dest;
-      }
-      if (resp.statusCode != 200 && resp.statusCode != 206) {
-        throw ModelDownloadException('HTTP ${resp.statusCode} em $url');
-      }
-      if (resp.statusCode == 200 && start > 0) start = 0; // sem resume
-      final knownLen = resp.contentLength >= 0;
-      final total =
-          (resp.contentLength < 0 ? 0 : resp.contentLength) + start;
-      final sink = dest.openWrite(
-          mode: start > 0 ? FileMode.append : FileMode.write);
-      var got = start;
-      try {
-        await for (final chunk in resp) {
-          sink.add(chunk);
-          got += chunk.length;
-          onProgress?.call(got, total);
+      // Wi-Fi/4G real: o CDN do HF corta o corpo no meio ("Connection closed
+      // while receiving data") e uma queda bastava para matar o download
+      // inteiro (Haibane no Moto G7: SenseVoice + LFM falhavam e voltavam a
+      // "faltando" sem mensagem). Os bytes já escritos ficam no arquivo, o
+      // Range retoma de onde parou → cada tentativa só custa o pedaço faltante.
+      for (var attempt = 1;; attempt++) {
+        try {
+          return await _fetchOnce(client, dest, url, headers, onProgress);
+        } on ModelDownloadException catch (e) {
+          // 'Download incompleto' pede retomada; só nessa última tenta
+          // rethrow p/ o chamador ler a mensagem amigável.
+          final partial =
+              e.message.startsWith('Download incompleto');
+          if (partial && attempt < maxAttempts) {
+            await Future.delayed(Duration(seconds: 1 << attempt));
+            continue;
+          }
+          rethrow;
+        } on HttpException {
+          if (attempt < maxAttempts) {
+            await Future.delayed(Duration(seconds: 1 << attempt));
+            continue;
+          }
+          // Sem o erro cru dentro: ele é longo (URL inteira) e a tela
+          // mostra só a dica acionável; o detalhe fica no logcat.
+          throw const ModelDownloadException(
+              'Conexão caiu no meio do download. Toque em Gerar/ Baixar de '
+              'novo — retoma de onde parou.');
+        } on SocketException {
+          if (attempt < maxAttempts) {
+            await Future.delayed(Duration(seconds: 1 << attempt));
+            continue;
+          }
+          throw const ModelDownloadException(
+              'Sem rede no meio do download. Confira o Wi-Fi e toque em '
+              'Gerar/ Baixar de novo — retoma de onde parou.');
         }
-      } finally {
-        await sink.close();
       }
-      // Download interrompido parecia "completo" (causa do EP3): só confia
-      // no total quando o servidor informou Content-Length.
-      if (knownLen && got != total) {
-        throw ModelDownloadException(
-            'Download incompleto ($got/$total bytes). Tente de novo no Wi-Fi.');
-      }
-      return dest;
     } finally {
       client.close();
     }
+  }
+
+  static Future<File> _fetchOnce(
+    HttpClient client,
+    File dest,
+    String url,
+    Map<String, String> headers,
+    void Function(int got, int total)? onProgress,
+  ) async {
+    var start = await dest.exists() ? await dest.length() : 0;
+    final req = await client.getUrl(Uri.parse(url));
+    headers.forEach(req.headers.set);
+    // HF barra bots em alguns repos (401): UA de browser passa.
+    // Só quando o chamador não definiu um (não quebra anti-bot de vídeos).
+    if (req.headers.value(HttpHeaders.userAgentHeader) == null) {
+      req.headers.set(HttpHeaders.userAgentHeader,
+          'Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36');
+    }
+    if (start > 0) req.headers.set('Range', 'bytes=$start-');
+    var resp = await req.close();
+    if (resp.statusCode == 416) {
+      // Range além do fim = arquivo já completo.
+      onProgress?.call(start, start);
+      return dest;
+    }
+    if (resp.statusCode != 200 && resp.statusCode != 206) {
+      throw ModelDownloadException('HTTP ${resp.statusCode} em $url');
+    }
+    if (resp.statusCode == 200 && start > 0) start = 0; // sem resume
+    final knownLen = resp.contentLength >= 0;
+    final total = (resp.contentLength < 0 ? 0 : resp.contentLength) + start;
+    final sink = dest.openWrite(
+        mode: start > 0 ? FileMode.append : FileMode.write);
+    var got = start;
+    try {
+      await for (final chunk in resp) {
+        sink.add(chunk);
+        got += chunk.length;
+        onProgress?.call(got, total);
+      }
+    } finally {
+      await sink.close();
+    }
+    // Download interrompido parecia "completo" (causa do EP3): só confia
+    // no total quando o servidor informou Content-Length.
+    if (knownLen && got != total) {
+      throw ModelDownloadException(
+          'Download incompleto ($got/$total bytes). Tente de novo no Wi-Fi.');
+    }
+    return dest;
   }
 
   Future<int> usedBytes() async {
