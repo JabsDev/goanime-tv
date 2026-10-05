@@ -11,6 +11,7 @@ import 'llm_mt.dart';
 import 'model_manager.dart';
 import 'mt_provider.dart';
 import 'srt_parser.dart';
+import 'subtitle_foreground.dart';
 import 'subtitle_store.dart';
 
 /// Fase visível do job (a UI mostra message + progress + detail; nunca 0%
@@ -69,12 +70,16 @@ class SubtitleJobManager {
       {String detail = '', String? error}) {
     progress.value = progressValue;
     status.value = message;
-    state.value = JobState(
+    final st = JobState(
         phase: phase,
         progress: progressValue,
         message: message,
         detail: detail,
         error: error);
+    state.value = st;
+    // Serviço de 1º plano: mantém o job vivo com o app em fundo/tela apagada
+    // (notificação de progresso; best-effort — no teste/host é no-op).
+    SubtitleForeground.notify(st);
     // Breadcrumb anti-crash: grava a fase no job file (só ao trocar de fase).
     // Se o SO matar o app (OOM), o próximo boot lê e explica em vez de 0% mudo.
     final cur = _current;
@@ -168,7 +173,7 @@ class SubtitleJobManager {
       return 'Falha interna do worker de voz. Atualize o app e tente de novo.';
     }
     if (s.contains('worker STT sem resposta')) {
-      return 'Voz demorou demais (aparelho sem memória?). Tente o modelo leve (tiny).';
+      return 'Voz demorou demais (aparelho sem memória?). Tente o modelo leve (Whisper anime leve).';
     }
     if (s.contains('worker STT:')) {
       final short = s.replaceAll(RegExp(r'^.*worker STT:\s*'), '');
@@ -388,7 +393,7 @@ class SubtitleJobManager {
   static String _gateCues(int translated, int total) {
     if (total <= 0) {
       throw StateError(
-          '0 falas traduzidas — troque o modelo de voz (tiny→sensevoice/base) '
+          '0 falas traduzidas — troque o modelo de voz (Whisper anime leve/v0.3) '
           'e tente de novo.');
     }
     // <30% das falas traduzidas: salva igual, mas avisa honestamente.
@@ -443,7 +448,7 @@ class SubtitleJobManager {
       debugPrint('[SubtitleJob] falas traduzidas $translated/$falas');
       if (out.isEmpty) {
         throw StateError(
-            '0 falas traduzidas — troque o modelo de voz (tiny→sensevoice/base) '
+            '0 falas traduzidas — troque o modelo de voz (Whisper anime leve/v0.3) '
             'e tente de novo.');
       }
       // Rewrap 42x2: fonte externa pode ter linha única longa; mpv não
@@ -471,8 +476,9 @@ class SubtitleJobManager {
     final audioOnlyPath = '${tmp.path}/ep${job.ep}.aac';
     final pcmPath = '${tmp.path}/ep${job.ep}.pcm';
     final stt = job.sttFor!();
-    // tiny traduz ja→en (MT recebe 'en'); base/small transcrevem ja (NLLB).
-    final mtSrc = stt.id == 'whisper-tiny-ja' ? 'en' : 'ja';
+    // Poda Fase 1: os dois tiers de voz transcrevem JA (não há mais tiny
+    // ja→en); o MT sempre recebe japonês.
+    const mtSrc = 'ja';
     var finished = false;
     try {
       String mediaPath = videoPath;
@@ -483,7 +489,7 @@ class SubtitleJobManager {
       } else {
         final download = job.download ??
             (String url, Map<String, String> h, String out) =>
-                ModelManager.fetchFile(
+                ModelManager.fetchFileParallel(
                     dest: File(out), url: url, headers: h,
                     onProgress: (got, total) {
                       final p = total <= 0 ? 0.0 : got / total;
@@ -515,7 +521,7 @@ class SubtitleJobManager {
           detail: 'pode demorar ~1 min na 1ª vez');
       await stt.load().timeout(const Duration(minutes: 3), onTimeout: () {
         throw StateError(
-            'Modelo de voz demorou demais (timeout 3 min). Tente o modelo leve (tiny).');
+            'Modelo de voz demorou demais (timeout 3 min). Tente o modelo leve (Whisper anime leve).');
       });
       List<SrtCue> srcCues = [];
       try {
@@ -559,17 +565,24 @@ class SubtitleJobManager {
           final p = (i + 1) / (srcCues.isEmpty ? 1 : srcCues.length);
           _set(JobPhase.translating, 0.73 + 0.24 * p, 'Traduzindo…',
               detail: srcCues.isEmpty ? '' : '${i + 1}/${srcCues.length} falas');
+          // Antes o job file ficava cravado em 0.73 a tradução inteira (só o
+          // STT salvava): resume e monitoramento não viam avanço.
+          if (i % 10 == 0) {
+            await job.save(progress: 0.73 + 0.24 * p, phase: 'translating');
+          }
         }
         final (out, translated, falas) = _resolveCues(srcCues, translations);
         debugPrint('[SubtitleJob] falas traduzidas $translated/$falas');
         if (out.isEmpty) {
           throw StateError(
-              '0 falas traduzidas — troque o modelo de voz (tiny→sensevoice/base) '
+              '0 falas traduzidas — troque o modelo de voz (Whisper anime leve/v0.3) '
               'e tente de novo.');
         }
         // Pós STT+sensevoice: rewrap 42x2 + split proporcional do chunk
         // (2ª frase não aparece adiantada) + shift +150ms do pré-roll VAD.
         final fitted = SrtParser.postprocess(out, fromStt: true);
+        // Fase 1: a auditoria saiu do fluxo (as classes seguem no repo, mas
+        // o job não gera a variante `ja-ai-audit`).
         await _finish(
           job,
           'ja-ai',
@@ -688,9 +701,9 @@ class _Job {
 
   String get _sttId {
     try {
-      return sttFor?.call().id ?? 'whisper-tiny-ja';
+      return sttFor?.call().id ?? 'sensevoice-ja';
     } catch (_) {
-      return 'whisper-tiny-ja';
+      return 'sensevoice-ja';
     }
   }
 

@@ -45,24 +45,40 @@ void main() {
     expect(SettingsService.instance.sttModel, 'sensevoice');
     await SettingsService.instance.init();
     expect(SettingsService.instance.sttModel, 'sensevoice');
-    await SettingsService.instance.setSttModel('tiny');
+    await SettingsService.instance.setSttModel('sensevoice');
   });
 
-  test('default em aparelho fraco é sensevoice; forte é tiny (item 4)',
-      () async {
-    SettingsService.lowEndOverrideForTest = true;
+  test('default (Fase 1) é sensevoice/manga', () async {
     await SettingsService.instance.init();
     expect(SettingsService.instance.sttModel, 'sensevoice');
-    SettingsService.lowEndOverrideForTest = false;
-    await SettingsService.instance.init();
-    expect(SettingsService.instance.sttModel, 'tiny');
-    SettingsService.lowEndOverrideForTest = null;
+    expect(SettingsService.instance.mtEngine, 'manga');
   });
 
-  test('tiers publicados batem com o catálogo (q3km fora)', () async {
-    expect(AiProviders.sttTierOrder, ['tiny', 'sensevoice', 'base', 'small']);
-    expect(AiProviders.mtTierOrder,
-        ['minima', 'leve', 'media', 'completa']);
+  test('preferência de tier removido migra p/ sensevoice/manga', () async {
+    // Aparelho já configurado com tiers baixos (tiny/leve) antes da poda:
+    // o init NÃO pode manter o valor fora da whitelist (que a UI não oferece
+    // mais) nem cair no mesmo valor na próxima gravação.
+    SharedPreferences.setMockInitialValues({
+      'settings_ai_stt': 'tiny',
+      'settings_ai_mt': 'leve',
+    });
+    await LocalStorage.init();
+    await SettingsService.instance.init();
+    expect(SettingsService.instance.sttModel, 'sensevoice');
+    expect(SettingsService.instance.mtEngine, 'manga');
+  });
+
+  test('setSttModel/setMtEngine recusam tier removido', () async {
+    await SettingsService.instance.init();
+    await SettingsService.instance.setSttModel('small');
+    await SettingsService.instance.setMtEngine('lmt');
+    expect(SettingsService.instance.sttModel, 'sensevoice');
+    expect(SettingsService.instance.mtEngine, 'manga');
+  });
+
+  test('tiers publicados batem com o catálogo (só os altos)', () async {
+    expect(AiProviders.sttTierOrder, ['sensevoice', 'jav03']);
+    expect(AiProviders.mtTierOrder, ['manga', 'completa']);
     for (final tier in AiProviders.sttTierOrder) {
       expect(aiModelCatalog[AiProviders.sttTiers[tier]!.id], isNotNull,
           reason: 'tier $tier sem spec no catálogo');

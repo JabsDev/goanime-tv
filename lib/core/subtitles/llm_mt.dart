@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'glossary.dart';
 import 'model_manager.dart';
 import 'mt_provider.dart';
 
@@ -31,7 +32,6 @@ class MethodLlmChannel implements LlmChannel {
   @override
   Future<void> dispose() => _ch.invokeMethod('dispose');
 }
-
 /// MT Hy-MT2-1.8B via llama.cpp (GGUF, JA→PT direto + EN→PT).
 /// Sessão nativa cacheada; [dispose] descarrega (carga sequencial com STT).
 class LlmMtProvider extends MtProvider {
@@ -40,15 +40,17 @@ class LlmMtProvider extends MtProvider {
   /// Tamanho esperado (MB) p/ validar o GGUF no load; injetado pelo
   /// catálogo via AiProviders (fallback inferido pelo nome do dir).
   final int? expectedMb;
-  /// LLM é lento por frase (pior no stick): teto 10 min.
+  /// LLM é lento por frase (pior no stick): teto 2 min. Antes 10 min — uma
+  /// fala patológica segurava o job por até 20 min (com retry) sem aviso.
   final Duration translateTimeout;
   LlmChannel? _ch;
   bool _loaded = false;
+  Glossary? _glossary;
 
   LlmMtProvider(this.modelPath,
       {this.channelForTest,
       this.expectedMb,
-      this.translateTimeout = const Duration(minutes: 10)});
+      this.translateTimeout = const Duration(minutes: 2)});
 
   @override
   String get id => 'hymt-llm';
@@ -64,6 +66,8 @@ class LlmMtProvider extends MtProvider {
       }
     }
     _ch = channelForTest ?? MethodLlmChannel();
+    // Glossário editável (honoríficos/nomes/jargão). Recarrega a cada job.
+    _glossary = await Glossary.load();
     _loaded = true;
   }
 
@@ -169,13 +173,19 @@ class LlmMtProvider extends MtProvider {
     final srcCode = _llmCode(src);
     final tgtCode = _llmCode(tgt);
     if (srcCode == tgtCode) return text;
-    final parts = pieces(text).where((p) => !isJunk(p));
+    // Glossário: termos (honoríficos/nomes/jargão) viram [T1], [T2]... antes de
+    // ir pro modelo, e voltam ao destino escolhido depois da tradução.
+    final g = _glossary;
+    final prot = g == null ? null : g.protect(text);
+    final source = prot?.text ?? text;
+    final parts = pieces(source).where((p) => !isJunk(p));
     final out = <String>[];
     for (final p in parts) {
       final t = await _translatePiece(ch, p.trim(), srcCode, tgtCode);
       if (!isDegenerate(t) && t.trim().isNotEmpty) out.add(t);
     }
-    return out.join(' ');
+    final joined = out.join(' ');
+    return prot == null ? joined : g!.restore(joined, prot);
   }
 
   @override
@@ -187,6 +197,5 @@ class LlmMtProvider extends MtProvider {
     _loaded = false;
   }
 
-  static String get modelIdQ3 => 'hymt-ja-pt-q3km';
   static String get modelIdQ4 => 'hymt-ja-pt-q4';
 }

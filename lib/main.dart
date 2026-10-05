@@ -5,6 +5,8 @@ import 'core/device/device_type.dart';
 import 'core/profile/profile_service.dart';
 import 'core/storage/local_storage.dart';
 import 'core/storage/settings_service.dart';
+import 'core/subtitles/legendai/legendai_connection.dart';
+import 'core/subtitles/legendai/legendai_job_manager.dart';
 import 'core/subtitles/subtitle_store.dart';
 import 'core/updater/update_service.dart';
 import 'app.dart';
@@ -30,6 +32,13 @@ void main() async {
     SubtitleStore.pruneExpired().then((n) {
       if (n > 0) debugPrint('[Main] subs expiradas removidas: $n');
     });
+    // Fase 3: fila remota do LegendAI. Carrega o espelho e reconcilia se já
+    // houver PC pareado (best-effort; sem PC configurado é no-op).
+    await LegendAiJobManager.instance.init();
+    if (LegendAiConnection.instance.isConfigured) {
+      // ignore: discarded_futures
+      LegendAiConnection.instance.refresh();
+    }
     runApp(const GoAnimeTVApp());
   } catch (e) {
     debugPrint('[Main] Error initializing app: $e');

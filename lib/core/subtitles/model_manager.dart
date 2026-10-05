@@ -37,39 +37,34 @@ class AiModelSpec {
 
 /// `final` (não const): assert de paralelismo remoteFiles/files.
 final aiModelCatalog = <String, AiModelSpec>{
-  // STT sherpa_onnx Whisper int8 (nomes locais normalizados; VAD opcional).
-  // tiny multilíngue cobre JA via translate; upgrade = exportar tiny-ja
-  // fine-tuned p/ layout sherpa (encoder/decoder/tokens).
-  'whisper-tiny-ja': AiModelSpec(
-      id: 'whisper-tiny-ja', label: 'Voz leve (tiny)',
-      hint: 'Voz · transforma o áudio japonês em texto inglês. Rápido, qualidade básica (passo 1 de 2)',
-      mb: 110, sha256: 'PINAR', strongOnly: false,
-      repo: 'csukuangfj/sherpa-onnx-whisper-tiny',
-      remoteFiles: ['tiny-encoder.int8.onnx', 'tiny-decoder.int8.onnx', 'tiny-tokens.txt'],
-      files: ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']),
-  'whisper-base': AiModelSpec(
-      id: 'whisper-base', label: 'Voz equilibrada (base)',
-      hint: 'Voz · transcreve o japonês com mais qualidade. Mais lento (passo 1 de 2)',
-      mb: 170, sha256: 'PINAR', strongOnly: false,
-      repo: 'csukuangfj/sherpa-onnx-whisper-base',
-      remoteFiles: ['base-encoder.int8.onnx', 'base-decoder.int8.onnx', 'base-tokens.txt'],
-      files: ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']),
-  'whisper-small': AiModelSpec(
-      id: 'whisper-small', label: 'Voz superior (small)',
-      hint: 'Voz · melhor transcrição de japonês. Só aparelho forte (passo 1 de 2)',
-      mb: 380, sha256: 'PINAR', strongOnly: true,
-      repo: 'csukuangfj/sherpa-onnx-whisper-small',
-      remoteFiles: ['small-encoder.int8.onnx', 'small-decoder.int8.onnx', 'small-tokens.txt'],
-      files: ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']),
-  // STT JA dedicado: SenseVoice-small int8 multilíngue (encoder direto, sem
-  // decoder autoregressivo — rápido e leve; idioma fixo 'ja' no provider).
+  // STT JA dedicado. Poda Fase 1: só os tiers ALTOS. ANTES era o SenseVoice
+  // (multilíngue, 86,6% de erro em galgame, 80% de deleção — o tokenizer de
+  // caracteres chinês degrada japonês). Substituído pelo whisper-small
+  // DESTILADO nos dados de anime (distill1-4 em asr_eval): encoder int8 +
+  // decoder int8 no formato sherpa, ~375 MB, ~23% filtrado. Fica no tier
+  // 'sensevoice' (chave já persistida nos aparelhos). Roda pelo motor ORT
+  // próprio (canal jav03), não pelo sherpa.
   'sensevoice-ja': AiModelSpec(
-      id: 'sensevoice-ja', label: 'Voz JA dedicada (SenseVoice)',
-      hint: 'Voz · transcreve japonês direto, rápido no stick fraco (passo 1 de 2)',
-      mb: 240, sha256: 'PINAR', strongOnly: false,
-      repo: 'csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17',
-      remoteFiles: ['model.int8.onnx', 'tokens.txt'],
-      files: ['model.int8.onnx', 'tokens.txt']),
+      id: 'sensevoice-ja', label: 'Voz JA dedicada (Whisper anime leve)',
+      hint: 'Voz · Whisper destilado p/ anime, leve e mais preciso (passo 1 de 2)',
+      mb: 420, sha256: 'PINAR', strongOnly: false,
+      repo: 'Jabs2/whisper-small-anime-distill',
+      remoteFiles: [
+        'mel.onnx',
+        'encoder_model.int8.onnx',
+        'encoder_model.int8.onnx.data',
+        'decoder_model.int8.onnx',
+        'decoder_model.int8.onnx.data',
+        'tokens.txt',
+      ],
+      files: [
+        'mel.onnx',
+        'encoder_model.int8.onnx',
+        'encoder_model.int8.onnx.data',
+        'decoder_model.int8.onnx',
+        'decoder_model.int8.onnx.data',
+        'tokens.txt',
+      ]),
   // VAD silero opcional (sem ele, janelas fixas de 30s).
   'silero-vad': AiModelSpec(
       id: 'silero-vad', label: 'VAD silero (opcional)',
@@ -78,15 +73,34 @@ final aiModelCatalog = <String, AiModelSpec>{
       repo: 'deepghs/silero-vad-onnx',
       remoteFiles: ['silero_vad.onnx'],
       files: ['vad.onnx']),
+  // Whisper-ja-anime-v0.3 (efwkjn), int8 encoder + fp16 decoder + front-end de
+  // mel (grafo ONNX). Roda pela C API do ONNX Runtime JA embarcado (o
+  // libonnxruntime.so do fork sherpa) — sem segundo runtime. CER ~6,5%
+  // (filtrado) contra 16,2% do anime-whisper, com deleção 3× menor.
+  // ATENÇÃO: o artefato é export optimum + quantização; o export sherpa do
+  // v0.3 está quebrado (decoder diverge do torch com prompt de 4 tokens).
+  // Nomes locais normalizados; a ordem casa remoteFiles.
+  'whisper-ja-anime-v03': AiModelSpec(
+      id: 'whisper-ja-anime-v03', label: 'Voz anime v0.3 (Whisper JA anime)',
+      hint: 'Voz · Whisper ja anime v0.3, menos erro e menos deleção (grande; passo 1 de 2)',
+      mb: 900, sha256: 'PINAR', strongOnly: false,
+      repo: 'Jabs2/whisper-ja-anime-v03-onnx',
+      remoteFiles: [
+        'mel.onnx',
+        'encoder_model.int8.onnx',
+        'encoder_model.int8.onnx.data',
+        'decoder_model.fp16.onnx',
+        'tokens.txt',
+      ],
+      files: [
+        'mel.onnx',
+        'encoder_model.int8.onnx',
+        'encoder_model.int8.onnx.data',
+        'decoder_model.fp16.onnx',
+        'tokens.txt',
+      ]),
   // MT JA→PT direta via llama.cpp (GGUF auto-contido, tokenizer embutido).
-  // Q3_K_M comunitário (Jabs2, 6/6 no gate) e Q4_K_M oficial (tencent).
-  'hymt-ja-pt-q3km': AiModelSpec(
-      id: 'hymt-ja-pt-q3km', label: 'Tradução JA→PT (Hy-MT2 Q3_K_M)',
-      hint: 'Tradução · leva japonês ou inglês p/ português (passo 2 de 2)',
-      mb: 907, sha256: 'PINAR', strongOnly: false,
-      repo: 'Jabs2/Hy-MT2-1.8B-Q3_K_M-GGUF',
-      remoteFiles: ['Hy-MT2-1.8B-Q3_K_M.gguf'],
-      files: ['model.gguf']),
+  // Q4_K_M oficial (tencent). Poda Fase 1: o Q3_K_M saiu do catálogo.
   'hymt-ja-pt-q4': AiModelSpec(
       id: 'hymt-ja-pt-q4', label: 'Tradução JA→PT (Hy-MT2 Q4_K_M)',
       hint: 'Tradução · igual ao Q3, com mais qualidade (passo 2 de 2)',
@@ -94,34 +108,62 @@ final aiModelCatalog = <String, AiModelSpec>{
       repo: 'tencent/Hy-MT2-1.8B-GGUF',
       remoteFiles: ['Hy-MT2-1.8B-Q4_K_M.gguf'],
       files: ['model.gguf']),
-  // MT intermediária: Hy-MT2 com imatrix em dado JA-PT (gate 6/6 igual ao
-  // Q4, ~274 MB menor). Repositório próprio (Jabs2) c/ README do gate.
-  'hymt-ja-pt-iq3m': AiModelSpec(
-      id: 'hymt-ja-pt-iq3m', label: 'Tradução intermediária (Hy-MT2 IQ3_M)',
-      hint: 'Tradução · qualidade do Q4 num arquivo menor (passo 2 de 2)',
-      mb: 859, sha256: 'PINAR', strongOnly: false,
-      repo: 'Jabs2/Hy-MT2-1.8B-IQ3_M-GGUF',
-      remoteFiles: ['Hy-MT2-1.8B-IQ3_M.gguf'],
+  // MT de domínio (Recomendado): Hy-MT2 1.8B fine-tune em mangá/anime,
+  // aceita destino PT. No EP3 (209 falas do anime-whisper) traduziu 30/30
+  // falas de pausa e 0 saiu em japonês; o Hy-MT2 base IQ3M falhou em 22%.
+  // EXIGE o chat template HunYuan + bloco de terminologia: com prompt cru
+  // o base degrada (cjk 35 -> 101). Não usar prompt cru.
+  'hymt-ja-pt-manga-v3': AiModelSpec(
+      id: 'hymt-ja-pt-manga-v3', label: 'Tradução mangá (Hy-MT2 v3 Q4)',
+      hint: 'Tradução · fine-tune de mangá, melhor p/ JA de anime (passo 2 de 2)',
+      mb: 1133, sha256: 'PINAR', strongOnly: false,
+      repo: 'fumetodev/Hy-MT2-1.8B-JP-Manga-Finetune-v3-multilingual-GGUF',
+      remoteFiles: ['manga-v3a-Q4_K_M.gguf'],
       files: ['model.gguf']),
-  // MT leve: LFM2.5-1.2B com fine-tune JA-PT próprio (QLoRA 6000 steps,
-  // gate 5/6; JA2 com honorífico ainda falha). Repositório próprio (Jabs2).
-  'lfm12b-ja-pt-iq3m': AiModelSpec(
-      id: 'lfm12b-ja-pt-iq3m', label: 'Tradução leve (LFM 1.2B IQ3_M)',
-      hint: 'Tradução · menor e mais rápida, qualidade básica (passo 2 de 2)',
-      mb: 541, sha256: 'PINAR', strongOnly: false,
-      repo: 'Jabs2/LFM2.5-1.2B-JAPT-GGUF',
-      remoteFiles: ['LFM2.5-1.2B-JAPT-IQ3_M.gguf'],
-      files: ['model.gguf']),
-  // MT mínima: Qwen3-0.6B com fine-tune JA-PT próprio (QLoRA 6000 steps,
-  // gate 4/6 sem alucinações bizarras — só trocas de palavra). A menor
-  // opção p/ aparelho fraco ou pouco disco. Repositório próprio (Jabs2).
-  'qwen06-ja-pt-q4': AiModelSpec(
-      id: 'qwen06-ja-pt-q4', label: 'Tradução mínima (Qwen 0.6B Q4_K_M)',
-      hint: 'Tradução · a menor opção, qualidade simples (passo 2 de 2)',
-      mb: 378, sha256: 'PINAR', strongOnly: false,
-      repo: 'Jabs2/Qwen3-0.6B-JAPT-GGUF',
-      remoteFiles: ['Qwen3-0.6B-JAPT-Q4_K_M.gguf'],
-      files: ['model.gguf']),
+  // Auditorias de legenda: LLM leve DIFERENTE do tradutor (segundo par de
+  // olhos). Mesmo runtime llama.cpp nativo; só o GGUF muda. Dois passes no
+  // job: PRÉ-tradução (JA) e PÓS-tradução (PT). O escolhido fica em
+  // Settings (settings_ai_audit); 'off' = sem auditoria (comportamento atual).
+  // NOTA HONESTA: os repos apontados ainda não estão hospedados no HF; o
+  // teste no aparelho usa os GGUFs via adb push (arquivos presentes = pronto).
+  // Auditor seq2seq próprio (ByT5 fine-tunado, ONNX int8/fp32). Limpa a
+  // transcrição JA ANTES de traduzir. NÃO é LLM nem tradutor. Hoje os arquivos
+  // vêm por adb push; o repo abaixo é o destino p/ publicar (download futuro).
+  'ja-seq2seq': AiModelSpec(
+      id: 'ja-seq2seq', label: 'Auditor JA seq2seq (ByT5)',
+      hint: 'Auditoria · limpa a transcrição JA antes de traduzir (rápido)',
+      mb: 551, sha256: 'PINAR', strongOnly: false,
+      repo: 'Jabs2/goanime-auditor-ja',
+      remoteFiles: ['encoder.onnx', 'decoder.onnx'],
+      files: ['encoder.onnx', 'decoder.onnx']),
+  'heretic-1b-it': AiModelSpec(
+      id: 'heretic-1b-it', label: 'Auditor gemma-3 1B (Heretic)',
+      hint: 'Voz · revisa a legenda antes e depois da tradução (teste)',
+      mb: 769, sha256: 'PINAR', strongOnly: false,
+      repo: 'Andycurrent/Gemma-3-1B-it-GLM-4.7-Flash-Heretic-Uncensored-Thinking_GGUF',
+      remoteFiles: ['Gemma-3-1B-it-GLM-4.7-Flash-Heretic-Uncensored-Thinking_Q4_k_m.gguf'],
+      files: ['auditor.gguf']),
+  'qwen3-06b': AiModelSpec(
+      id: 'qwen3-06b', label: 'Auditor Qwen3 0.6B',
+      hint: 'Voz · revisa a legenda antes e depois da tradução (teste)',
+      mb: 767, sha256: 'PINAR', strongOnly: false,
+      repo: 'Qwen/Qwen3-0.6B-GGUF',
+      remoteFiles: ['Qwen3-0.6B-Q8_0.gguf'],
+      files: ['auditor.gguf']),
+  'lfm25-dist': AiModelSpec(
+      id: 'lfm25-dist', label: 'Auditor LFM dist 350M',
+      hint: 'Voz · revisa a legenda antes e depois da tradução (teste)',
+      mb: 146, sha256: 'PINAR', strongOnly: false,
+      repo: 'Jabs2/lfm25-dist-gguf',
+      remoteFiles: ['lfm25-dist-q4km.gguf'],
+      files: ['auditor.gguf']),
+  'lfm12b-audit': AiModelSpec(
+      id: 'lfm12b-audit', label: 'Auditor LFM 1.2B',
+      hint: 'Voz · revisa a legenda antes e depois da tradução (teste)',
+      mb: 540, sha256: 'PINAR', strongOnly: false,
+      repo: 'Jabs2/lfm12b-ja-gguf',
+      remoteFiles: ['lfm12b-ja-iq3m.gguf'],
+      files: ['auditor.gguf']),
 };
 
 /// Download de modelos: só Wi-Fi (flag do chamador), Range/resume, sha256.
@@ -362,6 +404,185 @@ class ModelManager {
           'Download incompleto ($got/$total bytes). Tente de novo no Wi-Fi.');
     }
     return dest;
+  }
+
+  static const _userAgent =
+      'Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36';
+
+  /// Download multi-parte (N conexões em paralelo por `Range`) para arquivos
+  /// grandes — o vídeo do archive.org serve ~1-2 MB/s por conexão e aceita
+  /// `Range`, então paralelizar dá 2-4x. Cada parte baixa em um arquivo
+  /// próprio e retoma independente; no fim são concatenadas no destino. Se o
+  /// servidor não expõe tamanho/206, cai no [fetchFile] (1 conexão) intacto.
+  static Future<File> fetchFileParallel({
+    required File dest,
+    required String url,
+    Map<String, String> headers = const {},
+    int connections = 4,
+    int minChunkBytes = 4 * 1024 * 1024,
+    void Function(int got, int total)? onProgress,
+    int maxAttempts = 4,
+  }) async {
+    final client = HttpClient();
+    try {
+      final total = await _probeTotal(client, url, headers);
+      if (total == null || total <= 0) {
+        return fetchFile(
+            dest: dest, url: url, headers: headers, onProgress: onProgress);
+      }
+      if (await dest.exists() && await dest.length() == total) {
+        onProgress?.call(total, total);
+        return dest;
+      }
+      // Ajusta as conexões ao tamanho (evita 8 conexões p/ um arquivo pequeno).
+      final n = (total / minChunkBytes).ceil().clamp(1, connections);
+      if (n <= 1) {
+        return fetchFile(
+            dest: dest, url: url, headers: headers, onProgress: onProgress);
+      }
+      final chunk = (total / n).ceil();
+      final parts = Directory('${dest.path}.parts');
+      await parts.create(recursive: true);
+      await dest.parent.create(recursive: true);
+      final got = List<int>.filled(n, 0);
+      for (var i = 0; i < n; i++) {
+        final f = File('${parts.path}/$i');
+        if (await f.exists()) got[i] = await f.length();
+      }
+      void report() =>
+          onProgress?.call(got.fold<int>(0, (a, b) => a + b), total);
+      report();
+      await Future.wait([
+        for (var i = 0; i < n; i++)
+          _downloadPart(
+            client: client,
+            url: url,
+            headers: headers,
+            part: File('${parts.path}/$i'),
+            start: i * chunk,
+            end: ((i + 1) * chunk - 1).clamp(0, total - 1),
+            maxAttempts: maxAttempts,
+            onDelta: (d) {
+              got[i] += d;
+              report();
+            },
+          ),
+      ]);
+      // Concatena (I/O local, rápido) e confere o tamanho final.
+      final out = dest.openWrite();
+      try {
+        for (var i = 0; i < n; i++) {
+          await out.addStream(File('${parts.path}/$i').openRead());
+        }
+      } finally {
+        await out.close();
+      }
+      final len = await dest.length();
+      if (len != total) {
+        throw ModelDownloadException(
+            'Download incompleto ($len/$total bytes). Tente de novo.');
+      }
+      try {
+        await parts.delete(recursive: true);
+      } catch (_) {}
+      onProgress?.call(total, total);
+      return dest;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// `Content-Range: bytes 0-0/12345` → 12345; null se o servidor não
+  /// aceita `Range` (aí o chamador cai no single-connection).
+  static Future<int?> _probeTotal(
+      HttpClient client, String url, Map<String, String> headers) async {
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      headers.forEach(req.headers.set);
+      if (req.headers.value(HttpHeaders.userAgentHeader) == null) {
+        req.headers.set(HttpHeaders.userAgentHeader, _userAgent);
+      }
+      req.headers.set('Range', 'bytes=0-0');
+      final resp = await req.close();
+      final cr = resp.headers.value('content-range');
+      await resp.drain<void>();
+      if (resp.statusCode == 206 && cr != null) {
+        final m = RegExp(r'/(\d+)\s*$').firstMatch(cr);
+        if (m != null) return int.tryParse(m.group(1)!);
+      }
+      if (resp.statusCode == 200 && resp.contentLength > 0) {
+        return resp.contentLength;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _downloadPart({
+    required HttpClient client,
+    required String url,
+    required Map<String, String> headers,
+    required File part,
+    required int start,
+    required int end,
+    required int maxAttempts,
+    required void Function(int delta) onDelta,
+  }) async {
+    final want = end - start + 1;
+    for (var attempt = 1;; attempt++) {
+      try {
+        final have = await part.exists() ? await part.length() : 0;
+        if (have >= want) return;
+        final req = await client.getUrl(Uri.parse(url));
+        headers.forEach(req.headers.set);
+        if (req.headers.value(HttpHeaders.userAgentHeader) == null) {
+          req.headers.set(HttpHeaders.userAgentHeader, _userAgent);
+        }
+        req.headers.set('Range', 'bytes=${start + have}-$end');
+        final resp = await req.close();
+        if (resp.statusCode == 416) return; // parte já completa
+        if (resp.statusCode != 200 && resp.statusCode != 206) {
+          throw ModelDownloadException('HTTP ${resp.statusCode} em $url');
+        }
+        final sink =
+            part.openWrite(mode: have > 0 ? FileMode.append : FileMode.write);
+        try {
+          await for (final b in resp) {
+            sink.add(b);
+            onDelta(b.length);
+          }
+        } finally {
+          await sink.close();
+        }
+        if (await part.length() >= want) return;
+        throw ModelDownloadException(
+            'Download incompleto da parte $start-$end. Tente de novo.');
+      } on ModelDownloadException catch (e) {
+        final retryable = e.message.startsWith('Download incompleto') ||
+            e.message.startsWith('HTTP ');
+        if (retryable && attempt < maxAttempts) {
+          await Future.delayed(Duration(seconds: 1 << attempt));
+          continue;
+        }
+        rethrow;
+      } on HttpException {
+        if (attempt < maxAttempts) {
+          await Future.delayed(Duration(seconds: 1 << attempt));
+          continue;
+        }
+        throw const ModelDownloadException(
+            'Conexão caiu no meio do download. Tente de novo — retoma de '
+            'onde parou.');
+      } on SocketException {
+        if (attempt < maxAttempts) {
+          await Future.delayed(Duration(seconds: 1 << attempt));
+          continue;
+        }
+        throw const ModelDownloadException(
+            'Sem rede no meio do download. Confira o Wi-Fi e tente de novo.');
+      }
+    }
   }
 
   Future<int> usedBytes() async {

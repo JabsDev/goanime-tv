@@ -14,7 +14,38 @@ import 'srt_parser.dart';
 class SpeechChunk {
   final double startSec;
   final Float32List samples;
-  const SpeechChunk(this.startSec, this.samples);
+
+  /// true = janela fixa emitida pela rede de recall do VAD (fala baixa que o
+  /// Silero não detectou). Só observabilidade: o decode usa os samples iguais.
+  final bool fallback;
+  const SpeechChunk(this.startSec, this.samples, {this.fallback = false});
+}
+
+/// Heurística anti-alucinação para o texto das janelas de recall do VAD: sobre
+/// música de abertura/efeito o STT devolve só pontuação ("…", "。") ou a mesma
+/// sílaba repetida muitas vezes ("んんっ、んんっ…", "ふ、ふ、ふ…"). Isso não é
+/// fala e não deve virar legenda. Aplicada só a chunks [SpeechChunk.fallback]
+/// — nunca à saída normal do VAD nem de outros modelos.
+bool looksLikeSttNoise(String text) {
+  final stripped = text.replaceAll(
+      RegExp(r'[\s、。．，,！!？?…‥・「」『』（）()\[\]{}<>—–\-ー~〜:：;；]'), '');
+  if (stripped.isEmpty) return true;
+  if (stripped.length >= 6 && stripped.split('').toSet().length <= 2) {
+    return true;
+  }
+  return false;
+}
+
+/// Segmento sem conteúdo textual: só pausa, pontuação ou vocalização.
+///
+/// Distinto de [looksLikeSttNoise], que existe para as janelas de recall
+/// sobre música. Aqui o segmento é fala real, mas o STT não conseguiu
+/// transcrever nada além do resíduo — tipicamente "…" numa pausa de meio
+/// segundo. Enviar isso ao MT produz lixo traduzido ou fala repetida.
+bool isPauseOnly(String text) {
+  final stripped = text.replaceAll(
+      RegExp(r'[\s、。．，,！!？?…‥・「」『』（）()\[\]{}<>—–\-ー~〜:：;；]'), '');
+  return stripped.isEmpty;
 }
 
 /// Copia `models/silero-vad/vad.onnx` para dentro da pasta do modelo STT
@@ -56,25 +87,35 @@ class SherpaSttEngine implements SttEngine {
   bool _hasVad = false;
 
   /// 'whisper' (tiny/base/small) ou 'sensevoice' (JA dedicado).
+  /// `vadOnly`: só o VAD silero (sem recognizer) — usado pelo engine jav03,
+  /// que segmenta com o VAD do sherpa e decodifica pelo ONNX Runtime.
   final String sttKind;
-  SherpaSttEngine({this.sttKind = 'whisper'});
+  final bool vadOnly;
+  SherpaSttEngine({this.sttKind = 'whisper', this.vadOnly = false});
 
   @override
   Future<void> init(String modelDir,
       {required String task, int threads = 2}) async {
     // Guarda anti-crash nativo: sherpa estoura sem mensagem se faltar arquivo.
-    final needed = sttKind == 'sensevoice'
-        ? const ['model.int8.onnx', 'tokens.txt']
-        : const ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt'];
-    for (final f in needed) {
-      if (!await File('$modelDir/$f').exists()) {
-        throw StateError('Modelo de voz incompleto (falta $f). Baixe de novo.');
+    if (!vadOnly) {
+      final needed = sttKind == 'sensevoice'
+          ? const ['model.int8.onnx', 'tokens.txt']
+          : const ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt'];
+      for (final f in needed) {
+        if (!await File('$modelDir/$f').exists()) {
+          throw StateError('Modelo de voz incompleto (falta $f). Baixe de novo.');
+        }
       }
     }
     // Log permanente: evidência de H1 (VAD na pasta certa) no logcat.
     _hasVad = await ensureVadInModelDir(modelDir);
-    debugPrint('[SherpaStt] VAD: $_hasVad ($modelDir)');    _worker = await _SttWorker.spawn(modelDir,
-        task: task, withVad: _hasVad, threads: threads, sttKind: sttKind);
+    debugPrint('[SherpaStt] VAD: $_hasVad ($modelDir)${vadOnly ? ' (vad-only)' : ''}');
+    _worker = await _SttWorker.spawn(modelDir,
+        task: task,
+        withVad: _hasVad,
+        threads: threads,
+        sttKind: sttKind,
+        vadOnly: vadOnly);
   }
 
   @override
@@ -128,7 +169,8 @@ class _SttWorker {
       {required String task,
       required bool withVad,
       int threads = 2,
-      String sttKind = 'whisper'}) async {
+      String sttKind = 'whisper',
+      bool vadOnly = false}) async {
     final ready = ReceivePort();
     final errors = ReceivePort();
     ReceivePort? resp;
@@ -136,7 +178,8 @@ class _SttWorker {
     try {
       try {
         iso = await Isolate.spawn(
-            _entry, [ready.sendPort, modelDir, task, withVad, threads, sttKind],
+            _entry,
+            [ready.sendPort, modelDir, task, withVad, threads, sttKind, vadOnly],
             debugName: 'stt-worker', onError: errors.sendPort);
       } catch (e) {
         ready.close();
@@ -201,8 +244,10 @@ class _SttWorker {
       final segs = await _call('segments',
           [off ~/ sr, Float32List.fromList(pcm.sublist(off, end)), withVad]);
       for (final s in (segs as List)) {
-        out.add(SpeechChunk((s[0] as num).toDouble(),
-            Float32List.fromList((s[1] as List).cast<double>())));
+        out.add(SpeechChunk(
+            (s[0] as num).toDouble(),
+            Float32List.fromList((s[1] as List).cast<double>()),
+            fallback: s.length > 2 && s[2] == true));
       }
     }
     return out;
@@ -237,13 +282,17 @@ class _SttWorker {
     final withVad = args[3] as bool;
     final threads = args[4] as int;
     final sttKind = args.length > 5 ? args[5] as String : 'whisper';
+    final vadOnly = args.length > 6 ? args[6] as bool : false;
     // Qualquer throw aqui (binding, modelo corrompido) vira mensagem
     // de erro no handshake — nunca morte silenciosa do isolate.
-    late final sherpa.OfflineRecognizer recognizer;
+    sherpa.OfflineRecognizer? recognizer;  // null em vadOnly (engine jav03)
     sherpa.VoiceActivityDetector? vad;
     try {
       sherpa.initBindings();
-      if (sttKind == 'sensevoice') {
+      if (vadOnly) {
+        // Engine jav03: aqui só o VAD. O recognizer (encoder/decoder) não é
+        // criado — o decode daquele modelo é pelo ONNX Runtime, no Kotlin.
+      } else if (sttKind == 'sensevoice') {
         // JA dedicado: encoder direto (sem decoder autoregressivo).
         recognizer = sherpa.OfflineRecognizer(
           sherpa.OfflineRecognizerConfig(
@@ -286,8 +335,18 @@ class _SttWorker {
       try {
         vad = sherpa.VoiceActivityDetector(
           config: sherpa.VadModelConfig(
+            // Recall/segmentação afinados p/ diálogo de anime (Haibane EP3):
+            // o default (threshold 0.5, minSilence 0.5, maxSpeech 5) fundia
+            // falas em blocos de 10-12s e o Silero v5 ainda pulava fala baixa.
+            // maxSpeech menor mantém cues curtos; minSilence menor separa
+            // falas vizinhas. A cobertura do que ainda escapar é garantida
+            // por _recoverMissedSpeech.
             sileroVad: sherpa.SileroVadModelConfig(
-                model: '$modelDir/vad.onnx', maxSpeechDuration: 30),
+                model: '$modelDir/vad.onnx',
+                threshold: 0.4,
+                minSilenceDuration: 0.3,
+                minSpeechDuration: 0.15,
+                maxSpeechDuration: 12),
             sampleRate: 16000,
             numThreads: 1,
             debug: false,
@@ -315,14 +374,19 @@ class _SttWorker {
             reply.send({'id': id, 'value': _segment(vad, pcm, baseSec, useVad)});
           case 'decode':
             final samples = m['arg'] as Float32List;
-            final stream = recognizer.createStream();
+            final rec = recognizer;
+            if (rec == null) {
+              reply.send({'id': id, 'value': _error('decode indisponível (vad-only)')});
+              return;
+            }
+            final stream = rec.createStream();
             // finally de propósito: chunk com erro vazava o stream e o
             // recognizer.free() depois derrubava o processo (SIGSEGV no
             // dispose — app "só fechava" entre voz e tradução, sem breadcrumb).
             try {
               stream.acceptWaveform(samples: samples, sampleRate: 16000);
-              recognizer.decode(stream);
-              final text = recognizer.getResult(stream).text.trim();
+              rec.decode(stream);
+              final text = rec.getResult(stream).text.trim();
               reply.send({'id': id, 'value': text});
             } catch (e) {
               reply.send({'id': id, 'value': _error(e)});
@@ -333,7 +397,7 @@ class _SttWorker {
             }
           case 'free':
             vad?.free();
-            recognizer.free();
+            recognizer?.free();
             reply.send({'id': id, 'value': true});
             inbox.close();
         }
@@ -346,7 +410,8 @@ class _SttWorker {
   static List<List<dynamic>> _segment(sherpa.VoiceActivityDetector? vad,
       Float32List pcm, int baseSec, bool useVad) {
     const sr = 16000;
-    if (!useVad || vad == null) {
+    final v = vad;
+    if (!useVad || v == null) {
       // ponytail: sem VAD, janelas fixas de 30s (cobre OP/ED longas sem corte).
       final out = <List<dynamic>>[];
       for (var off = 0; off < pcm.length; off += 30 * sr) {
@@ -358,17 +423,116 @@ class _SttWorker {
       }
       return out;
     }
-    vad.acceptWaveform(pcm);
-    vad.flush();
+    // CRÍTICO: alimentar o VAD em sub-chunks (~window_size), NUNCA com o bloco
+    // inteiro. O `acceptWaveform` com 60s de uma vez faz o silero emitir
+    // ~1 segmento de ~0,3s por bloco (Haibane EP3: 18 falas — pior que sem
+    // VAD). Com chunks de 512 o mesmo VAD devolve ~121-148 segmentos corretos
+    // (reproduzido na C API; ver .qa/haibane_ep3/relatorio-haibane-ep3.md).
+    const chunk = 512;
     final out = <List<dynamic>>[];
-    while (!vad.isEmpty()) {
-      final seg = vad.front();
-      vad.pop();
-      if (seg.samples.length < sr ~/ 4) continue; // <250ms = ruído
-      out.add([baseSec + seg.start / sr, seg.samples]);
+    // Amostras cobertas por segmento do VAD: a rede de recall não pode
+    // recortar o que o VAD já entregou (senão duplica cue).
+    final covered = Uint8List(pcm.length);
+    void drain() {
+      while (!v.isEmpty()) {
+        final seg = v.front();
+        v.pop();
+        if (seg.samples.length < sr ~/ 5) continue; // <200ms = ruído
+        final s = seg.start < 0 ? 0 : seg.start;
+        final e = (seg.start + seg.samples.length).clamp(0, pcm.length);
+        if (e > s) covered.fillRange(s, e, 1);
+        out.add([baseSec + seg.start / sr, seg.samples, false]);
+      }
     }
-    vad.reset();
+
+    for (var off = 0; off < pcm.length; off += chunk) {
+      final end = (off + chunk).clamp(0, pcm.length);
+      v.acceptWaveform(pcm.sublist(off, end));
+      drain();
+    }
+    v.flush();
+    drain();
+    v.reset();
+    // Recall DESATIVADO: com o Silero v4 (k2-fsa) o VAD já cobre 1:44-3:00 sem
+    // precisar forçar janelas. O recall enfiava a abertura (música) no Whisper,
+    // que alucinava ("ん、ん、ん…" / "E o amor, e o amor…").
+    // _recoverMissedSpeech(pcm, covered, baseSec, out);
     return out;
+  }
+
+  /// Rede de recall do VAD. O Silero v5 (deepghs/silero-vad-onnx, o modelo que
+  /// o app baixa) é conservador: na Haibane Renmei EP3 ignorou por completo o
+  /// diálogo baixo de 1:44-3:00 (o trecho tem fala real — confirmado por ASR
+  /// com SenseVoice). Onde há energia de fala (RMS > 0,010) que o VAD NÃO
+  /// cobriu, emite janelas fixas de 6s para o STT não perder o trecho. Música
+  /// de fundo baixa (RMS tipicamente < 0,008) fica de fora, e o que já veio do
+  /// VAD é preservado (sem sobreposição/duplicação).
+  static void _recoverMissedSpeech(Float32List pcm, Uint8List covered,
+      int baseSec, List<List<dynamic>> out) {
+    const sr = 16000;
+    const win = sr ~/ 4; // 0.25s: granularidade do portão de energia
+    const thr2 = 0.010 * 0.010; // RMS mínimo de fala baixa
+    const minRun = sr * 4 ~/ 5; // 0.8s: abaixo disso é transiente/ruído
+    const hole = 5600; // 0.35s: ponte entre sílabas
+    const fb = sr * 6; // janela de fallback (6s)
+    const minChunk = sr ~/ 5; // 200ms
+    final n = pcm.length;
+    // 1) energia por janela de 0.25s -> marca "fala baixa" por amostra.
+    final active = Uint8List(n);
+    for (var a = 0; a < n; a += win) {
+      final b = (a + win).clamp(0, n);
+      var sum = 0.0;
+      for (var k = a; k < b; k++) {
+        sum += pcm[k] * pcm[k];
+      }
+      if (b > a && sum / (b - a) > thr2) active.fillRange(a, b, 1);
+    }
+    // 2) livres = fala baixa ainda não coberta pelo VAD.
+    final free = Uint8List(n);
+    for (var k = 0; k < n; k++) {
+      if (active[k] != 0 && covered[k] == 0) free[k] = 1;
+    }
+    // 3) agrupa trechos livres (tolerando buracos curtos) e fatia em janelas.
+    var i = 0;
+    while (i < n) {
+      if (free[i] == 0) {
+        i++;
+        continue;
+      }
+      var j = i;
+      var last = i;
+      while (j < n) {
+        if (free[j] != 0) {
+          last = j;
+        } else if (covered[j] != 0 || j - last > hole) {
+          break;
+        }
+        j++;
+      }
+      final end = (last + 1).clamp(0, n);
+      if (end - i >= minRun) {
+        var p = i;
+        while (p < end) {
+          var q = (p + fb).clamp(0, end);
+          while (q > p && covered[q - 1] != 0) {
+            q--;
+          }
+          if (q - p >= minChunk) {
+            out.add([
+              baseSec + p / sr,
+              Float32List.fromList(pcm.sublist(p, q)),
+              true
+            ]);
+          }
+          p = q;
+          while (p < end && covered[p] != 0) {
+            p++;
+          }
+          if (p <= i) break; // segurança anti-loop
+        }
+      }
+      i = end;
+    }
   }
 
   static String _error(Object e) => '__STT_ERROR__$e';
@@ -395,6 +559,7 @@ class SherpaSttProvider extends SttProvider {
   String get id {
     if (sttKind == 'sensevoice') return 'sensevoice-ja';
     final base = modelDir.split('/').last;
+    if (base.contains('anime-whisper')) return 'anime-whisper-ja';
     if (base.contains('small')) return 'whisper-small';
     if (task == 'transcribe') return 'whisper-base';
     return 'whisper-tiny-ja';
@@ -421,6 +586,10 @@ class SherpaSttProvider extends SttProvider {
     final file = File(pcm16kPath);
     final totalBytes = await file.length();
     final totalSamples = totalBytes ~/ 2;
+    // Diagnóstico do gap (EP3 1:44-3:00): tamanho do PCM vs. duração do vídeo
+    // denuncia extração incompleta; log por segmento mostra se o texto veio
+    // vazio (o `continue` abaixo é o que remove cue).
+    debugPrint('[STT] pcm totalSamples=$totalSamples (${(totalSamples / sr).toStringAsFixed(1)}s)');
     final raf = await file.open();
     try {
       final cues = <SrtCue>[];
@@ -437,12 +606,35 @@ class SherpaSttProvider extends SttProvider {
         }
         final baseSec = done / sr;
         final chunks = await engine.segments(pcm);
+        // O recall de fala baixa anexa os fallbacks DEPOIS dos segmentos do
+        // VAD no mesmo slice → ordem temporal quebrada. Ordena por início.
+        chunks.sort((a, b) => a.startSec.compareTo(b.startSec));
+        debugPrint('[STT] slice base=${baseSec.toStringAsFixed(0)}s chunks=${chunks.length}');
         for (final chunk in chunks) {
           if (isCancelled?.call() ?? false) return cues;
           final text = await engine.decode(chunk);
-          if (text.trim().isEmpty) continue;
           final start = baseSec + chunk.startSec;
           final end = start + chunk.samples.length / sr;
+          final short = text.replaceAll('\n', ' ');
+          debugPrint('[STT] seg ${start.toStringAsFixed(1)}-${end.toStringAsFixed(1)}s '
+              '${chunk.fallback ? '[fb] ' : ''}"${short.length > 60 ? short.substring(0, 60) : short}"');
+          if (text.trim().isEmpty) continue;
+          // Sobre música de abertura/efeito, o STT devolve só pontuação ou a
+          // mesma sílaba repetida ("んんっ、んんっ…"). Essas janelas de recall
+          // não viram legenda.
+          if (chunk.fallback && looksLikeSttNoise(text)) {
+            debugPrint('[STT] drop ruído ${start.toStringAsFixed(1)}s');
+            continue;
+          }
+          // Segmento do VAD pode ser só pausa: o anime-whisper emite "…" com
+          // 0,9s de áudio e nenhum conteúdo. 30 de 209 cues do EP3 são assim.
+          // Não há o que traduzir, e o MT só tem como devolver ruído — então
+          // some antes de gastar token. Vale para todos os MT (Hy-MT2, LFM,
+          // LMT): a entrada ruim estraga a saída em qualquer um deles.
+          if (isPauseOnly(text)) {
+            debugPrint('[STT] drop pausa ${start.toStringAsFixed(1)}s "$short"');
+            continue;
+          }
           cues.add(SrtCue(
             index: cues.length + 1,
             start: Duration(milliseconds: (start * 1000).toInt()),

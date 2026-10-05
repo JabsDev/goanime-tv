@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/subtitles/ai_providers.dart';
+import '../../core/subtitles/legendai/legendai_connection.dart';
 import '../../core/subtitles/model_manager.dart';
 import '../../core/subtitles/subtitle_store.dart';
 import '../../core/updater/update_service.dart';
@@ -12,6 +13,8 @@ import '../../shared/widgets/app_top_bar.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import '../../shared/widgets/tv_button.dart';
 import '../ai_subtitle/ai_model_row.dart';
+import 'legendai_pair_screen.dart';
+import 'legendai_queue_card.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -23,8 +26,10 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   /// 1 único probe p/ todos os tiers (linha NÃO re-proba por build).
   Future<Map<String, bool>> _aiStatuses = AiProviders.readyMap(
-      AiProviders.sttTiers.values.map((t) => t.id)
-          .followedBy(AiProviders.mtTiers.values));
+    AiProviders.sttTiers.values
+        .map((t) => t.id)
+        .followedBy(AiProviders.mtTiers.values),
+  );
   final Map<String, double> _downloading = {};
 
   @override
@@ -49,16 +54,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         setState(() {
           _aiStatuses = AiProviders.readyMap(
-              AiProviders.sttTiers.values.map((t) => t.id)
-                  .followedBy(AiProviders.mtTiers.values));
+            AiProviders.sttTiers.values
+                .map((t) => t.id)
+                .followedBy(AiProviders.mtTiers.values),
+          );
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Modelo pronto.')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Modelo pronto.')));
       }
     } on ModelDownloadException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
       }
     } finally {
       if (mounted) setState(() => _downloading.remove(modelId));
@@ -84,7 +93,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 final user = SettingsService.instance.userPreference;
                 return ListView(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 48, vertical: 24),
+                    horizontal: 48,
+                    vertical: 24,
+                  ),
                   children: [
                     Text(
                       'Desempenho',
@@ -166,8 +177,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             _ModeOption(
                               label: 'Filtrar (padrão)',
-                              description:
-                                  'Esconde animes hentai e ecchi',
+                              description: 'Esconde animes hentai e ecchi',
                               selected: nsfwSetting == NsfwFilterSetting.strict,
                               onTap: () => SettingsService.instance
                                   .setNsfwFilterLevel(NsfwFilterSetting.strict),
@@ -182,8 +192,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                             _ModeOption(
                               label: 'Desativado',
-                              description:
-                                  'Mostra todo o conteúdo, sem filtro',
+                              description: 'Mostra todo o conteúdo, sem filtro',
                               selected: nsfwSetting == NsfwFilterSetting.off,
                               onTap: () => SettingsService.instance
                                   .setNsfwFilterLevel(NsfwFilterSetting.off),
@@ -233,8 +242,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const Text(
                       'Gera legenda PT-BR no aparelho, sem nuvem: traduz a '
                       'legenda existente (rápido) ou transcreve o áudio japonês '
-                      '(lento, uma vez por episódio, vale por 5 dias). Modelos '
-                      'baixam só no Wi-Fi.',
+                      '(lento, uma vez por episódio, vale por 5 dias). Só os '
+                      'modelos de alta qualidade ficam disponíveis; baixam só '
+                      'no Wi-Fi.',
                       style: TextStyle(
                         fontSize: 16,
                         color: ThemeConstants.textSecondary,
@@ -314,6 +324,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       downloading: _downloading,
                       onDownload: _download,
                     ),
+                    const SizedBox(height: 32),
+                    _LegendAiSection(),
                     const SizedBox(height: 32),
                     const Text(
                       'Atualizações',
@@ -450,12 +462,14 @@ class _StatusCard extends StatelessWidget {
     final detectorLabel = autoDetectedLowEnd
         ? 'Dispositivo fraco detectado'
         : 'Dispositivo capaz detectado';
-    final activeLabel = liteActive ? 'Modo ativo: Lite' : 'Modo ativo: Completo';
+    final activeLabel = liteActive
+        ? 'Modo ativo: Lite'
+        : 'Modo ativo: Completo';
     final sourceLabel = userPreference == null
         ? 'Escolha: Automática'
         : userPreference!
-            ? 'Escolha: Lite forçado'
-            : 'Escolha: Completo forçado';
+        ? 'Escolha: Lite forçado'
+        : 'Escolha: Completo forçado';
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -542,8 +556,7 @@ class _AutoSkipToggleState extends State<_AutoSkipToggle> {
   Widget build(BuildContext context) {
     return Focus(
       onFocusChange: (f) => setState(() => _isFocused = f),
-      onKeyEvent: (node, event) =>
-          FocusKeyHandler.handle(node, event, _toggle),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, _toggle),
       child: Semantics(
         button: true,
         toggled: widget.on,
@@ -554,8 +567,7 @@ class _AutoSkipToggleState extends State<_AutoSkipToggle> {
             borderRadius: BorderRadius.circular(12),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 120),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               decoration: BoxDecoration(
                 color: ThemeConstants.surface,
                 borderRadius: BorderRadius.circular(12),
@@ -630,8 +642,7 @@ class _UpdateToggleState extends State<_UpdateToggle> {
   Widget build(BuildContext context) {
     return Focus(
       onFocusChange: (f) => setState(() => _isFocused = f),
-      onKeyEvent: (node, event) =>
-          FocusKeyHandler.handle(node, event, _toggle),
+      onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, _toggle),
       child: Semantics(
         button: true,
         toggled: widget.on,
@@ -642,8 +653,7 @@ class _UpdateToggleState extends State<_UpdateToggle> {
             borderRadius: BorderRadius.circular(12),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 120),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               decoration: BoxDecoration(
                 color: ThemeConstants.surface,
                 borderRadius: BorderRadius.circular(12),
@@ -724,10 +734,9 @@ class _CheckNowRowState extends State<_CheckNowRow> {
         UpdateState.error => 'A última atualização falhou.',
         UpdateState.idle => 'Uma atualização está em andamento.',
       };
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(msg),
-        duration: const Duration(seconds: 3),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
+      );
       return;
     }
 
@@ -737,19 +746,22 @@ class _CheckNowRowState extends State<_CheckNowRow> {
     setState(() => _busy = false);
 
     if (result == false) {
-      final msg = updater.lastCheckNotice ?? 'Você está na versão mais recente.';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(msg),
-        duration: const Duration(seconds: 3),
-      ));
+      final msg =
+          updater.lastCheckNotice ?? 'Você está na versão mais recente.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
+      );
     } else if (result == null) {
       // Só sobra erro de rede/timeout aqui: o no-op por estado ativo já foi
       // tratado no pré-check acima.
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text(
-            'Não foi possível verificar atualizações agora. Tente novamente.'),
-        duration: Duration(seconds: 3),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Não foi possível verificar atualizações agora. Tente novamente.',
+          ),
+          duration: Duration(seconds: 3),
+        ),
+      );
     }
   }
 
@@ -808,7 +820,9 @@ class _ModeOptionState extends State<_ModeOption> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 120),
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 18),
+                  horizontal: 20,
+                  vertical: 18,
+                ),
                 decoration: BoxDecoration(
                   color: widget.selected
                       ? ThemeConstants.primary.withValues(alpha: 0.12)
@@ -818,8 +832,8 @@ class _ModeOptionState extends State<_ModeOption> {
                     color: widget.selected
                         ? ThemeConstants.primary
                         : _isFocused
-                            ? ThemeConstants.primary
-                            : ThemeConstants.surfaceLight,
+                        ? ThemeConstants.primary
+                        : ThemeConstants.surfaceLight,
                     width: widget.selected ? 2 : 1.5,
                   ),
                 ),
@@ -868,6 +882,178 @@ class _ModeOptionState extends State<_ModeOption> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Seção "LegendAI (PC)": status/pareamento, modo padrão e fila unificada.
+class _LegendAiSection extends StatefulWidget {
+  const _LegendAiSection();
+
+  @override
+  State<_LegendAiSection> createState() => _LegendAiSectionState();
+}
+
+class _LegendAiSectionState extends State<_LegendAiSection> {
+  bool _busy = false;
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _test() async {
+    setState(() => _busy = true);
+    final ok = await LegendAiConnection.instance.refresh();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    final c = LegendAiConnection.instance;
+    _snack(
+      ok
+          ? 'PC conectado${c.healthLabel.isEmpty ? '' : ' · ${c.healthLabel}'}'
+          : 'PC não respondeu. Confira o endereço e se o LegendAI está aberto.',
+    );
+  }
+
+  Future<void> _disconnect() async {
+    await LegendAiConnection.instance.disconnect();
+    if (!mounted) return;
+    _snack('Desconectado.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'LegendAI (PC)',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: ThemeConstants.white,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Gera a legenda no PC da rede local: o PC baixa o stream, '
+          'transcreve e traduz, e o aparelho só recebe o SRT pronto. Escolha '
+          '"No PC" no card do episódio quando estiver conectado.',
+          style: TextStyle(
+            fontSize: 16,
+            color: ThemeConstants.textSecondary,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 20),
+        ValueListenableBuilder<LegendAiStatus>(
+          valueListenable: LegendAiConnection.instance.status,
+          builder: (context, status, _) => _pairStatusLine(status),
+        ),
+        const SizedBox(height: 12),
+        if (_busy)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: LinearProgressIndicator(
+              backgroundColor: Colors.white24,
+              valueColor: AlwaysStoppedAnimation(ThemeConstants.primary),
+            ),
+          ),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            TVButton(
+              label: 'Conectar / parear',
+              icon: Icons.qr_code_2,
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const LegendAiPairScreen()),
+              ),
+            ),
+            TVButton(
+              label: 'Testar conexão',
+              isPrimary: false,
+              icon: Icons.wifi_find,
+              onPressed: _busy ? () {} : _test,
+            ),
+            if (LegendAiConnection.instance.isConfigured)
+              TVButton(
+                label: 'Desconectar',
+                isPrimary: false,
+                icon: Icons.link_off,
+                onPressed: _busy ? () {} : _disconnect,
+              ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Onde gerar por padrão',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+            color: ThemeConstants.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 12),
+        ValueListenableBuilder<String>(
+          valueListenable: SettingsService.instance.subtitleSourceListenable,
+          builder: (context, src, _) => Column(
+            children: [
+              _ModeOption(
+                label: 'No aparelho',
+                description:
+                    'Usa os modelos locais (Whisper anime + Hy-MT2). Mais lento.',
+                selected: src != 'pc',
+                onTap: () =>
+                    SettingsService.instance.setSubtitleSource('device'),
+              ),
+              _ModeOption(
+                label: 'No PC (LegendAI)',
+                description:
+                    'Envia o stream para o PC e recebe o SRT pronto da rede.',
+                selected: src == 'pc',
+                onTap: () => SettingsService.instance.setSubtitleSource('pc'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        const LegendAiQueueCard(),
+      ],
+    );
+  }
+
+  Widget _pairStatusLine(LegendAiStatus status) {
+    final address = SettingsService.instance.legendAiAddressListenable.value;
+    final c = LegendAiConnection.instance;
+    final (color, text) = switch (status) {
+      LegendAiStatus.online => (
+        Colors.greenAccent,
+        'PC conectado · ${c.healthLabel}',
+      ),
+      LegendAiStatus.checking => (Colors.orangeAccent, 'Conectando…'),
+      LegendAiStatus.offline => (Colors.redAccent, 'PC não respondeu'),
+      LegendAiStatus.unconfigured => (
+        ThemeConstants.textSecondary,
+        'Nenhum PC configurado',
+      ),
+    };
+    final showAddr =
+        status != LegendAiStatus.unconfigured &&
+        status != LegendAiStatus.checking &&
+        address.isNotEmpty;
+    return Row(
+      children: [
+        Icon(Icons.circle, size: 12, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            showAddr ? '$text · $address' : text,
+            style: TextStyle(color: color, fontSize: 15),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -6,16 +6,32 @@
     <!-- Auto-update (sideload): instalação via PackageInstaller + confirm -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
+    <!-- Geração de legenda IA em segundo plano: foreground service (dataSync)
+         mantém o processo vivo com o app fechado; wake lock mantém a CPU
+         acordada com a tela apagada; notificação de progresso (13+ pede
+         permissão em runtime). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <!-- Fase 4: leitura do QR de pareamento do LegendAI. Câmera opcional
+         (Android TV não tem) — o botão é escondido quando não há câmera e a
+         digitação manual do IP continua disponível. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+
     <!-- Android TV permissions -->
     <uses-feature android:name="android.software.leanback"
                   android:required="false"/>
     
     <application
+        android:name=".GoAnimeApp"
         android:label="goanime_tv"
-        android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:banner="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -40,6 +56,13 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Job de legenda IA em 2º plano: foreground `dataSync` + wake lock.
+             stopWithTask=false: deslizar o app dos recentes NÃO para o job. -->
+        <service
+            android:name=".SubtitleJobService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="dataSync"/>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

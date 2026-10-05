@@ -130,20 +130,36 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('legenda IA: 4 tiers de voz, sem q3km (item 7)', (tester) async {
+  testWidgets('legenda IA: 2 tiers de voz e 2 de tradução, sem auditoria',
+      (tester) async {
     await pumpSettings(tester);
     // Desce até a seção Legenda IA e verifica as linhas unificadas.
     await tester.scrollUntilVisible(
-      find.text('Voz Whisper tiny'),
+      find.text('Voz Whisper anime leve'),
       160,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    expect(find.text('Voz Whisper tiny'), findsOneWidget);
-    expect(find.text('Voz SenseVoice'), findsOneWidget);
-    expect(find.text('Voz Whisper base'), findsOneWidget);
-    expect(find.text('Voz Whisper small'), findsOneWidget);
+    expect(find.text('Voz Whisper anime leve'), findsOneWidget);
+    expect(find.text('Voz Whisper anime v0.3'), findsOneWidget);
+    // Tiers baixos removidos na Fase 1.
+    expect(find.text('Voz Whisper tiny'), findsNothing);
+    expect(find.text('Voz Whisper base'), findsNothing);
+    expect(find.text('Voz Whisper small'), findsNothing);
+    expect(find.text('Anime Whisper'), findsNothing);
+    // Tradução: só os altos.
+    await tester.scrollUntilVisible(
+      find.text('Tradução Hy-MT2 Q4_K_M'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Tradução Hy-MT2 v3 mangá Q4'), findsOneWidget);
+    expect(find.text('Tradução Hy-MT2 Q4_K_M'), findsOneWidget);
+    // Auditoria saiu da UI (Fase 1).
+    expect(find.textContaining('Auditoria'), findsNothing);
     // Entrada morta descontinuada (nenhum tier mapeia mais).
     expect(find.textContaining('Q3_K_M'), findsNothing);
+    expect(find.textContaining('LFM'), findsNothing);
+    expect(find.textContaining('Qwen'), findsNothing);
   });
 }

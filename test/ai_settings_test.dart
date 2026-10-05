@@ -17,49 +17,49 @@ void main() {
     await SettingsService.instance.init();
   });
 
-  group('Settings IA (Fase 4)', () {
-    test('padrões: tiny + leve', () {
-      expect(SettingsService.instance.sttModel, 'tiny');
-      expect(SettingsService.instance.mtEngine, 'leve');
+  group('Settings IA (Fase 1 — poda p/ tiers altos)', () {
+    test('padrões: sensevoice + manga', () {
+      expect(SettingsService.instance.sttModel, 'sensevoice');
+      expect(SettingsService.instance.mtEngine, 'manga');
     });
 
     test('troca persiste no restart', () async {
-      await SettingsService.instance.setSttModel('base');
+      await SettingsService.instance.setSttModel('jav03');
       await SettingsService.instance.setMtEngine('completa');
       await SettingsService.instance.init();
-      expect(SettingsService.instance.sttModel, 'base');
+      expect(SettingsService.instance.sttModel, 'jav03');
       expect(SettingsService.instance.mtEngine, 'completa');
-      expect(SettingsService.instance.sttModelListenable.value, 'base');
+      expect(SettingsService.instance.sttModelListenable.value, 'jav03');
       // volta ao padrão p/ não vazar entre testes
-      await SettingsService.instance.setSttModel('tiny');
-      await SettingsService.instance.setMtEngine('leve');
+      await SettingsService.instance.setSttModel('sensevoice');
+      await SettingsService.instance.setMtEngine('manga');
     });
 
-    test('stt small é válido e persiste', () async {
-      await SettingsService.instance.setSttModel('small');
-      expect(SettingsService.instance.sttModel, 'small');
+    test('stt jav03 é válido e persiste', () async {
+      await SettingsService.instance.setSttModel('jav03');
+      expect(SettingsService.instance.sttModel, 'jav03');
       await SettingsService.instance.init();
-      expect(SettingsService.instance.sttModel, 'small');
-      await SettingsService.instance.setSttModel('tiny');
+      expect(SettingsService.instance.sttModel, 'jav03');
+      await SettingsService.instance.setSttModel('sensevoice');
     });
 
-    test('mt media é válido e persiste', () async {
-      await SettingsService.instance.setMtEngine('media');
-      expect(SettingsService.instance.mtEngine, 'media');
+    test('mt manga é válido e persiste', () async {
+      await SettingsService.instance.setMtEngine('manga');
+      expect(SettingsService.instance.mtEngine, 'manga');
       await SettingsService.instance.init();
-      expect(SettingsService.instance.mtEngine, 'media');
-      await SettingsService.instance.setMtEngine('leve');
+      expect(SettingsService.instance.mtEngine, 'manga');
+      await SettingsService.instance.setMtEngine('manga');
     });
 
-    test('valor inválido cai no padrão', () async {
+    test('valor inválido cai no padrão novo', () async {
       await SettingsService.instance.setSttModel('xxx');
       await SettingsService.instance.setMtEngine('yyy');
-      expect(SettingsService.instance.sttModel, 'tiny');
-      expect(SettingsService.instance.mtEngine, 'leve');
+      expect(SettingsService.instance.sttModel, 'sensevoice');
+      expect(SettingsService.instance.mtEngine, 'manga');
     });
   });
 
-  group('AiProviders readiness', () {
+  group('AiProviders readiness (Fase 1)', () {
     late Directory root;
 
     setUp(() async {
@@ -93,39 +93,26 @@ void main() {
       expect(await AiProviders.makeMt(modelRootForTest: root), isNull);
     });
 
-    test('stt small pronto quando arquivos existem', () async {
-      await _fakeModel('whisper-small',
-          ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']);
+    test('stt sensevoice pronto quando arquivos existem', () async {
+      await _fakeModel(
+          'sensevoice-ja', aiModelCatalog['sensevoice-ja']!.files);
+      final stt = await AiProviders.makeStt(
+          modelRootForTest: root, stt: 'sensevoice');
+      expect(stt?.id, 'whisper-small-anime-distill');
+    });
+
+    test('stt jav03 pronto quando arquivos existem', () async {
+      await _fakeModel(
+          'whisper-ja-anime-v03', aiModelCatalog['whisper-ja-anime-v03']!.files);
       final stt =
-          await AiProviders.makeStt(modelRootForTest: root, stt: 'small');
-      expect(stt?.id, 'whisper-small');
+          await AiProviders.makeStt(modelRootForTest: root, stt: 'jav03');
+      expect(stt?.id, 'whisper-ja-anime-v03');
     });
 
-    test('stt tiny pronto quando arquivos existem', () async {
-      await _fakeModel('whisper-tiny-ja',
-          ['encoder.int8.onnx', 'decoder.int8.onnx', 'tokens.txt']);
-      final stt =
-          await AiProviders.makeStt(modelRootForTest: root, stt: 'tiny');
-      expect(stt?.id, 'whisper-tiny-ja');
-    });
-
-    test('mt minima (Qwen 0.6B) pronto quando arquivo existe', () async {
-      await _fakeModel('qwen06-ja-pt-q4', ['model.gguf']);
-      final mt = await AiProviders.makeMt(
-          modelRootForTest: root, engine: 'minima');
-      expect(mt?.id, 'hymt-llm');
-    });
-
-    test('mt leve (LFM 1.2B) pronto quando arquivo existe', () async {
-      await _fakeModel('lfm12b-ja-pt-iq3m', ['model.gguf']);
-      final mt = await AiProviders.makeMt(modelRootForTest: root);
-      expect(mt?.id, 'hymt-llm');
-    });
-
-    test('mt media (Hy-MT2 IQ3) pronto quando arquivo existe', () async {
-      await _fakeModel('hymt-ja-pt-iq3m', ['model.gguf']);
-      final mt = await AiProviders.makeMt(
-          modelRootForTest: root, engine: 'media');
+    test('mt manga (Hy-MT2 v3 Q4) pronto quando arquivo existe', () async {
+      await _fakeModel('hymt-ja-pt-manga-v3', ['model.gguf']);
+      final mt =
+          await AiProviders.makeMt(modelRootForTest: root, engine: 'manga');
       expect(mt?.id, 'hymt-llm');
     });
 
@@ -133,6 +120,12 @@ void main() {
       await _fakeModel('hymt-ja-pt-q4', ['model.gguf']);
       final mt = await AiProviders.makeMt(
           modelRootForTest: root, engine: 'completa');
+      expect(mt?.id, 'hymt-llm');
+    });
+
+    test('default do makeMt é manga', () async {
+      await _fakeModel('hymt-ja-pt-manga-v3', ['model.gguf']);
+      final mt = await AiProviders.makeMt(modelRootForTest: root);
       expect(mt?.id, 'hymt-llm');
     });
   });

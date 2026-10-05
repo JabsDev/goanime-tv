@@ -16,18 +16,17 @@ class SettingsService {
   static const _kNsfwFilter = 'settings_nsfw_filter';
   static const _kOnboardingSeen = 'settings_onboarding_seen';
   static const _kAutoSkipIntro = 'settings_auto_skip_intro';
-  static const _kSttModel = 'settings_ai_stt'; // 'tiny'|'base'|'small'|'sensevoice'
-  static const _kMtEngine = 'settings_ai_mt'; // 'minima'|'leve'|'media'|'completa'
+  static const _kSttModel = 'settings_ai_stt'; // 'sensevoice'|'jav03'
+  static const _kMtEngine = 'settings_ai_mt'; // 'manga'|'completa'
+  // LegendAI (PC) — Fase 3: endereço do servidor na LAN + modo padrão.
+  static const _kLegendAiHost = 'settings_legendai_host';
+  static const _kLegendAiPort = 'settings_legendai_port';
+  static const _kSubtitleSource = 'settings_subtitle_source'; // 'device'|'pc'
 
-  /// Whitelist do setter (antes 'sensevoice' era descartado — persistência
-  /// quebrada, estudo §2.3/§item 4). Inválido → 'tiny'.
-  static const _sttTiers = {'tiny', 'base', 'small', 'sensevoice'};
-  static const _mtTiers = {'minima', 'leve', 'media', 'completa'};
-
-  /// Hook de teste do default por aparelho (padrão setClockForTest):
-  /// null = usa DeviceCapability.isLowEnd(); true = default 'sensevoice'.
-  @visibleForTesting
-  static bool? lowEndOverrideForTest;
+  /// Whitelist do setter. Poda Fase 1: só os tiers ALTOS. Inválido → default
+  /// ('sensevoice'/'manga'), nunca nos tiers baixos removidos (tiny/leve).
+  static const _sttTiers = {'sensevoice', 'jav03'};
+  static const _mtTiers = {'manga', 'completa'};
 
   bool? _userPref;
   bool _autoLite = false;
@@ -47,20 +46,45 @@ class SettingsService {
   ValueListenable<bool> get autoSkipIntroListenable => _autoSkipIntroVN;
   bool get autoSkipIntro => _autoSkipIntro;
 
-  /// Legenda IA: STT 'tiny' (L1 padrão stick fraco), 'base', 'small' ou
-  /// 'sensevoice' (transcrevem JA; depois Hy-MT2 direto). Inválidos → 'tiny'.
-  String _sttModel = 'tiny';
-  final ValueNotifier<String> _sttModelVN = ValueNotifier<String>('tiny');
+  /// Legenda IA: STT 'sensevoice' (Whisper destilado de anime, leve) ou
+  /// 'jav03' (Whisper ja-anime v0.3, melhor CER). Inválidos → 'sensevoice'.
+  String _sttModel = 'sensevoice';
+  final ValueNotifier<String> _sttModelVN = ValueNotifier<String>('sensevoice');
   ValueListenable<String> get sttModelListenable => _sttModelVN;
   String get sttModel => _sttModel;
 
-  /// Legenda IA: MT 'minima' (Qwen 0.6B ~378MB, 4/6), 'leve' (LFM 1.2B
-  /// ~541MB, 5/6), 'media' (Hy-MT2 IQ3 ~859MB, 6/6) ou 'completa' (Hy-MT2
-  /// Q4 ~1,13GB, 6/6, via llama.cpp).
-  String _mtEngine = 'leve';
-  final ValueNotifier<String> _mtEngineVN = ValueNotifier<String>('leve');
+  /// Legenda IA: MT 'manga' (Hy-MT2 v3 fine-tune de mangá, melhor p/ anime)
+  /// ou 'completa' (Hy-MT2 Q4 base). Inválidos → 'manga'.
+  String _mtEngine = 'manga';
+  final ValueNotifier<String> _mtEngineVN = ValueNotifier<String>('manga');
   ValueListenable<String> get mtEngineListenable => _mtEngineVN;
   String get mtEngine => _mtEngine;
+
+  /// LegendAI (PC): endereço do servidor na LAN. Vazio = não configurado.
+  String _legendAiHost = '';
+  int _legendAiPort = 8765;
+  final ValueNotifier<String> _legendAiAddressVN = ValueNotifier<String>('');
+  ValueListenable<String> get legendAiAddressListenable => _legendAiAddressVN;
+  String get legendAiHost => _legendAiHost;
+  int get legendAiPort => _legendAiPort;
+  bool get legendAiConfigured => _legendAiHost.trim().isNotEmpty;
+
+  /// Onde gerar a legenda por padrão: 'device' (aparelho) ou 'pc' (LegendAI).
+  String _subtitleSource = 'device';
+  final ValueNotifier<String> _subtitleSourceVN = ValueNotifier<String>(
+    'device',
+  );
+  ValueListenable<String> get subtitleSourceListenable => _subtitleSourceVN;
+  String get subtitleSource => _subtitleSource;
+
+  /// Auditoria de legenda (RETIRADA do fluxo na Fase 1): 'off' é o único
+  /// valor efetivo. Os campos/API seguem existindo apenas para os testes de
+  /// integração do recurso (que setam em runtime); o app sempre inicia com
+  /// 'off' e o job não executa mais auditoria.
+  String _auditKind = 'off';
+  final ValueNotifier<String> _auditKindVN = ValueNotifier<String>('off');
+  ValueListenable<String> get auditKindListenable => _auditKindVN;
+  String get auditKind => _auditKind;
 
   Future<void> init() async {
     LocalStorage.ensureInitialized();
@@ -70,26 +94,37 @@ class SettingsService {
     _initialized = true;
     _onboardingSeen = prefs.getBool(_kOnboardingSeen) ?? false;
     _liteModeVN.value = _resolveLite();
-    _nsfwFilter = NsfwFilterSetting.values[
-        prefs.getInt(_kNsfwFilter) ?? NsfwFilterSetting.strict.index];
+    _nsfwFilter = NsfwFilterSetting
+        .values[prefs.getInt(_kNsfwFilter) ?? NsfwFilterSetting.strict.index];
     _nsfwFilterVN.value = _nsfwFilter;
     _autoSkipIntro = prefs.getBool(_kAutoSkipIntro) ?? false;
     _autoSkipIntroVN.value = _autoSkipIntro;
-    // Default honesto por aparelho (estudo §2.3): preferência AUSENTE em
-    // low-end pré-marca SenseVoice (JA dedicado, rápido no stick).
+    // Poda Fase 1: whitelist só dos tiers altos. Preferência persistida fora
+    // da lista (tiny/base/small/anime-whisper/minima/anime/leve/lmt) migra
+    // para o default novo — nunca volta a um tier removido.
     final stored = prefs.getString(_kSttModel);
-    _sttModel = _sttTiers.contains(stored) ? stored! : await _defaultStt();
+    _sttModel = _sttTiers.contains(stored) ? stored! : 'sensevoice';
     _sttModelVN.value = _sttModel;
     final storedMt = prefs.getString(_kMtEngine);
-    _mtEngine = _mtTiers.contains(storedMt) ? storedMt! : 'leve';
+    _mtEngine = _mtTiers.contains(storedMt) ? storedMt! : 'manga';
     _mtEngineVN.value = _mtEngine;
+    // LegendAI (PC): endereço salvo + modo padrão. Sem migração necessária —
+    // ausência significa "nunca pareado": modo padrão continua 'device'.
+    _legendAiHost = (prefs.getString(_kLegendAiHost) ?? '').trim();
+    _legendAiPort = prefs.getInt(_kLegendAiPort) ?? 8765;
+    _legendAiAddressVN.value = legendAiConfigured
+        ? '$_legendAiHost:$_legendAiPort'
+        : '';
+    _subtitleSource = prefs.getString(_kSubtitleSource) == 'pc'
+        ? 'pc'
+        : 'device';
+    _subtitleSourceVN.value = _subtitleSource;
+    // Auditoria saiu do fluxo: o valor persistido é ignorado (sempre 'off').
+    _auditKind = 'off';
+    _auditKindVN.value = _auditKind;
     debugPrint(
-        '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value nsfw=$_nsfwFilter autoSkip=$_autoSkipIntro');
-  }
-
-  static Future<String> _defaultStt() async {
-    final low = lowEndOverrideForTest ?? await DeviceCapability.isLowEnd();
-    return low ? 'sensevoice' : 'tiny';
+      '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value nsfw=$_nsfwFilter autoSkip=$_autoSkipIntro',
+    );
   }
 
   bool _resolveLite() {
@@ -140,17 +175,65 @@ class SettingsService {
   }
 
   Future<void> setSttModel(String v) async {
-    _sttModel = _sttTiers.contains(v) ? v : 'tiny';
+    _sttModel = _sttTiers.contains(v) ? v : 'sensevoice';
     _sttModelVN.value = _sttModel;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kSttModel, _sttModel);
   }
 
   Future<void> setMtEngine(String v) async {
-    _mtEngine = _mtTiers.contains(v) ? v : 'leve';
+    _mtEngine = _mtTiers.contains(v) ? v : 'manga';
     _mtEngineVN.value = _mtEngine;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kMtEngine, _mtEngine);
+  }
+
+  /// Salva o endereço do LegendAI (host pode ser IP ou nome `.local`).
+  Future<void> setLegendAiAddress(String host, int port) async {
+    _legendAiHost = host.trim();
+    _legendAiPort = port;
+    _legendAiAddressVN.value = legendAiConfigured
+        ? '$_legendAiHost:$_legendAiPort'
+        : '';
+    final prefs = await SharedPreferences.getInstance();
+    if (_legendAiHost.isEmpty) {
+      await prefs.remove(_kLegendAiHost);
+    } else {
+      await prefs.setString(_kLegendAiHost, _legendAiHost);
+    }
+    await prefs.setInt(_kLegendAiPort, port);
+  }
+
+  Future<void> clearLegendAiAddress() async {
+    _legendAiHost = '';
+    _legendAiPort = 8765;
+    _legendAiAddressVN.value = '';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kLegendAiHost);
+    await prefs.remove(_kLegendAiPort);
+  }
+
+  Future<void> setSubtitleSource(String v) async {
+    _subtitleSource = v == 'pc' ? 'pc' : 'device';
+    _subtitleSourceVN.value = _subtitleSource;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kSubtitleSource, _subtitleSource);
+  }
+
+  static const _kAuditKind = 'settings_ai_audit';
+  static const auditTiers = {
+    'off',
+    'ja-seq2seq',
+    'heretic-1b-it',
+    'qwen3-06b',
+    'lfm25-dist',
+    'lfm12b-audit',
+  };
+  Future<void> setAuditKind(String v) async {
+    _auditKind = auditTiers.contains(v) ? v : 'off';
+    _auditKindVN.value = _auditKind;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kAuditKind, _auditKind);
   }
 
   // Levers. Lê uma vez por build(), não em cada widget aninhado.

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Configuração de segurança de rede (Fase 4 do plano LegendAI).
+
+  Contexto: o app fala HTTP em texto claro com o LegendAI na LAN (IP privado
+  arbitrário informado pelo usuário) e com os proxies locais (OAuth loopback,
+  proxy DASH em 127.0.0.1). O restante do tráfego é HTTPS.
+
+  Limitação do Android: o `network-security-config` NÃO aceita faixas CIDR
+  (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) nem curingas de IP — apenas
+  hosts exatos. Como o IP do PC é escolhido em runtime, não é possível
+  pré-listar "só faixas privadas" de forma estática. Por isso o cleartext
+  segue permitido na base, mas fica centralizado aqui (em vez do atributo
+  `usesCleartextTraffic` no manifesto) e o app valida, em código, que o
+  endereço do LegendAI é de rede privada/local antes de usá-lo.
+
+  Para um deploy com IP fixo, troque `cleartextTrafficPermitted` da base para
+  `false` e adicione um <domain-config> com o IP do PC:
+    <domain-config cleartextTrafficPermitted="true">
+      <domain includeSubdomains="false">192.168.2.109</domain>
+    </domain-config>
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Proxies locais do próprio app: sempre texto claro. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

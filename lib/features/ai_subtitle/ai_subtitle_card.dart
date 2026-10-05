@@ -6,6 +6,12 @@ import 'package:flutter/material.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/subtitles/ai_providers.dart';
+import '../../core/subtitles/audio_extract.dart';
+import '../../core/subtitles/legendai/legendai_client.dart';
+import '../../core/subtitles/legendai/legendai_connection.dart';
+import '../../core/subtitles/legendai/legendai_job_manager.dart';
+import '../../core/subtitles/legendai/legendai_protocol.dart';
+import '../../core/subtitles/legendai/legendai_remote_job.dart';
 import '../../core/subtitles/model_manager.dart';
 import '../../core/subtitles/srt_parser.dart';
 import '../../core/subtitles/subtitle_job_manager.dart';
@@ -17,6 +23,7 @@ import '../../shared/widgets/tv_button.dart';
 import '../player/exo_dash_player_screen.dart';
 import '../player/player_screen.dart';
 import 'ai_model_row.dart';
+import 'legendai_job_card.dart';
 
 /// Card da legenda IA dentro do picker (etapa Legenda, estudo §3.2): decisão
 /// completa (rota auto + Voz + Tradução + Gerar + Resultado) sem sair do
@@ -47,8 +54,8 @@ class AiSubtitleCard extends StatefulWidget {
 
 class _AiSubtitleCardState extends State<AiSubtitleCard> {
   late String _route; // 'translate' | 'transcribe' (auto)
-  late String _sttId; // tier: tiny | sensevoice | base | small
-  late String _mtId; // tier: minima | leve | media | completa
+  late String _sttId; // tier: sensevoice | jav03 (Fase 1: só tiers altos)
+  late String _mtId; // tier: manga | completa (Fase 1: só tiers altos)
   Future<File?>? _cached;
   Map<String, double> _downloading = {};
   late Future<Map<String, bool>> _statuses;
@@ -56,15 +63,26 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
   List<SubtitleRef> _cands = [];
   bool _sawDone = false;
 
+  /// Fase 3: rota escolhida no card — 'device' (aparelho) ou 'pc' (LegendAI).
+  late String _where;
+  bool _sawRemoteDone = false;
+  String? _remoteError;
+
+  /// Fase 5: extração+upload do áudio em andamento (fallback DASH/token).
+  bool _uploading = false;
+
   @override
   void initState() {
     super.initState();
+    _where = SettingsService.instance.subtitleSource;
     _cands = widget.sources.expand((s) => s.subtitleCandidates).toList();
-    final hasEnEs = _cands.any((c) =>
-        SrtParser.detectLang(tag: '${c.label} ${c.lang}', filename: c.uri) ==
-            'en' ||
-        SrtParser.detectLang(tag: '${c.label} ${c.lang}', filename: c.uri) ==
-            'es');
+    final hasEnEs = _cands.any(
+      (c) =>
+          SrtParser.detectLang(tag: '${c.label} ${c.lang}', filename: c.uri) ==
+              'en' ||
+          SrtParser.detectLang(tag: '${c.label} ${c.lang}', filename: c.uri) ==
+              'es',
+    );
     _route = hasEnEs ? 'translate' : 'transcribe';
     _sttId = SettingsService.instance.sttModel;
     _mtId = SettingsService.instance.mtEngine;
@@ -73,8 +91,17 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
     _statuses = AiProviders.readyMap([
       ...AiProviders.sttTiers.values.map((t) => t.id),
       ...AiProviders.mtTiers.values,
+      'silero-vad',
     ]);
     _lowEnd = _lowEndSafe();
+    // Fase 3: carrega o espelho da fila remota e, se já houver PC pareado,
+    // revalida a conexão (fire-and-forget — nunca bloqueia a UI).
+    // ignore: discarded_futures
+    LegendAiJobManager.instance.init();
+    if (LegendAiConnection.instance.isConfigured) {
+      // ignore: discarded_futures
+      LegendAiConnection.instance.refresh();
+    }
   }
 
   /// Path ausente em teste/host não deve derrubar o card.
@@ -114,8 +141,7 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
         try {
           final req = await client.getUrl(Uri.parse(uri));
           headers.forEach(req.headers.set);
-          final resp =
-              await req.close().timeout(const Duration(seconds: 15));
+          final resp = await req.close().timeout(const Duration(seconds: 15));
           if (resp.statusCode != 200) return null;
           out = await resp
               .transform(utf8.decoder)
@@ -139,7 +165,9 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
     SubtitleRef? es;
     for (final c in _cands) {
       final lang = SrtParser.detectLang(
-          tag: '${c.label} ${c.lang}', filename: c.uri);
+        tag: '${c.label} ${c.lang}',
+        filename: c.uri,
+      );
       if (lang == 'en') en ??= c;
       if (lang == 'es') es ??= c;
     }
@@ -172,7 +200,9 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
       return;
     }
     final srcLang = SrtParser.detectLang(
-        tag: '${cand.label} ${cand.lang}', filename: cand.uri)!;
+      tag: '${cand.label} ${cand.lang}',
+      filename: cand.uri,
+    )!;
     final mt = await AiProviders.makeMtForSrc(srcLang);
     if (mt == null) {
       _snack('Modelo de tradução não instalado. Baixe acima (só Wi-Fi).');
@@ -194,6 +224,11 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
 
   Future<void> _startTranscribe() async {
     if (widget.sources.isEmpty) return;
+    // Sem VAD o STT fatia em janelas de 30s (~43 falas em 23 min, texto
+    // emendado e sem timing). Baixa os 3 MB automaticamente; se não der
+    // (rede metrada/offline), bloqueia com aviso em vez de gerar legenda
+    // ruim em silêncio.
+    if (!await _ensureVad()) return;
     final stt = await AiProviders.makeStt(stt: _sttId);
     if (stt == null) {
       _snack('Modelo de voz ($_sttId) não instalado. Baixe acima.');
@@ -216,6 +251,34 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
     );
   }
 
+  /// Garante o VAD (3 MB) antes de transcrever. Sem ele o STT cai nas janelas
+  /// fixas de 30 s e devolve ~1 fala por janela (Haibane EP3: 43 falas em
+  /// 24 min, texto emendado). Tenta baixar automático; se falhar
+  /// (rede metrada/offline), bloqueia — nunca gera legenda ruim em silêncio.
+  Future<bool> _ensureVad() async {
+    if (_downloading.containsKey('silero-vad')) return false;
+    try {
+      if (await const ModelManager().isReady('silero-vad')) return true;
+    } catch (_) {}
+    _snack('Baixando o VAD (3 MB) — melhora a transcrição…');
+    try {
+      await _downloadModel('silero-vad');
+    } catch (e) {
+      _snack('Não foi possível baixar o VAD: $e');
+    }
+    var ok = false;
+    try {
+      ok = await const ModelManager().isReady('silero-vad');
+    } catch (_) {}
+    if (!ok) {
+      _snack(
+        'Sem o VAD a transcrição fica incompleta. '
+        'Baixe "silero · corta silêncio" acima e tente de novo.',
+      );
+    }
+    return ok;
+  }
+
   Future<void> _downloadModel(String modelId) async {
     setState(() => _downloading[modelId] = 0);
     try {
@@ -228,6 +291,7 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
       _statuses = AiProviders.readyMap([
         ...AiProviders.sttTiers.values.map((t) => t.id),
         ...AiProviders.mtTiers.values,
+        'silero-vad',
       ]);
       _snack('Modelo pronto.');
     } on ModelDownloadException catch (e) {
@@ -241,7 +305,11 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
 
   void _playWithSub(File srt) {
     final sub = SubtitleRef(
-        label: 'PT-BR (IA)', lang: 'pt', uri: srt.path, isAI: true);
+      label: 'PT-BR (IA)',
+      lang: 'pt',
+      uri: srt.path,
+      isAI: true,
+    );
     final withSub = widget.sources.map((s) => s.withSubtitle(sub)).toList();
     final nav = Navigator.of(context);
     nav.pop(); // fecha o picker
@@ -270,28 +338,88 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          _route == 'translate'
-              ? '${_cands.length} candidata(s) EN/ES na fonte · rota: traduzir'
-              : 'Nenhuma candidata EN/ES · rota: gerar do áudio japonês',
-          style: const TextStyle(
-              color: ThemeConstants.textSecondary, fontSize: 14),
-        ),
-        if (_route == 'transcribe')
+        _whereSelector(),
+        if (_where == 'pc') ...[
+          ..._pcSection(),
+        ] else ...[
+          Text(
+            _route == 'translate'
+                ? '${_cands.length} candidata(s) EN/ES na fonte · rota: traduzir'
+                : 'Nenhuma candidata EN/ES · rota: gerar do áudio japonês',
+            style: const TextStyle(
+              color: ThemeConstants.textSecondary,
+              fontSize: 14,
+            ),
+          ),
+          if (_route == 'transcribe') ...[
+            FutureBuilder<bool>(
+              future: _lowEnd,
+              builder: (context, snap) => AiModelRow(
+                heading: 'Voz',
+                tiers: AiProviders.sttTierOrder,
+                tierIds: {
+                  for (final e in AiProviders.sttTiers.entries)
+                    e.key: e.value.id,
+                },
+                tierLabels: AiProviders.sttTierLabels,
+                selected: _sttId,
+                onSelect: (t) {
+                  setState(() => _sttId = t);
+                  SettingsService.instance.setSttModel(t);
+                },
+                statuses: _statuses,
+                downloading: _downloading,
+                onDownload: _downloadModel,
+                lowEnd: snap.data ?? false,
+              ),
+            ),
+            // VAD (3 MB) decide a qualidade: sem ele o STT fatia em janelas
+            // fixas de 30s e devolve ~1 cue por janela — dozens de falas curtas
+            // do episódio ficam SEM legenda (relato Haibane EP3: 43 cues num
+            // episódio de 24 min). O aviso fica aqui, no card, em vez de
+            // escondido nas Configurações.
+            FutureBuilder<bool>(
+              future: _lowEnd,
+              builder: (context, snap) => AiModelRow(
+                heading: 'VAD',
+                tiers: const ['vad'],
+                tierIds: const {'vad': 'silero-vad'},
+                tierLabels: const {'vad': 'silero · corta silêncio'},
+                selected: 'vad',
+                onSelect: (_) {},
+                statuses: _statuses,
+                downloading: _downloading,
+                onDownload: _downloadModel,
+                lowEnd: snap.data ?? false,
+              ),
+            ),
+            FutureBuilder<Map<String, bool>>(
+              future: _statuses,
+              builder: (context, snap) {
+                final ready = snap.data?['silero-vad'] == true;
+                if (ready) return const SizedBox.shrink();
+                return const Padding(
+                  padding: EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    'Sem o VAD o STT usa janelas fixas de 30 s e muitas falas '
+                    'curtas ficam sem legenda. São 3 MB — vale baixar.',
+                    style: TextStyle(color: Colors.orangeAccent, fontSize: 14),
+                  ),
+                );
+              },
+            ),
+          ],
           FutureBuilder<bool>(
             future: _lowEnd,
             builder: (context, snap) => AiModelRow(
-              heading: 'Voz',
-              tiers: AiProviders.sttTierOrder,
-              tierIds: {
-                for (final e in AiProviders.sttTiers.entries)
-                  e.key: e.value.id,
-              },
-              tierLabels: AiProviders.sttTierLabels,
-              selected: _sttId,
+              heading: 'Tradução',
+              tiers: AiProviders.mtTierOrder,
+              tierIds: AiProviders.mtTiers,
+              tierLabels: AiProviders.mtTierLabels,
+              selected: _mtId,
               onSelect: (t) {
-                setState(() => _sttId = t);
-                SettingsService.instance.setSttModel(t);
+                setState(() => _mtId = t);
+                SettingsService.instance.setMtEngine(t);
               },
               statuses: _statuses,
               downloading: _downloading,
@@ -299,101 +427,425 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
               lowEnd: snap.data ?? false,
             ),
           ),
-        FutureBuilder<bool>(
-          future: _lowEnd,
-          builder: (context, snap) => AiModelRow(
-            heading: 'Tradução',
-            tiers: AiProviders.mtTierOrder,
-            tierIds: AiProviders.mtTiers,
-            tierLabels: AiProviders.mtTierLabels,
-            selected: _mtId,
-            onSelect: (t) {
-              setState(() => _mtId = t);
-              SettingsService.instance.setMtEngine(t);
-            },
-            statuses: _statuses,
-            downloading: _downloading,
-            onDownload: _downloadModel,
-            lowEnd: snap.data ?? false,
-          ),
-        ),
-        const SizedBox(height: 8),
-        FutureBuilder<String?>(
-          future: SubtitleJobManager.consumeCrashHint(),
-          builder: (context, snap) {
-            // Arquivo some no retry (_dropStale preserva em memória).
-            final hint = snap.data ?? SubtitleJobManager.instance.lastCrashHint;
-            if (hint == null) return const SizedBox.shrink();
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(hint,
+          const SizedBox(height: 8),
+          FutureBuilder<String?>(
+            future: SubtitleJobManager.consumeCrashHint(),
+            builder: (context, snap) {
+              // Arquivo some no retry (_dropStale preserva em memória).
+              final hint =
+                  snap.data ?? SubtitleJobManager.instance.lastCrashHint;
+              if (hint == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  hint,
                   style: const TextStyle(
-                      color: Colors.orangeAccent, fontSize: 15)),
-            );
-          },
-        ),
-        ValueListenableBuilder<JobState>(
-          valueListenable: SubtitleJobManager.instance.state,
-          builder: (context, st, _) => _JobCard(
-            state: st,
-            busy: SubtitleJobManager.instance.isBusy,
-            onStart: _start,
-            onCancel: () => SubtitleJobManager.instance.cancelCurrent(),
-            onRetry: _start,
-          ),
-        ),
-        ValueListenableBuilder<JobState>(
-          valueListenable: SubtitleJobManager.instance.state,
-          builder: (context, st, _) {
-            if (st.phase == JobPhase.done && !_sawDone) {
-              _sawDone = true;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _refreshCached();
-              });
-            }
-            return FutureBuilder<File?>(
-              future: _cached,
-              builder: (context, snap) {
-                if (snap.connectionState != ConnectionState.done) {
-                  return const SizedBox.shrink();
-                }
-                final file = snap.data;
-                if (file == null) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      TVButton(
-                        label: 'Assistir com IA',
-                        autofocus: _sawDone,
-                        onPressed: () => _playWithSub(file),
-                      ),
-                      TVButton(
-                        label: 'Apagar',
-                        isPrimary: false,
-                        onPressed: () async {
-                          try {
-                            await file.delete();
-                            await File('${file.path}.meta.json').delete();
-                          } catch (_) {}
-                          _refreshCached();
-                        },
-                      ),
-                    ],
+                    color: Colors.orangeAccent,
+                    fontSize: 15,
                   ),
-                );
-              },
-            );
-          },
-        ),
-        const SizedBox(height: 4),
-        const Text('Legenda gerada por IA, pode conter erros.',
-            style: TextStyle(
-                color: ThemeConstants.textSecondary, fontSize: 13)),
+                ),
+              );
+            },
+          ),
+          ValueListenableBuilder<JobState>(
+            valueListenable: SubtitleJobManager.instance.state,
+            builder: (context, st, _) => _JobCard(
+              state: st,
+              busy: SubtitleJobManager.instance.isBusy,
+              onStart: _start,
+              onCancel: () => SubtitleJobManager.instance.cancelCurrent(),
+              onRetry: _start,
+            ),
+          ),
+          ValueListenableBuilder<JobState>(
+            valueListenable: SubtitleJobManager.instance.state,
+            builder: (context, st, _) {
+              if (st.phase == JobPhase.done && !_sawDone) {
+                _sawDone = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _refreshCached();
+                });
+              }
+              return _buildCachedActions();
+            },
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Legenda gerada por IA, pode conter erros.',
+            style: TextStyle(color: ThemeConstants.textSecondary, fontSize: 13),
+          ),
+          const Text(
+            'Pode sair do app ou bloquear a tela: a geração continua '
+            'em segundo plano (notificação de progresso).',
+            style: TextStyle(color: ThemeConstants.textSecondary, fontSize: 13),
+          ),
+        ],
       ],
     );
+  }
+
+  /// Seletor "Onde gerar" + status da conexão com o PC.
+  Widget _whereSelector() {
+    final configured = LegendAiConnection.instance.isConfigured;
+    return ValueListenableBuilder<LegendAiStatus>(
+      valueListenable: LegendAiConnection.instance.status,
+      builder: (context, status, _) {
+        final pcEnabled = configured && status != LegendAiStatus.offline;
+        final statusText = switch (status) {
+          LegendAiStatus.online => LegendAiConnection.instance.healthLabel,
+          LegendAiStatus.checking => 'Conectando ao PC…',
+          LegendAiStatus.offline => 'PC não encontrado',
+          LegendAiStatus.unconfigured => 'PC não configurado',
+        };
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Onde gerar',
+              style: TextStyle(
+                color: ThemeConstants.textSecondary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                _whereChip(
+                  'No aparelho',
+                  selected: _where == 'device',
+                  enabled: true,
+                  onTap: () => _setWhere('device'),
+                ),
+                _whereChip(
+                  'No PC (LegendAI)',
+                  selected: _where == 'pc',
+                  enabled: pcEnabled,
+                  onTap: pcEnabled
+                      ? () => _setWhere('pc')
+                      : () {
+                          _snack(
+                            configured
+                                ? 'O PC não respondeu. Confira se o LegendAI '
+                                      'está aberto e o IP nas Configurações.'
+                                : 'Configure o endereço do LegendAI em '
+                                      'Configurações → LegendAI (PC).',
+                          );
+                        },
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              configured
+                  ? 'LegendAI · $statusText'
+                  : 'PC não configurado — veja Configurações → LegendAI (PC).',
+              style: TextStyle(
+                color: status == LegendAiStatus.offline
+                    ? Colors.orangeAccent
+                    : ThemeConstants.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _whereChip(
+    String label, {
+    required bool selected,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) {
+    return Opacity(
+      opacity: enabled || selected ? 1 : 0.5,
+      child: TVButton(
+        label: label,
+        isPrimary: selected,
+        width: 210,
+        onPressed: onTap,
+      ),
+    );
+  }
+
+  void _setWhere(String value) {
+    if (_where == value) return;
+    setState(() => _where = value);
+    // Persiste a escolha como padrão (próximo card abre no mesmo modo).
+    // ignore: discarded_futures
+    SettingsService.instance.setSubtitleSource(value);
+    if (value == 'pc') {
+      // ignore: discarded_futures
+      LegendAiJobManager.instance.init();
+      if (LegendAiConnection.instance.isConfigured) {
+        // ignore: discarded_futures
+        LegendAiConnection.instance.refresh();
+      }
+    }
+  }
+
+  /// Conteúdo da rota "No PC": status do job remoto deste episódio + botão
+  /// "Gerar no PC"/cancelar/retry.
+  List<Widget> _pcSection() {
+    final manager = LegendAiJobManager.instance;
+    return [
+      const Text(
+        'O PC baixa o stream, transcreve com Whisper e traduz. O aparelho '
+        'só recebe o SRT pronto — economiza bateria e usa a GPU do PC.',
+        style: TextStyle(
+          color: ThemeConstants.textSecondary,
+          fontSize: 14,
+          height: 1.4,
+        ),
+      ),
+      if (_remoteError != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            _remoteError!,
+            style: const TextStyle(color: Colors.redAccent, fontSize: 14),
+          ),
+        ),
+      const SizedBox(height: 12),
+      ValueListenableBuilder<List<RemoteJob>>(
+        valueListenable: manager.jobs,
+        builder: (context, _, __) {
+          final job = manager.jobForEpisode(
+            animeKey: widget.anime.name,
+            ep: widget.episode.number,
+          );
+          if (job != null && job.downloaded && !_sawRemoteDone) {
+            _sawRemoteDone = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _refreshCached();
+            });
+          }
+          // Fallback de upload (Fase 5): o PC não abriu o stream (DASH/token).
+          final needsUpload =
+              job != null &&
+              job.state == LegendAiState.error &&
+              job.error?.code == 'unsupported_stream';
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              LegendAiJobCard(
+                job: job,
+                onStart: _startRemote,
+                onCancel: () {
+                  if (job != null) {
+                    // ignore: discarded_futures
+                    manager.cancel(job);
+                  }
+                },
+              ),
+              if (_route == 'transcribe' || needsUpload) ...[
+                const SizedBox(height: 12),
+                Opacity(
+                  opacity: _uploading ? 0.6 : 1,
+                  child: TVButton(
+                    label: _uploading
+                        ? 'Enviando áudio…'
+                        : 'Enviar áudio do aparelho',
+                    isPrimary: false,
+                    width: 280,
+                    onPressed: _uploading ? () {} : _startRemoteUpload,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Para fontes que o PC não consegue baixar (DASH/token): o '
+                  'aparelho extrai o áudio e envia. Usa mais dados móveis.',
+                  style: TextStyle(
+                    color: ThemeConstants.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+      _buildCachedActions(),
+      const SizedBox(height: 8),
+      const Text(
+        'Legenda gerada por IA, pode conter erros.',
+        style: TextStyle(color: ThemeConstants.textSecondary, fontSize: 13),
+      ),
+    ];
+  }
+
+  /// Botões do SRT em cache ("Assistir com IA" / "Apagar"), compartilhados
+  /// pelas rotas local e remota.
+  Widget _buildCachedActions() {
+    return FutureBuilder<File?>(
+      future: _cached,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const SizedBox.shrink();
+        }
+        final file = snap.data;
+        if (file == null) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              TVButton(
+                label: 'Assistir com IA',
+                autofocus: _sawDone || _sawRemoteDone,
+                onPressed: () => _playWithSub(file),
+              ),
+              TVButton(
+                label: 'Apagar',
+                isPrimary: false,
+                onPressed: () async {
+                  try {
+                    await file.delete();
+                    await File('${file.path}.meta.json').delete();
+                  } catch (_) {}
+                  _refreshCached();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Enfileira o episódio no LegendAI. A rota define a origem: rota S envia a
+  /// legenda EN/ES pronta (o PC só traduz, Fase 5); rota L1 envia a URL para o
+  /// PC transcrever (Fase 3). Erros viram mensagem amigável.
+  Future<void> _startRemote() async {
+    if (widget.sources.isEmpty) return;
+    if (!LegendAiConnection.instance.isConfigured) {
+      _snack(
+        'Configure o endereço do LegendAI em Configurações → LegendAI (PC).',
+      );
+      return;
+    }
+    setState(() => _remoteError = null);
+    try {
+      if (_route == 'translate') {
+        await _startRemoteSrt();
+      } else {
+        await _startRemoteUrl();
+      }
+    } catch (e) {
+      final msg = friendlyLegendAiError(e);
+      if (mounted) setState(() => _remoteError = msg);
+      _snack(msg);
+    }
+  }
+
+  /// Rota S remota: baixa a candidata EN/ES e manda o texto para o PC traduzir.
+  Future<void> _startRemoteSrt() async {
+    final cand = _pickCandidate();
+    if (cand == null) {
+      _snack('Sem legenda EN/ES nesta fonte. Troque p/ gerar do áudio.');
+      return;
+    }
+    final srcLang = SrtParser.detectLang(
+      tag: '${cand.label} ${cand.lang}',
+      filename: cand.uri,
+    )!;
+    final text = await _fetchSrt(cand.uri, widget.sources.first.headers);
+    if (text == null) {
+      _snack('Não foi possível baixar a legenda fonte.');
+      return;
+    }
+    final job = await LegendAiJobManager.instance.generateSrt(
+      animeKey: widget.anime.name,
+      ep: widget.episode.number,
+      srt: text,
+      sourceLang: srcLang,
+      tag: '$srcLang-ai',
+    );
+    if (job == null) {
+      _snack('LegendAI não está configurado.');
+    } else if (job.isDone) {
+      _snack('O PC já tinha esta legenda. Baixando…');
+    } else {
+      _snack('Legenda $srcLang enviada — o PC só traduz.');
+    }
+  }
+
+  /// Rota L1 remota: o PC baixa o stream e transcreve.
+  Future<void> _startRemoteUrl() async {
+    final src = widget.sources.first;
+    final job = await LegendAiJobManager.instance.generate(
+      animeKey: widget.anime.name,
+      ep: widget.episode.number,
+      url: src.url,
+      headers: src.headers,
+      // A rota remota por URL sempre transcreve o áudio; o SRT é JA→PT.
+      tag: 'ja-ai',
+    );
+    if (job == null) {
+      _snack('LegendAI não está configurado.');
+    } else if (job.isDone) {
+      _snack('O PC já tinha esta legenda. Baixando…');
+    } else {
+      _snack('Enviado para o PC. Acompanhe o progresso aqui.');
+    }
+  }
+
+  /// Fallback de upload (Fase 5): extrai o áudio no aparelho e envia ao PC.
+  /// Para DASH/token que o ffmpeg do PC não abre.
+  Future<void> _startRemoteUpload() async {
+    if (widget.sources.isEmpty) return;
+    if (!LegendAiConnection.instance.isConfigured) {
+      _snack(
+        'Configure o endereço do LegendAI em Configurações → LegendAI (PC).',
+      );
+      return;
+    }
+    final src = widget.sources.first;
+    setState(() {
+      _remoteError = null;
+      _uploading = true;
+    });
+    Directory? tmp;
+    try {
+      tmp = await Directory.systemTemp.createTemp('legendai_up');
+      final pcmPath = '${tmp.path}/ep${widget.episode.number}.pcm';
+      _snack('Extraindo o áudio no aparelho…');
+      await AudioExtract.extractPcm16k(
+        url: src.url,
+        headers: src.headers,
+        outPath: pcmPath,
+      );
+      final file = File(pcmPath);
+      if (!await file.exists() || await file.length() < 1024) {
+        throw StateError('Não foi possível extrair o áudio desta fonte.');
+      }
+      final job = await LegendAiJobManager.instance.generateUpload(
+        animeKey: widget.anime.name,
+        ep: widget.episode.number,
+        audioFile: file,
+        format: 's16le',
+      );
+      if (job == null) {
+        _snack('LegendAI não está configurado.');
+      } else {
+        _snack('Áudio enviado ao PC. Acompanhe o progresso aqui.');
+      }
+    } catch (e) {
+      final msg = friendlyLegendAiError(e);
+      if (mounted) setState(() => _remoteError = msg);
+      _snack(msg);
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+      try {
+        await tmp?.delete(recursive: true);
+      } catch (_) {}
+    }
   }
 }
 
@@ -419,53 +871,66 @@ class _JobCard extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(st.error ?? 'Falhou.',
-              style:
-                  const TextStyle(color: Colors.redAccent, fontSize: 16)),
+          Text(
+            st.error ?? 'Falhou.',
+            style: const TextStyle(color: Colors.redAccent, fontSize: 16),
+          ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 12,
-            children: [
-              TVButton(label: 'Tentar de novo', onPressed: onRetry),
-            ],
+            children: [TVButton(label: 'Tentar de novo', onPressed: onRetry)],
           ),
         ],
       );
     }
     if (st.phase == JobPhase.done) {
-      return Text(st.message.isEmpty ? 'Legenda pronta.' : st.message,
-          style: const TextStyle(color: Colors.greenAccent, fontSize: 16));
+      return Text(
+        st.message.isEmpty ? 'Legenda pronta.' : st.message,
+        style: const TextStyle(color: Colors.greenAccent, fontSize: 16),
+      );
     }
     if (busy) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(st.message.isEmpty ? 'Trabalhando…' : st.message,
-              style: const TextStyle(color: Colors.white, fontSize: 17)),
+          Text(
+            st.message.isEmpty ? 'Trabalhando…' : st.message,
+            style: const TextStyle(color: Colors.white, fontSize: 17),
+          ),
           if (st.detail.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text(st.detail,
-                  style: const TextStyle(
-                      color: ThemeConstants.textSecondary, fontSize: 14)),
+              child: Text(
+                st.detail,
+                style: const TextStyle(
+                  color: ThemeConstants.textSecondary,
+                  fontSize: 14,
+                ),
+              ),
             ),
           const SizedBox(height: 8),
           LinearProgressIndicator(
-              value: st.progress <= 0 ? null : st.progress,
-              backgroundColor: Colors.white24,
-              valueColor: const AlwaysStoppedAnimation(
-                  ThemeConstants.primary)),
+            value: st.progress <= 0 ? null : st.progress,
+            backgroundColor: Colors.white24,
+            valueColor: const AlwaysStoppedAnimation(ThemeConstants.primary),
+          ),
           const SizedBox(height: 4),
-          Text('${(st.progress * 100).toInt()}%',
-              style: const TextStyle(
-                  color: ThemeConstants.textSecondary, fontSize: 14)),
+          Text(
+            '${(st.progress * 100).toInt()}%',
+            style: const TextStyle(
+              color: ThemeConstants.textSecondary,
+              fontSize: 14,
+            ),
+          ),
           const SizedBox(height: 12),
-          TVButton(
-              label: 'Cancelar', isPrimary: false, onPressed: onCancel),
+          TVButton(label: 'Cancelar', isPrimary: false, onPressed: onCancel),
         ],
       );
     }
     return TVButton(
-        label: 'Gerar legenda', autofocus: true, onPressed: onStart);
+      label: 'Gerar legenda',
+      autofocus: true,
+      onPressed: onStart,
+    );
   }
 }
