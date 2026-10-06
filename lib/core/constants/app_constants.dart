@@ -1,6 +1,6 @@
 class AppConstants {
   static const String appName = 'GoAnime TV';
-  static const String baseSiteUrl = 'https://animefire.io';
+  static const String baseSiteUrl = 'https://animefire.one';
 
   static const String goyabuBase = 'https://goyabu.io';
   static const String betterAnimeBase = 'https://betteranime.io';

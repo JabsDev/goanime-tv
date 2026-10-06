@@ -374,8 +374,9 @@ void main() {
 
   group('DooPlay family wiring', () {
     test('registry routes every new source to its own DooPlayAdapter', () {
+      // HDK fica roteável mas fora do fan-out (origem com TLS quebrado,
+      // 06/10/2026); Orion e AnimesHD seguem implementadas.
       for (final s in [
-        AnimeSource.animesOnlineHdk,
         AnimeSource.animesOrion,
         AnimeSource.animesHd,
       ]) {
@@ -385,6 +386,10 @@ void main() {
         expect(adapter.source, s);
         expect(adapter.implemented, isTrue);
       }
+      final hdk = SourceRegistry.forSource(AnimeSource.animesOnlineHdk);
+      expect(hdk, isA<DooPlayAdapter>());
+      expect(hdk.source, AnimeSource.animesOnlineHdk);
+      expect(hdk.implemented, isFalse);
       expect(DooPlayAdapter.baseUrls[AnimeSource.animesOnlineHdk],
           'https://animesonlinehdk.com');
       expect(DooPlayAdapter.baseUrls[AnimeSource.animesOrion],
@@ -419,10 +424,11 @@ void main() {
           .map((a) => a.source)
           .toSet();
       expect(sources, containsAll([
-        AnimeSource.animesOnlineHdk,
         AnimeSource.animesOrion,
         AnimeSource.animesHd,
       ]));
+      expect(sources, isNot(contains(AnimeSource.animesOnlineHdk)),
+          reason: 'HDK desligada no fan-out (TLS quebrado)');
     });
   });
 

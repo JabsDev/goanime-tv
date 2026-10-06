@@ -11,7 +11,7 @@ import '../utils/text_utils.dart';
 import 'anime_source_adapter.dart';
 
 /// AnimeFire provider, backed by the site's public JSON API
-/// (`https://api.animefire.io`).
+/// (`https://api.animefire.one`).
 ///
 /// The legacy HTML scraping died with the 2026 site rebuild (Angular SPA:
 /// old `/pesquisar/<slug>` route is 404, episode cards carry no `<a href>`,
@@ -20,8 +20,14 @@ import 'anime_source_adapter.dart';
 /// (served as `.jpg` from `akumast.net`, `content-type: application/dash+xml`
 /// — mpv handles it).
 ///
-/// API surface used (no auth, verified live 09/09/2026):
-///  - `GET /animes/pesquisar?q=` → `{data:[{id,title,audio,poster_src,...}]}`
+/// Domain note (06/10/2026): the site moved `animefire.io` → `animefire.one`
+/// and the old `api.animefire.io` host no longer resolves. The API also
+/// changed the search payload: the flat `title` string became a localized
+/// `titles` map (`{BR, JP, US, …}`) — parsed with `title` kept as a legacy
+/// fallback.
+///
+/// API surface used (no auth, verified live 06/10/2026):
+///  - `GET /animes/pesquisar?q=` → `{data:[{id,titles,audio,poster_src,...}]}`
 ///  - `GET /anime/{animeId}`     → `{data:{seasons:[{number,first_episode_number}],
 ///    episodes:[{id,season,number,title,...}]}}` — episodes are numbered
 ///    **per season**; the absolute number is
@@ -32,8 +38,8 @@ import 'anime_source_adapter.dart';
 ///    (+ `Auto` when several) sharing the manifest URL, disambiguated by
 ///    `dashHeight` and resolved through the local MPD proxy in the player.
 class AnimeFireAdapter extends AnimeSourceAdapter {
-  static const _apiBase = 'https://api.animefire.io';
-  static const _siteBase = 'https://animefire.io';
+  static const _apiBase = 'https://api.animefire.one';
+  static const _siteBase = 'https://animefire.one';
 
   final http.Client? _client;
 
@@ -160,8 +166,7 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
       for (final item in data) {
         if (item is! Map) continue;
         final id = item['id']?.toString() ?? '';
-        final title = TextUtils.cleanTitle(
-            item['title']?.toString().trim() ?? '');
+        final title = TextUtils.cleanTitle(_titleOf(item));
         if (id.isEmpty || title.isEmpty) continue;
         list.add(Anime(
           name: title,
@@ -549,6 +554,25 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
       offsets[s] = first;
     }
     return offsets;
+  }
+
+  /// Display title from a search hit. The site's new payload carries a
+  /// localized `titles` map (`{BR, JP, US, …}`); prefer the PT-BR entry, then
+  /// English, then the first non-empty value. Falls back to the legacy flat
+  /// `title` field for old fixtures/cached payloads.
+  static String _titleOf(Map item) {
+    final titles = item['titles'];
+    if (titles is Map) {
+      for (final key in const ['BR', 'US', 'EN']) {
+        final v = titles[key]?.toString().trim() ?? '';
+        if (v.isNotEmpty) return v;
+      }
+      for (final v in titles.values) {
+        final s = v?.toString().trim() ?? '';
+        if (s.isNotEmpty) return s;
+      }
+    }
+    return item['title']?.toString().trim() ?? '';
   }
 
   /// Top-level `data` as List (search payload). Null on any shape mismatch.

@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/Plataforma-Android%20TV-3DDC84?logo=android&logoColor=white" alt="Android TV" />
   <img src="https://img.shields.io/badge/Player-media_kit-00E5FF" alt="media_kit" />
   <img src="https://img.shields.io/badge/AniList-Integrado-02A9FF?logo=anilist&logoColor=white" alt="AniList" />
-  <img src="https://img.shields.io/badge/vers%C3%A3o-1.0.16-00E5FF" alt="Versão 1.0.16" />
+  <img src="https://img.shields.io/badge/vers%C3%A3o-1.4.5-00E5FF" alt="Versão 1.4.5" />
 </p>
 
 ---
@@ -61,9 +61,11 @@ GoAnime TV é um app de **Android TV** 100% navegável por **controle remoto** (
 
 Agregador de fontes públicas de anime em português:
 
-AnimeFire · Goyabu · BetterAnime · AnimesROLL · DooPlay · Animes Online (Cloud/Drive/AnimeQ/AnimePlay) · **Animes Online HDK** · **Animes Orion** · **AnimesHD** · AnimePlayer
+AnimeFire · BetterAnime · DooPlay · Animes Online (Cloud/Drive/AnimeQ) · Animes Orion · AnimesHD · AnimePlayer · ArchiveJP · AnimeGG
 
 > A disponibilidade das fontes muda sem aviso — o app lida com isso de forma resiliente, priorizando as mais rápidas e estáveis.
+
+Fontes temporariamente fora do fan-out (adaptadores preservados e testados, prontos para religar): **Goyabu** (desafio Cloudflare), **Animes Online HDK** (TLS quebrado na origem) e **AnimePlay** (indisponível).
 
 ---
 

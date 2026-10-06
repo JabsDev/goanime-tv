@@ -31,8 +31,14 @@ class GoyabuAdapter extends AnimeSourceAdapter {
 
   @override
   AnimeSource get source => AnimeSource.goyabu;
+
+  /// Desligada no fan-out (06/10/2026): goyabu.io agora responde o desafio
+  /// Cloudflare ("Just a moment…", HTTP 403 `cf-mitigated: challenge`) em
+  /// todas as rotas — o `http.Client` puro do app não executa JS, então a
+  /// busca/episódios nunca passam. Mantida implementada e testada para
+  /// religar caso o site volte a servir HTML direto.
   @override
-  bool get implemented => true;
+  bool get implemented => false;
 
   @override
   Future<ScraperResult<List<Anime>>> search(String query) async {

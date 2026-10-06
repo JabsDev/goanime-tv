@@ -273,7 +273,7 @@ void main() {
     expect(searches, 1);
     expect(res.providers[AnimeSource.animeFire], isNotEmpty);
     expect(await ProviderMatchStore.urlFor(identity, AnimeSource.animeFire),
-        'https://animefire.io/anime/bc789');
+        'https://animefire.one/anime/bc789');
   });
 
   test('página achada + vídeo ok → providers e match persistido', () async {

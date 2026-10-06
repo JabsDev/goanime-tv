@@ -99,7 +99,7 @@ void main() {
       Anime(name: 'One Piece', url: '', source: AnimeSource.animeFire),
     );
     expect(match, isNotNull);
-    expect(match!.url, 'https://animefire.io/anime/op456');
+    expect(match!.url, 'https://animefire.one/anime/op456');
     expect(match.name, 'One Piece');
   });
 
@@ -195,7 +195,7 @@ void main() {
       source: AnimeSource.animeFire,
     ));
     expect(match, isNotNull);
-    expect(match!.url, 'https://animefire.io/anime/EfqshGOax3D');
+    expect(match!.url, 'https://animefire.one/anime/EfqshGOax3D');
   });
 
   test('tokens soltos não batem prefixo: filme não rouba a página combinada (Slime)',
@@ -222,7 +222,7 @@ void main() {
       source: AnimeSource.animeFire,
     ));
     expect(match, isNotNull);
-    expect(match!.url, 'https://animefire.io/anime/o7eXYR04IjL');
+    expect(match!.url, 'https://animefire.one/anime/o7eXYR04IjL');
   });
 
   test('sem sinal léxico (página em PT), confia no #1 da API (Sparks of Tomorrow)',
@@ -247,6 +247,30 @@ void main() {
       source: AnimeSource.animeFire,
     ));
     expect(match, isNotNull);
-    expect(match!.url, 'https://animefire.io/anime/UY6-domqQN0');
+    expect(match!.url, 'https://animefire.one/anime/UY6-domqQN0');
+  });
+
+  test('novo schema de busca (titles map BR/JP) → nome BR e host .one',
+      () async {
+    // Payload ao vivo 06/10/2026: o campo `title` virou o mapa localizado
+    // `titles`; sem isto a busca devolveria título vazio e 0 resultados.
+    const payload = '''
+    {"data":[
+      {"id":"i0i1t0BT9B1","titles":{"BR":"Solo Leveling","JP":"Ore dake Level Up na Ken"},
+       "audio":"Dublado \\u0026 Legendado",
+       "poster_src":"https://image.tmdb.org/t/p/original/sl.jpg"},
+      {"id":"sfUVtmFpToP","titles":{"BR":"Failure Frame","US":"Failure Frame EN"},
+       "audio":"Legendado"}
+    ]}
+    ''';
+    final adapter = AnimeFireAdapter(
+      client: MockClient((req) async => http.Response(payload, 200)),
+    );
+    final result = await adapter.search('solo leveling');
+    expect(result, isA<Success<List<Anime>>>());
+    final list = (result as Success<List<Anime>>).data;
+    expect(list.first.name, 'Solo Leveling');
+    expect(list.first.url, 'https://animefire.one/anime/i0i1t0BT9B1');
+    expect(list[1].name, 'Failure Frame');
   });
 }

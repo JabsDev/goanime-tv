@@ -238,8 +238,8 @@ void main() {
       expect(adapter.source, s);
       expect(
         AnimesOnlineAdapter.baseUrls[s]!.contains('animesonline.cloud') ||
-            AnimesOnlineAdapter.baseUrls[s]!.contains('animesdrive.online') ||
-            AnimesOnlineAdapter.baseUrls[s]!.contains('animeq.blog') ||
+            AnimesOnlineAdapter.baseUrls[s]!.contains('animesdrive.cloud') ||
+            AnimesOnlineAdapter.baseUrls[s]!.contains('animeq.cloud') ||
             AnimesOnlineAdapter.baseUrls[s]!.contains('animeplay.cloud'),
         isTrue,
       );

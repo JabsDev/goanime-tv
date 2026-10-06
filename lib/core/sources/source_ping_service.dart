@@ -18,15 +18,15 @@ class SourcePingService {
   static const String unknownPing = '--';
 
   static const Map<AnimeSource, String> _domains = {
-    AnimeSource.animeFire: 'animefire.io',
+    AnimeSource.animeFire: 'animefire.one',
     AnimeSource.goyabu: 'goyabu.io',
     AnimeSource.betterAnime: 'betteranime.io',
-    AnimeSource.animesRoll: 'anroll.tv',
+    AnimeSource.animesRoll: 'animes.tokyo',
     AnimeSource.dooPlay: 'betteranime.io',
-    AnimeSource.animePlayer: 'animeplayer.com.br',
+    AnimeSource.animePlayer: 'anreyalp.vip',
     AnimeSource.animesOnlineCloud: 'animesonline.cloud',
-    AnimeSource.animesDrive: 'animesdrive.online',
-    AnimeSource.animeQ: 'animeq.blog',
+    AnimeSource.animesDrive: 'animesdrive.cloud',
+    AnimeSource.animeQ: 'animeq.cloud',
     AnimeSource.animePlay: 'animeplay.cloud',
     AnimeSource.animesOnlineHdk: 'animesonlinehdk.com',
     AnimeSource.animesOrion: 'animesorion.cc',

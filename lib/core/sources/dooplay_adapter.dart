@@ -40,16 +40,24 @@ class DooPlayAdapter extends AnimeSourceAdapter {
   @override
   AnimeSource get source => _source;
 
+  /// AnimesOnline HDK desligada no fan-out (06/10/2026): a origem responde
+  /// com falha de handshake TLS (`tlsv1 alert internal error`) — o site não
+  /// completa nem o `ClientHello`, então nenhuma rota funciona. O adapter
+  /// segue roteável/testado para religar quando o servidor voltar.
   @override
-  bool get implemented => true;
+  bool get implemented => _source != AnimeSource.animesOnlineHdk;
 
   /// Base URL for the selected source. BetterAnime is the primary PT-BR
-  /// DooPlay site; `animesRoll` is not fully wired via the old `anroll.plus`
-  /// constant.
+  /// DooPlay site. `animesRoll` moved `anroll.tv` → `animes.tokyo`
+  /// (301, 06/10/2026); it has no search path in the active fallback order yet.
+  ///
+  /// `animesOnlineHdk` keeps the last known host (`animesonlinehdk.com`), which
+  /// now parks a Hostinger placeholder over HTTP and fails TLS on HTTPS — no
+  /// confirmed replacement domain.
   static const Map<AnimeSource, String> baseUrls = {
     AnimeSource.dooPlay: 'https://betteranime.io',
     AnimeSource.betterAnime: 'https://betteranime.io',
-    AnimeSource.animesRoll: 'https://anroll.tv',
+    AnimeSource.animesRoll: 'https://animes.tokyo',
     AnimeSource.animesOnlineHdk: 'https://animesonlinehdk.com',
     AnimeSource.animesHd: 'https://animeshd.to',
     AnimeSource.animesOrion: 'https://animesorion.cc',

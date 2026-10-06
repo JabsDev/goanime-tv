@@ -12,10 +12,14 @@ import 'cdn_resolver.dart';
 import 'dooplay_v2_extractor.dart';
 
 /// AnimesOnline-cluster provider (PT-BR): `animesonline.cloud`, its clones
-/// `animesdrive.online` and `animeq.blog` (same database, `wp_json` transport)
+/// `animesdrive.cloud` and `animeq.cloud` (same database, `wp_json` transport)
 /// and `animeplay.cloud` (`admin_ajax` transport). Search and episode listing
 /// are HTML scraping; video resolves through [DooPlayV2Extractor] (Layer A)
 /// with the CDN probe fallback (Layer B) as last resort.
+///
+/// Domain note (06/10/2026): `animesdrive.online` → 301 → `animesdrive.cloud`
+/// and `animeq.blog` → 301 → `animeq.cloud`; the constants below point
+/// straight at the canonical hosts to skip the redirect hop.
 ///
 /// Season layout (probe 12/09/2026, Slime S4): SPLIT pages — one URL per
 /// season (`…/anime/…-4th-season`, block `se-t se-o'>4`), episodes numbered
@@ -36,8 +40,8 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
 
   static const Map<AnimeSource, String> baseUrls = {
     AnimeSource.animesOnlineCloud: 'https://animesonline.cloud',
-    AnimeSource.animesDrive: 'https://animesdrive.online',
-    AnimeSource.animeQ: 'https://animeq.blog',
+    AnimeSource.animesDrive: 'https://animesdrive.cloud',
+    AnimeSource.animeQ: 'https://animeq.cloud',
     AnimeSource.animePlay: 'https://animeplay.cloud',
   };
 

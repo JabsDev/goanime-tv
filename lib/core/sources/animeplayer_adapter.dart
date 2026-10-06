@@ -27,7 +27,10 @@ class AnimePlayerAdapter extends AnimeSourceAdapter {
     return apiClient.get(uri, headers: headers);
   }
 
-  static const _base = 'https://animeplayer.com.br';
+  // Domain note (06/10/2026): `animeplayer.com.br` 301-redirects to
+  // `anreyalp.vip`. Search result hrefs are absolute on the new host, so
+  // pinning the canonical base skips the redirect and keeps the Referer warm.
+  static const _base = 'https://anreyalp.vip';
   static const _ua =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
