@@ -67,9 +67,18 @@ class _JobBody extends StatelessWidget {
       );
     }
     if (st.phase == JobPhase.done) {
-      return Text(
-        st.message.isEmpty ? 'Legenda pronta no PC.' : st.message,
-        style: const TextStyle(color: Colors.greenAccent, fontSize: 16),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            st.message.isEmpty ? 'Legenda pronta no PC.' : st.message,
+            style: const TextStyle(color: Colors.greenAccent, fontSize: 16),
+          ),
+          const SizedBox(height: 12),
+          // Regerar sempre disponível: o estado `done` escondia o botão e
+          // travava uma nova geração no PC (mesmo bug do card local).
+          TVButton(label: 'Gerar de novo', isPrimary: false, onPressed: onRetry),
+        ],
       );
     }
     if (st.phase == JobPhase.cancelled) {

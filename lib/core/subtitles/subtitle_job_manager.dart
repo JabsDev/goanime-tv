@@ -89,6 +89,18 @@ class SubtitleJobManager {
     }
   }
 
+  /// Volta a UI ao estado inicial (idle) quando não há job rodando.
+  ///
+  /// O `state` é global e ficava "grudado" em [JobPhase.done]: depois de gerar
+  /// uma legenda, o card mostrava "Legenda pronta." e escondia o botão de
+  /// gerar — apagar o `.srt` não resetava isso (bug recorrente entre versões).
+  /// Chamado ao apagar a legenda em cache e ao (re)abrir o card de IA.
+  void resetIdleState() {
+    if (isBusy) return;
+    _lastSavedPhase = null;
+    state.value = const JobState();
+  }
+
   /// Dica de crash CONSUMÍVEL: lê o job pendente e apaga os arquivos.
   /// Nada recomeça sozinho — re-tentativa é sempre toque explícito.
   /// Retorna a fase em português ou null se nada pendente.

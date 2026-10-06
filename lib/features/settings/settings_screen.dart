@@ -6,6 +6,7 @@ import '../../core/subtitles/ai_providers.dart';
 import '../../core/subtitles/legendai/legendai_connection.dart';
 import '../../core/subtitles/model_manager.dart';
 import '../../core/subtitles/subtitle_store.dart';
+import '../../core/subtitles/subtitle_job_manager.dart';
 import '../../core/updater/update_service.dart';
 import '../../core/utils/device_capability.dart';
 import '../../core/utils/nsfw_filter.dart';
@@ -426,6 +427,9 @@ class _AiStorageRowState extends State<_AiStorageRow> {
                   isPrimary: false,
                   onPressed: () async {
                     await SubtitleStore.clearAll();
+                    // Limpa também o estado do job: senão o card fica preso em
+                    // "Legenda pronta." mesmo sem arquivo nenhum.
+                    SubtitleJobManager.instance.resetIdleState();
                     _refresh();
                   },
                 ),

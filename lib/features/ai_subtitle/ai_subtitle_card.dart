@@ -86,6 +86,10 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
     _route = hasEnEs ? 'translate' : 'transcribe';
     _sttId = SettingsService.instance.sttModel;
     _mtId = SettingsService.instance.mtEngine;
+    // O estado de job é global e terminava "grudado" em `done` (mostrava
+    // "Legenda pronta." e escondia o botão de gerar, inclusive para outro
+    // episódio). Ao (re)abrir o card sem job rodando, volta para idle.
+    SubtitleJobManager.instance.resetIdleState();
     _refreshCached();
     // 1 único probe p/ todos os tiers (pronto de cada modelo).
     _statuses = AiProviders.readyMap([
@@ -709,6 +713,10 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
                     await file.delete();
                     await File('${file.path}.meta.json').delete();
                   } catch (_) {}
+                  // Apagar a legenda precisa liberar o card: sem reset o estado
+                  // global ficava em `done` ("Legenda pronta.") e o botão de
+                  // gerar não voltava.
+                  SubtitleJobManager.instance.resetIdleState();
                   _refreshCached();
                 },
               ),
@@ -884,9 +892,18 @@ class _JobCard extends StatelessWidget {
       );
     }
     if (st.phase == JobPhase.done) {
-      return Text(
-        st.message.isEmpty ? 'Legenda pronta.' : st.message,
-        style: const TextStyle(color: Colors.greenAccent, fontSize: 16),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            st.message.isEmpty ? 'Legenda pronta.' : st.message,
+            style: const TextStyle(color: Colors.greenAccent, fontSize: 16),
+          ),
+          const SizedBox(height: 12),
+          // Botão de regerar sempre visível: o estado `done` escondia o
+          // "Gerar legenda" e travava uma nova geração (bug reportado).
+          TVButton(label: 'Gerar de novo', isPrimary: false, onPressed: onStart),
+        ],
       );
     }
     if (busy) {

@@ -124,4 +124,25 @@ void main() {
     expect(find.byType(SnackBar), findsOneWidget,
         reason: 'precisa dar feedback (baixando VAD / bloqueio)');
   });
+
+  testWidgets('estado done mostra "Gerar de novo" e não trava nova geração',
+      (tester) async {
+    await _pump(tester, cands: const []);
+    await tester.pump();
+
+    // Simula um job concluído: o estado global era "grudado" em done e a UI
+    // mostrava só "Legenda pronta." escondendo o botão de gerar.
+    SubtitleJobManager.instance.state.value =
+        const JobState(phase: JobPhase.done, message: 'Legenda pronta.');
+    await tester.pump();
+
+    expect(find.text('Gerar de novo'), findsOneWidget,
+        reason: 'done precisa oferecer regeração');
+    expect(find.text('Gerar legenda'), findsNothing);
+
+    // Voltar ao idle restaura o botão inicial (reset usado no "Apagar").
+    SubtitleJobManager.instance.resetIdleState();
+    await tester.pump();
+    expect(find.text('Gerar legenda'), findsOneWidget);
+  });
 }
