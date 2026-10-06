@@ -112,11 +112,17 @@ class LegendAiQueueSync {
     final client = connection.client;
     if (client == null) return null;
     final clientJobId = clientJobIdFor(animeKey, episode);
-    // Já temos espelho? Reenvio idempotente local (PC devolveria o mesmo).
+    // Já temos espelho? Job ATIVO: não duplica. Job CONCLUÍDO: o reenvio é
+    // explícito (usuário tocou em "Gerar de novo") e precisa re-baixar o SRT —
+    // ele pode ter sido apagado localmente ou nunca baixado (ver _redownloadDone).
     final existing = jobForClientId(clientJobId);
-    if (existing != null && (existing.isActive || existing.isDone)) {
-      if (existing.isActive) _schedulePoll();
+    if (existing != null && existing.isActive) {
+      _schedulePoll();
       return existing;
+    }
+    if (existing != null && existing.isDone) {
+      final redownloaded = await _redownloadDone(existing);
+      if (redownloaded != null) return redownloaded;
     }
     final created = await client.createJob(
       LegendAiJobRequest(
@@ -162,9 +168,13 @@ class LegendAiQueueSync {
       kind: 'srt-$sourceLang',
     );
     final existing = jobForClientId(clientJobId);
-    if (existing != null && (existing.isActive || existing.isDone)) {
-      if (existing.isActive) _schedulePoll();
+    if (existing != null && existing.isActive) {
+      _schedulePoll();
       return existing;
+    }
+    if (existing != null && existing.isDone) {
+      final redownloaded = await _redownloadDone(existing);
+      if (redownloaded != null) return redownloaded;
     }
     final created = await client.createJob(
       LegendAiJobRequest(
@@ -205,9 +215,13 @@ class LegendAiQueueSync {
     if (client == null) return null;
     final clientJobId = clientJobIdFor(animeKey, episode, kind: 'upload');
     final existing = jobForClientId(clientJobId);
-    if (existing != null && (existing.isActive || existing.isDone)) {
-      if (existing.isActive) _schedulePoll();
+    if (existing != null && existing.isActive) {
+      _schedulePoll();
       return existing;
+    }
+    if (existing != null && existing.isDone) {
+      final redownloaded = await _redownloadDone(existing);
+      if (redownloaded != null) return redownloaded;
     }
     SubtitleForeground.notify(
       const JobState(
@@ -355,9 +369,22 @@ class LegendAiQueueSync {
     _notifyAndPersist();
   }
 
-  Future<void> _download(RemoteJob job) async {
+  /// Reenvio explícito de um job já concluído no PC (o usuário tocou em
+  /// "Gerar de novo"): baixa o SRT de novo — o arquivo local pode ter sido
+  /// apagado ou nunca ter sido salvo. Se o PC não tiver mais o SRT, remove o
+  /// espelho (retorna `null`) para o fluxo recriar o job.
+  Future<RemoteJob?> _redownloadDone(RemoteJob existing) async {
+    existing.downloaded = false;
+    if (await _download(existing)) return existing;
+    _removeLocal(existing.jobId);
+    _notifyAndPersist();
+    return null;
+  }
+
+  /// Baixa o SRT de um job `done`. Retorna `true` se salvou localmente.
+  Future<bool> _download(RemoteJob job) async {
     final client = connection.client;
-    if (client == null) return;
+    if (client == null) return false;
     try {
       final result = await client.getSrt(job.jobId);
       if (result.ready && (result.srt?.trim().isNotEmpty ?? false)) {
@@ -372,6 +399,7 @@ class LegendAiQueueSync {
         job.downloaded = true;
         job.updatedMs = DateTime.now().millisecondsSinceEpoch;
         _notifyAndPersist();
+        return true;
       } else if (result.error != null) {
         if (result.error!.code == 'job_cancelled') {
           job.state = LegendAiState.cancelled;
@@ -381,11 +409,13 @@ class LegendAiQueueSync {
         }
         _notifyAndPersist();
       }
+      return false;
     } catch (e) {
       debugPrint('[LegendAiQueueSync] getSrt falhou: $e');
       if (e is LegendAiException && e.isConnectionError) {
         connection.status.value = LegendAiStatus.offline;
       }
+      return false;
     }
   }
 

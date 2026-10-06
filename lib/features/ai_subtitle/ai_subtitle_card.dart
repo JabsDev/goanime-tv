@@ -739,6 +739,9 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
       return;
     }
     setState(() => _remoteError = null);
+    // Reenvio remoto (inclusive "Gerar de novo"): libera o refresh do SRT em
+    // cache quando o download do PC terminar.
+    _sawRemoteDone = false;
     try {
       if (_route == 'translate') {
         await _startRemoteSrt();

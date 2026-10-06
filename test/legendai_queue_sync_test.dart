@@ -361,4 +361,58 @@ void main() {
       isNotNull,
     );
   });
+
+  test('reenvio de job done re-baixa o SRT apagado (não trava em "Baixando…")',
+      () async {
+    const url = 'https://cdn/reb.m3u8';
+    final r = await sync.submit(animeKey: 'Reb', episode: 1, url: url);
+    await pumpEventQueue();
+    final id = r!.jobId;
+    server.setState(id, 'done');
+    await sync.refresh();
+    expect(sync.jobById(id)!.downloaded, isTrue);
+
+    // Usuário apaga o SRT local (botão "Apagar").
+    final srcHash = SubtitleStore.sha256Of(url);
+    final f = await SubtitleStore.get(
+      animeKey: 'Reb',
+      ep: 1,
+      tag: 'ja-ai',
+      srcHash: srcHash,
+      subsDirForTest: subsTmp,
+    );
+    await f!.delete();
+    await File('${f.path}.meta.json').delete();
+
+    // "Gerar de novo" no PC que já tinha a legenda: precisa re-baixar, sem
+    // recriar o job (bug: early-return só mostrava "Baixando…" e não baixava).
+    final r2 = await sync.submit(animeKey: 'Reb', episode: 1, url: url);
+    expect(r2!.jobId, id);
+    expect(server.creates, 1, reason: 'PC já tinha: não recria');
+    expect(sync.jobById(id)!.downloaded, isTrue);
+
+    final back = await SubtitleStore.get(
+      animeKey: 'Reb',
+      ep: 1,
+      tag: 'ja-ai',
+      srcHash: srcHash,
+      subsDirForTest: subsTmp,
+    );
+    expect(back, isNotNull, reason: 'SRT re-baixado após apagar');
+    expect(await back!.readAsString(), contains('Olá PC'));
+  });
+
+  test('reenvio de job done que sumiu do PC recria o job', () async {
+    const url = 'https://cdn/gone.m3u8';
+    final r = await sync.submit(animeKey: 'Gone', episode: 1, url: url);
+    await pumpEventQueue();
+    server.setState(r!.jobId, 'done');
+    await sync.refresh(); // espelho local passa a `done`
+    // PC perdeu o job (reiniciou sem snapshot).
+    server.jobs.clear();
+
+    final r2 = await sync.submit(animeKey: 'Gone', episode: 1, url: url);
+    expect(r2, isNotNull);
+    expect(server.creates, 2, reason: 'PC não tinha mais: recria');
+  });
 }
