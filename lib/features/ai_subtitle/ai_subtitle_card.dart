@@ -795,7 +795,9 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
       ep: widget.episode.number,
       url: src.url,
       headers: src.headers,
-      // A rota remota por URL sempre transcreve o áudio; o SRT é JA→PT.
+      // A rota remota por URL sempre transcreve o áudio japonês: informa a
+      // origem para o PC (Parakeet não detecta idioma; Nemotron usa o locale).
+      sourceLang: 'ja',
       tag: 'ja-ai',
     );
     if (job == null) {
@@ -841,6 +843,8 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
         ep: widget.episode.number,
         audioFile: file,
         format: 's16le',
+        // Mesmo motivo da rota URL: o áudio é japonês.
+        sourceLang: 'ja',
       );
       if (job == null) {
         _snack('LegendAI não está configurado.');
