@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/Plataforma-Android%20TV-3DDC84?logo=android&logoColor=white" alt="Android TV" />
   <img src="https://img.shields.io/badge/Player-media_kit-00E5FF" alt="media_kit" />
   <img src="https://img.shields.io/badge/AniList-Integrado-02A9FF?logo=anilist&logoColor=white" alt="AniList" />
-  <img src="https://img.shields.io/badge/vers%C3%A3o-1.4.5-00E5FF" alt="Versão 1.4.5" />
+  <img src="https://img.shields.io/badge/vers%C3%A3o-1.4.6-00E5FF" alt="Versão 1.4.6" />
 </p>
 
 ---

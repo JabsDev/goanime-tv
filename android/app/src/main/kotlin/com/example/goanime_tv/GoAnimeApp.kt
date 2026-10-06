@@ -45,6 +45,13 @@ class GoAnimeApp : Application() {
         Jav03Stt(messenger).register()
         Seq2SeqAudit(messenger).register()
         SubtitleJobChannel(this, messenger).register()
+        // UiMode NÃO depende de Activity, mas PRECISA estar pronto antes de
+        // `main()` (que roda logo abaixo): o Dart chama `getUiModeType` no boot
+        // para decidir TV×celular. Registrado aqui (e não só no MainActivity)
+        // porque a engine é cacheada e o entrypoint executa antes de qualquer
+        // Activity — registrar depois causava corrida e a TV era tratada como
+        // celular (retrato/esticado).
+        UiModeChannel(this, messenger).register()
 
         // main() roda aqui (headless até a Activity anexar o FlutterView).
         engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())

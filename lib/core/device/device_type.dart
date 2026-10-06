@@ -12,17 +12,28 @@ class DeviceType {
 
   static bool? _cachedIsTv;
 
-  /// True em Android TV (UiModeManager UI_MODE_TYPE_TELEVISION). Fallback false.
-  static Future<bool> isTelevision() async {
-    if (_cachedIsTv != null) return _cachedIsTv!;
+  /// Consulta o UiModeManager. `null` quando o canal não está pronto/falhou
+  /// (NÃO é o mesmo que "celular").
+  static Future<bool?> _query() async {
     try {
       final mode = await channel.invokeMethod<int>('getUiModeType');
-      _cachedIsTv = parseUiModeType(mode);
+      return parseUiModeType(mode);
     } catch (e) {
-      debugPrint('[DeviceType] uimode detect failed, assuming phone: $e');
-      _cachedIsTv = false;
+      debugPrint('[DeviceType] uimode detect failed: $e');
+      return null;
     }
-    return _cachedIsTv!;
+  }
+
+  /// True em Android TV (UiModeManager UI_MODE_TYPE_TELEVISION). Fallback false.
+  ///
+  /// Só memoiza uma resposta VÁLIDA: uma falha (canal indisponível numa corrida
+  /// de boot) não pode envenenar o cache para o resto da sessão — a próxima
+  /// chamada tenta de novo e a TV volta a ser reconhecida.
+  static Future<bool> isTelevision() async {
+    if (_cachedIsTv != null) return _cachedIsTv!;
+    final result = await _query();
+    if (result != null) _cachedIsTv = result;
+    return result ?? false;
   }
 
   /// Parse puro/testável: 4 (TELEVISION) → true, resto/null → false.
@@ -36,9 +47,24 @@ class DeviceType {
       : const [DeviceOrientation.portraitUp];
 
   /// Aplica no boot (chamar após ensureInitialized, antes do runApp).
+  ///
+  /// Reintenta algumas vezes: o `main()` roda no onCreate do processo (engine
+  /// cacheada), então o canal nativo pode não estar pronto no primeiríssimo
+  /// instante. Se TODAS as tentativas falharem, NÃO trava retrato — deixar a
+  /// orientação livre evita o sintoma "TV esticada" num aparelho que só não
+  /// respondeu o modo. Televisão detectada trava landscape normalmente.
   static Future<void> applyStartupPolicy() async {
-    final isTv = await isTelevision();
-    await SystemChrome.setPreferredOrientations(orientationsFor(isTv));
+    for (var attempt = 0; attempt < 4; attempt++) {
+      final result = await _query();
+      if (result != null) {
+        _cachedIsTv = result;
+        await SystemChrome.setPreferredOrientations(orientationsFor(result));
+        return;
+      }
+      await Future.delayed(const Duration(milliseconds: 150));
+    }
+    debugPrint('[DeviceType] uimode indisponível no boot; '
+        'deixando orientação livre (sem forçar retrato)');
   }
 
   /// Player: landscape nos dois form factors (padrão YouTube).

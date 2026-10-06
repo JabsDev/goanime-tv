@@ -21,7 +21,8 @@ class MainActivity : FlutterActivity() {
         // update vive enquanto a Activity existe.
         updaterChannel = UpdaterChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         updaterChannel?.register()
-        UiModeChannel(this, flutterEngine.dartExecutor.binaryMessenger).register()
+        // UiModeChannel vive no Application (GoAnimeApp): o Dart consulta o
+        // modo TV×celular antes de qualquer Activity existir.
         live = this
     }
 

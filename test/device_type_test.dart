@@ -39,4 +39,17 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(DeviceType.channel, null);
   });
+
+  test('isTelevision não envenena o cache em falha (recupera depois)', () async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    // Boot: canal ainda não pronto → falha (não é "celular").
+    messenger.setMockMethodCallHandler(
+        DeviceType.channel, (call) async => throw PlatformException(code: 'x'));
+    expect(await DeviceType.isTelevision(), isFalse);
+    // Canal fica pronto → a TV é reconhecida (falha anterior não persistiu).
+    messenger.setMockMethodCallHandler(DeviceType.channel, (call) async => 4);
+    expect(await DeviceType.isTelevision(), isTrue);
+    messenger.setMockMethodCallHandler(DeviceType.channel, null);
+  });
 }
