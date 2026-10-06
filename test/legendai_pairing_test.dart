@@ -69,6 +69,17 @@ void main() {
       expect(isPrivateLanHost('pc-jabs.local'), isTrue);
     });
 
+    test('aceita a faixa CGNAT do Tailscale (100.64.0.0/10)', () {
+      // O roteador pode isolar Ethernet de Wi-Fi; a VPN overlay (Tailscale)
+      // resolve, e o app precisa aceitar o IP 100.x do tailnet.
+      expect(isPrivateLanHost('100.64.0.1'), isTrue);
+      expect(isPrivateLanHost('100.101.102.103'), isTrue);
+      expect(isPrivateLanHost('100.127.255.254'), isTrue);
+      // Bordas fora da faixa continuam rejeitadas.
+      expect(isPrivateLanHost('100.63.0.1'), isFalse);
+      expect(isPrivateLanHost('100.128.0.1'), isFalse);
+    });
+
     test('rejeita IP público literal', () {
       expect(isPrivateLanHost('8.8.8.8'), isFalse);
       expect(isPrivateLanHost('172.32.0.1'), isFalse);

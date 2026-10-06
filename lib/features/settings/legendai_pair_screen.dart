@@ -56,14 +56,15 @@ class _LegendAiPairScreenState extends State<LegendAiPairScreen> {
   }
 
   /// Bloqueia IP público literal (o LegendAI é LAN sem auth). Retorna `true`
-  /// se pode prosseguir.
+  /// se pode prosseguir. Aceita faixas privadas, de VPN overlay (Tailscale
+  /// 100.x) e nomes de host.
   bool _guardPrivateHost() {
     final host = _host.text.trim();
     if (host.isEmpty) return true; // deixa o fluxo normal mostrar "sem endereço"
     if (isPrivateLanHost(host)) return true;
     _snack(
-      'Esse endereço parece ser um IP público. O LegendAI deve estar na sua '
-      'rede local (ex.: 192.168.x.y).',
+      'Esse endereço parece ser um IP público. Use o IP da rede local '
+      '(ex.: 192.168.x.y) ou de uma VPN como o Tailscale (ex.: 100.x.y.z).',
     );
     return false;
   }

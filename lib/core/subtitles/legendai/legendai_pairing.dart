@@ -91,8 +91,13 @@ LegendAiAddress? _build(String host, int? port) {
 /// protocolo é HTTP sem auth. Se o usuário digitar um IP **público** literal,
 /// provavelmente é engano/risco — retorna `false` para a UI alertar.
 ///
-/// Nomes de host (ex.: `pc-jabs`, `pc.local`) retornam `true`: não dá para
-/// resolvê-los sem DNS e a política de rede do Android já cobre o caso.
+/// Aceita as faixas privadas (RFC 1918), link-local e também **faixas de VPN
+/// overlay**: `100.64.0.0/10` (CGNAT — Tailscale) e `fc00::/7` (IPv6 ULA). Isso
+/// permite parear via Tailscale quando o roteador bloqueia a comunicação entre
+/// as redes Ethernet e Wi-Fi (isolamento de clientes/VLANs).
+///
+/// Nomes de host (ex.: `pc-jabs`, `pc-jabs.tailnet.ts.net`) retornam `true`:
+/// não dá para resolvê-los sem DNS e a política de rede do Android já cobre.
 bool isPrivateLanHost(String host) {
   final h = host.trim().toLowerCase();
   if (h.isEmpty) return false;
@@ -106,9 +111,13 @@ bool isPrivateLanHost(String host) {
     if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;
     if (b[0] == 192 && b[1] == 168) return true;
     if (b[0] == 169 && b[1] == 254) return true; // link-local (fallback)
+    // 100.64.0.0/10 — CGNAT, usado pelo Tailscale (VPN overlay). Não é
+    // roteável na internet pública; é seguro parear por aqui.
+    if (b[0] == 100 && b[1] >= 64 && b[1] <= 127) return true;
     return false;
   }
-  // IPv6: fe80::/10 (link-local) e fc00::/7 (unique local).
+  // IPv6: fe80::/10 (link-local) e fc00::/7 (unique local — inclui o ULA do
+  // Tailscale fd7a:115c:a1e0::/48).
   final b = ip.rawAddress;
   if (b.isEmpty) return false;
   if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return true;
