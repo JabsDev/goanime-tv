@@ -60,8 +60,9 @@ class Anime {
 
 enum AnimeSource {
   animeFire,
-  allAnime,
   goyabu,
+  animesDigital,
+  allAnime,
   betterAnime,
   animesRoll,
   dooPlay,
@@ -85,6 +86,7 @@ extension AnimeSourcePriority on AnimeSource {
   bool get isPtBr =>
       this == AnimeSource.animeFire ||
       this == AnimeSource.goyabu ||
+      this == AnimeSource.animesDigital ||
       this == AnimeSource.betterAnime ||
       this == AnimeSource.animesRoll ||
       this == AnimeSource.dooPlay ||
@@ -95,8 +97,8 @@ extension AnimeSourcePriority on AnimeSource {
       this == AnimeSource.animePlay ||
       this == AnimeSource.animesOnlineHdk ||
       this == AnimeSource.animesOrion ||
-       this == AnimeSource.animesHd ||
-       this == AnimeSource.animesOnlineIo;
+      this == AnimeSource.animesHd ||
+      this == AnimeSource.animesOnlineIo;
 
   /// Ordering priority for display/selection: lower = higher priority.
   /// PT-BR sources with reliable playback come first; AllAnime (EN, currently
@@ -105,6 +107,8 @@ extension AnimeSourcePriority on AnimeSource {
     switch (this) {
       case AnimeSource.animeFire:
         return 0;
+      case AnimeSource.animesDigital:
+        return 1;
       case AnimeSource.anilist:
         return 1;
       case AnimeSource.goyabu:
@@ -148,6 +152,8 @@ extension AnimeSourceDisplay on AnimeSource {
     switch (this) {
       case AnimeSource.animeFire:
         return 'AnimeFire';
+      case AnimeSource.animesDigital:
+        return 'Animes Digital';
       case AnimeSource.anilist:
         return 'AniList';
       case AnimeSource.allAnime:
@@ -212,6 +218,7 @@ extension AnimeSourceLanguage on AnimeSource {
       case AnimeSource.allAnime:
         return SourceLanguage.english;
       case AnimeSource.animeFire:
+      case AnimeSource.animesDigital:
       case AnimeSource.goyabu:
       case AnimeSource.betterAnime:
       case AnimeSource.animesRoll:

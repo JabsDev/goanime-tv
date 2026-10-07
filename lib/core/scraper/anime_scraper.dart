@@ -205,6 +205,7 @@ class AnimeScraper {
           case AnimeSource.allAnime:
             return a.allAnimeId != null;
           case AnimeSource.animeFire:
+          case AnimeSource.animesDigital:
           case AnimeSource.goyabu:
           case AnimeSource.betterAnime:
           case AnimeSource.animesRoll:

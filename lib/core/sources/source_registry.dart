@@ -3,6 +3,7 @@ import '../../data/models/anime.dart';
 import '../scraper/scraper_result.dart';
 import '../sources/anime_source_adapter.dart';
 import '../sources/anime_fire_adapter.dart';
+import '../sources/animesdigital_adapter.dart';
 import '../sources/animesonline_io_adapter.dart';
 import '../sources/all_anime_adapter.dart';
 import '../sources/anime_gg_adapter.dart';
@@ -22,6 +23,7 @@ class SourceRegistry {
   // in search/video fan-out or fallback.
   static final List<AnimeSourceAdapter> _adapters = [
     AnimeFireAdapter(),
+    AnimesDigitalAdapter(),
     GoyabuAdapter(),
     DooPlayAdapter(source: AnimeSource.dooPlay),
     AnimesOnlineAdapter(source: AnimeSource.animesOnlineCloud),
@@ -43,6 +45,7 @@ class SourceRegistry {
   static List<AnimeSource> get fallbackOrder {
     return [
       AnimeSource.animeFire,
+      AnimeSource.animesDigital,
       AnimeSource.goyabu,
       AnimeSource.dooPlay,
       AnimeSource.animesOnlineCloud,
@@ -63,8 +66,10 @@ class SourceRegistry {
     switch (source) {
       case AnimeSource.animeFire:
         return 0;
-      case AnimeSource.goyabu:
+      case AnimeSource.animesDigital:
         return 1;
+      case AnimeSource.goyabu:
+        return 2;
       case AnimeSource.dooPlay:
         return 2;
       case AnimeSource.animesOnlineCloud:
@@ -103,6 +108,7 @@ class SourceRegistry {
   static AnimeSourceAdapter forSource(AnimeSource source) {
     return _adapters.firstWhere(
       (a) => source == AnimeSource.animeFire && a is AnimeFireAdapter ||
+             source == AnimeSource.animesDigital && a is AnimesDigitalAdapter ||
              source == AnimeSource.goyabu && a is GoyabuAdapter ||
              source == AnimeSource.animePlayer && a is AnimePlayerAdapter ||
              source == AnimeSource.allAnime && a is AllAnimeAdapter ||

@@ -45,6 +45,37 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
 
   AnimeFireAdapter({http.Client? client}) : _client = client;
 
+  /// Probe barato do manifest: o CDN do AnimeFire (`akumast.net`) ficou
+  /// segmentado pós-migração — os links gravados nos episódios antigos
+  /// (re-encode AV1-only ago/set) respondem **404**, os recém-encodados (com
+  /// rendição H.264 `720p-x264`) respondem 200 — e a API segue marcando os
+  /// mortos como `is_offline: false` com URL preenchida. Sem este probe o
+  /// picker oferecia um card que falhava no player ("Não foi possível
+  /// reproduzir"). GET de Range 0-255: o host aceita partial e devolve o
+  /// manifesto inteiro (200 c/ MPD ou #EXTM3U); 404 é independente de
+  /// header/UA/Referer (testado com variações ao vivo 07/10/2026).
+  Future<bool> _manifestAlive(String url, Map<String, String> headers) async {
+    try {
+      final client = _client ?? http.Client();
+      try {
+        final res = await client.get(Uri.parse(url),
+            headers: {...headers, 'Range': 'bytes=0-255'});
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          final b = res.body;
+          return b.contains('#EXTM3U') ||
+              b.contains('<MPD') ||
+              b.contains('mpd');
+        }
+        return false;
+      } finally {
+        if (_client == null) client.close();
+      }
+    } catch (e) {
+      debugPrint('[AnimeFire] manifest probe error: $e');
+      return false;
+    }
+  }
+
   /// Dispatches to [http.Client.get] when a mock client is injected, otherwise
   /// falls back to the app's global [apiClient] singleton. Real requests are
   /// serialized (min 250ms gap) — the API sits behind Cloudflare rate limits.
@@ -398,12 +429,20 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
       final sources = <VideoSource>[];
       final seen = <String>{};
       var skippedOffline = 0;
+      var skippedDead = 0;
       for (final item in raw) {
         if (item is! Map) continue;
         final url = item['url']?.toString() ?? '';
         final audio = item['audio']?.toString() ?? '';
         if (url.isEmpty) {
           skippedOffline++;
+          continue;
+        }
+        // Link que o CDN não serve (404) = stream morto, não ofereça.
+        if (!await _manifestAlive(url, _headers)) {
+          skippedDead++;
+          debugPrint(
+              '[AnimeFire] Dead CDN stream (404) for $epId audio=$audio');
           continue;
         }
         // ponytail: dedup por (url, áudio) — por URL pura colapsaria áudios
@@ -459,10 +498,11 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
             'for $epId (only dubbed/subbed available)');
       }
       if (sources.isEmpty) {
-        return ScraperResult.failure(EmptyResultError(
-          message: 'No video sources found',
-          source: source,
-        ));
+        final reason = skippedDead > 0
+            ? 'All $skippedDead stream(s) dead (CDN 404)'
+            : 'No video sources found';
+        return ScraperResult.failure(
+            EmptyResultError(message: reason, source: source));
       }
       return ScraperResult.success(sources);
     } catch (e) {

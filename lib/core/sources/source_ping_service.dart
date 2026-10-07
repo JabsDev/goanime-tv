@@ -19,6 +19,7 @@ class SourcePingService {
 
   static const Map<AnimeSource, String> _domains = {
     AnimeSource.animeFire: 'animefire.one',
+    AnimeSource.animesDigital: 'animesdigital.org',
     AnimeSource.goyabu: 'goyabu.io',
     AnimeSource.betterAnime: 'betteranime.io',
     AnimeSource.animesRoll: 'animes.tokyo',
