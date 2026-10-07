@@ -475,6 +475,18 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
     }
   }
 
+  /// O site do AnimeFire só expõe a rota `/anime/:id` (o episódio é escolhido
+  /// no cliente; a API de episódios vive em `api.animefire.one`). Para o
+  /// fallback por WebView, devolve a página do anime no host do site.
+  @override
+  Future<String?> watchUrl(Anime anime, int episodeNumber) async {
+    final match = await resolveAnime(anime);
+    if (match == null) return null;
+    final id = _animeId(match.url);
+    if (id == null) return null;
+    return '$_siteBase/anime/$id';
+  }
+
   @override
   Future<AvailabilityReport> checkAvailability(String animeName) async {
     final report = AvailabilityReport(

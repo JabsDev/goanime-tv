@@ -10,6 +10,7 @@ import '../../core/anilist/anilist_service.dart';
 import '../../core/device/device_type.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/local_storage.dart';
+import '../../core/sources/source_registry.dart';
 import '../../core/utils/device_codecs.dart';
 import '../../core/utils/quality_picker.dart';
 import '../../data/models/anime.dart';
@@ -18,6 +19,7 @@ import '../../data/repositories/anime_repository.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import 'dash_manifest_proxy.dart';
 import 'player_screen.dart';
+import 'webview_player_screen.dart';
 
 /// ExoPlayer screen, used exclusively for AnimeFire DASH streams.
 ///
@@ -744,6 +746,27 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
     );
   }
 
+  Future<void> _openWebFallback() async {
+    final adapter = SourceRegistry.forSource(widget.provider);
+    String? url;
+    try {
+      url = await adapter.watchUrl(widget.anime, widget.episodeIndex + 1);
+    } catch (_) {}
+    if (!mounted) return;
+    if (url == null || url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Não consegui montar a página do site para esta fonte.'),
+      ));
+      return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => WebViewPlayerScreen(
+        url: url!,
+        title: '${widget.anime.name} · EP${widget.episodeIndex + 1}',
+      ),
+    ));
+  }
+
   Widget _buildErrorState() {
     return Center(
       child: Padding(
@@ -769,6 +792,12 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
                     _initPlayer();
                   },
                   child: const Text('Tentar novamente'),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  onPressed: _openWebFallback,
+                  icon: const Icon(Icons.public, size: 18),
+                  label: const Text('Abrir no navegador'),
                 ),
                 const SizedBox(width: 12),
                 TextButton(

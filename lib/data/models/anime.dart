@@ -55,46 +55,7 @@ class Anime {
 
   String get imageUrl => fallbackImageUrl ?? '';
 
-  String get sourceName {
-    switch (source) {
-      case AnimeSource.animeFire:
-        return 'AnimeFire';
-      case AnimeSource.anilist:
-        return 'AniList';
-      case AnimeSource.allAnime:
-        return 'AllAnime';
-      case AnimeSource.goyabu:
-        return 'Goyabu';
-      case AnimeSource.betterAnime:
-        return 'BetterAnime';
-      case AnimeSource.animesRoll:
-        return 'AnimesROLL';
-      case AnimeSource.dooPlay:
-        return 'DooPlay';
-      case AnimeSource.animePlayer:
-        return 'Anime Player';
-      case AnimeSource.animesOnlineCloud:
-        return 'Animes Online';
-      case AnimeSource.animesDrive:
-        return 'Animes Drive';
-      case AnimeSource.animeQ:
-        return 'AnimeQ';
-      case AnimeSource.animePlay:
-        return 'Anime Play';
-      case AnimeSource.animesOnlineHdk:
-        return 'Animes Online HDK';
-      case AnimeSource.animesOrion:
-        return 'Animes Orion';
-      case AnimeSource.animesHd:
-        return 'AnimesHD';
-      case AnimeSource.animesOnlineIo:
-        return 'Animes Online IO';
-      case AnimeSource.archiveJp:
-        return 'Archive JA';
-      case AnimeSource.animeGg:
-        return 'AnimeGG';
-    }
-  }
+  String get sourceName => source.displayName;
 }
 
 enum AnimeSource {
@@ -178,6 +139,105 @@ extension AnimeSourcePriority on AnimeSource {
         return 16;
       case AnimeSource.animeGg:
         return 17;
+    }
+  }
+}
+
+extension AnimeSourceDisplay on AnimeSource {
+  String get displayName {
+    switch (this) {
+      case AnimeSource.animeFire:
+        return 'AnimeFire';
+      case AnimeSource.anilist:
+        return 'AniList';
+      case AnimeSource.allAnime:
+        return 'AllAnime';
+      case AnimeSource.goyabu:
+        return 'Goyabu';
+      case AnimeSource.betterAnime:
+        return 'BetterAnime';
+      case AnimeSource.animesRoll:
+        return 'AnimesROLL';
+      case AnimeSource.dooPlay:
+        return 'DooPlay';
+      case AnimeSource.animePlayer:
+        return 'Anime Player';
+      case AnimeSource.animesOnlineCloud:
+        return 'Animes Online';
+      case AnimeSource.animesDrive:
+        return 'Animes Drive';
+      case AnimeSource.animeQ:
+        return 'AnimeQ';
+      case AnimeSource.animePlay:
+        return 'Anime Play';
+      case AnimeSource.animesOnlineHdk:
+        return 'Animes Online HDK';
+      case AnimeSource.animesOrion:
+        return 'Animes Orion';
+      case AnimeSource.animesHd:
+        return 'AnimesHD';
+      case AnimeSource.animesOnlineIo:
+        return 'Animes Online IO';
+      case AnimeSource.archiveJp:
+        return 'Internet Archive';
+      case AnimeSource.animeGg:
+        return 'AnimeGG';
+    }
+  }
+}
+
+/// Idioma do conteúdo entregue pela fonte — usado para agrupar o seletor.
+/// Fontes japonesas recebem o passo extra de "Legenda" antes de tocar.
+enum SourceLanguage { portuguese, japanese, english }
+
+extension SourceLanguageLabel on SourceLanguage {
+  String get languageLabel {
+    switch (this) {
+      case SourceLanguage.portuguese:
+        return 'Português';
+      case SourceLanguage.japanese:
+        return 'Japonês';
+      case SourceLanguage.english:
+        return 'Inglês';
+    }
+  }
+}
+
+extension AnimeSourceLanguage on AnimeSource {
+  SourceLanguage get language {
+    switch (this) {
+      case AnimeSource.archiveJp:
+        return SourceLanguage.japanese;
+      case AnimeSource.animeGg:
+      case AnimeSource.allAnime:
+        return SourceLanguage.english;
+      case AnimeSource.animeFire:
+      case AnimeSource.goyabu:
+      case AnimeSource.betterAnime:
+      case AnimeSource.animesRoll:
+      case AnimeSource.dooPlay:
+      case AnimeSource.animePlayer:
+      case AnimeSource.anilist:
+      case AnimeSource.animesOnlineCloud:
+      case AnimeSource.animesDrive:
+      case AnimeSource.animeQ:
+      case AnimeSource.animePlay:
+      case AnimeSource.animesOnlineHdk:
+      case AnimeSource.animesOrion:
+      case AnimeSource.animesHd:
+      case AnimeSource.animesOnlineIo:
+        return SourceLanguage.portuguese;
+    }
+  }
+
+  String get languageLabel {
+    switch (language) {
+      case SourceLanguage.portuguese:
+        return 'Português';
+      case SourceLanguage.japanese:
+        return 'Japonês';
+      case SourceLanguage.english:
+        return 'Inglês';
     }
   }
 }

@@ -1164,6 +1164,8 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
 //
 // ponytail: `initialSources` per provider passed straight to the player; the
 //     player keeps its own dead-source fallback across the provider's qualities.
+enum _PickerStep { source, audio, quality, subtitle }
+
 class _ProviderQualityDialog extends StatefulWidget {
   final Anime anime;
   final CatalogEpisode episode;
@@ -1254,25 +1256,24 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   /// arriving later claims the best slot.
   void _applyResolution(EpisodeResolution resolution) {
     if (!mounted) return;
-    final nextBest =
-        resolution.providers.isEmpty ? null : resolution.providers.keys.first;
     debugPrint('[ProviderDialog] partial ${resolution.providers.length} '
-        'providers best=$nextBest complete=${resolution.complete} '
+        'providers complete=${resolution.complete} '
         'matchedUnavailable=${resolution.matchedUnavailable}');
     setState(() {
       _error = null;
       _matchedUnavailable = resolution.matchedUnavailable;
       _errored = resolution.errored;
-      if (resolution.providers.isNotEmpty) {
-        // Troca de fonte invalida o áudio e a qualidade (eram de outra lista).
-        if (nextBest != _selectedProvider) {
-          _selectedAudio = null;
-          _resetQualitySelection();
-        }
-        _providers = resolution.providers;
-        _selectedProvider = nextBest;
-        _loading = false;
-      } else if (resolution.complete) {
+      _providers = resolution.providers;
+      // Picker em etapas começa em "Fontes": NÃO auto-seleciona a melhor
+      // (senão o card já pularia pra Qualidade). Se a fonte escolhida sumir
+      // numa atualização parcial, volta pra lista.
+      if (_selectedProvider != null &&
+          !resolution.providers.containsKey(_selectedProvider)) {
+        _selectedProvider = null;
+        _selectedAudio = null;
+        _resetQualitySelection();
+      }
+      if (resolution.providers.isNotEmpty || resolution.complete) {
         _loading = false;
       }
     });
@@ -1282,7 +1283,23 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     }
   }
 
-  String _sourceName(AnimeSource s) => s.name;
+  String _sourceName(AnimeSource s) => s.displayName;
+
+  /// Título do card conforme a etapa atual (mockups: Fontes/Qualidade/Legenda).
+  String get _dialogTitle {
+    final providers = _providers;
+    if (providers == null || providers.isEmpty) return 'Reproduzir EP';
+    switch (_currentStep(providers)) {
+      case _PickerStep.source:
+        return 'Fontes';
+      case _PickerStep.audio:
+        return 'Áudio';
+      case _PickerStep.quality:
+        return 'Qualidade';
+      case _PickerStep.subtitle:
+        return 'Legenda';
+    }
+  }
 
   /// Sonda legendas HLS por provider (uma vez por sessão do dialog): busca
   /// `EXT-X-MEDIA SUBTITLES` na primeira fonte `.m3u8` e anexa as tracks a
@@ -1407,9 +1424,9 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Reproduzir EP',
-                        style: TextStyle(
+                      Text(
+                        _dialogTitle,
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -1646,77 +1663,126 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     return audio[0].toUpperCase() + audio.substring(1);
   }
 
-  /// Picker em 3 níveis: Fonte → Áudio (só quando há >1) → Qualidade.
+  /// Seletor em etapas (card único): Fontes (agrupadas por idioma) →
+  /// Áudio (só quando há >1) → Qualidade → Legenda (só fonte japonesa).
   Widget _buildProviderSelector() {
     final providers = _providers!;
+    switch (_currentStep(providers)) {
+      case _PickerStep.source:
+        return _buildSourceStep(providers);
+      case _PickerStep.audio:
+        return _buildAudioStep(providers[_selectedProvider!] ?? const <VideoSource>[]);
+      case _PickerStep.quality:
+        return _buildQualityStep(providers[_selectedProvider!] ?? const <VideoSource>[]);
+      case _PickerStep.subtitle:
+        return _buildSubtitleStep(providers[_selectedProvider!] ?? const <VideoSource>[]);
+    }
+  }
+
+  /// Etapa atual derivada das escolhas (o card mostra UM passo por vez).
+  _PickerStep _currentStep(Map<AnimeSource, List<VideoSource>> providers) {
     final selected = _selectedProvider;
+    if (selected == null) return _PickerStep.source;
+    final sources = providers[selected] ?? const <VideoSource>[];
+    if (_audiosFor(sources).length > 1 && _selectedAudio == null) {
+      return _PickerStep.audio;
+    }
+    if (_selectedQualityIdx == null) return _PickerStep.quality;
+    return selected.language == SourceLanguage.japanese
+        ? _PickerStep.subtitle
+        : _PickerStep.quality;
+  }
 
-    final providerList = providers.entries.map((e) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: _ProviderItem(
-          label: _sourceName(e.key),
-          ping: _pingLabel(e.key),
-          isSelected: selected == e.key,
-          onTap: () {
-            setState(() {
-              _selectedProvider = e.key;
-              _selectedAudio = null;
-              _resetQualitySelection();
-            });
-          },
-        ),
+  Widget _stepBack(VoidCallback onTap) => Padding(
+        padding: const EdgeInsets.only(top: 14),
+        child: _DialogButton(label: 'Voltar', onTap: onTap),
       );
-    }).toList();
 
-    List<Widget> audioSection(List<VideoSource> sources) {
-      final audios = _audiosFor(sources);
-      // Passo pulado: 0-1 áudio — qualidade direto, sem card redundante.
-      if (audios.length <= 1) return const [];
-      return [
-        const Divider(color: ThemeConstants.surfaceLight),
-        const Text(
-          'Áudio',
-          style: TextStyle(
+  /// Passo 1 — Fontes agrupadas por idioma (Português / Japonês / Inglês).
+  Widget _buildSourceStep(Map<AnimeSource, List<VideoSource>> providers) {
+    final groups = <SourceLanguage, List<AnimeSource>>{};
+    for (final s in providers.keys) {
+      groups.putIfAbsent(s.language, () => <AnimeSource>[]).add(s);
+    }
+    const order = [
+      SourceLanguage.portuguese,
+      SourceLanguage.japanese,
+      SourceLanguage.english,
+    ];
+    final children = <Widget>[];
+    for (final lang in order) {
+      final list = groups[lang] ?? const <AnimeSource>[];
+      if (list.isEmpty) continue;
+      children.add(Padding(
+        padding: EdgeInsets.only(top: children.isEmpty ? 0 : 16, bottom: 6),
+        child: Text(
+          lang.languageLabel,
+          style: const TextStyle(
             color: ThemeConstants.textSecondary,
             fontSize: 13,
             fontWeight: FontWeight.w600,
           ),
         ),
-        const SizedBox(height: 8),
+      ));
+      for (final s in list) {
+        children.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: _ProviderItem(
+            label: _sourceName(s),
+            ping: _pingLabel(s),
+            isSelected: false,
+            onTap: () => setState(() {
+              _selectedProvider = s;
+              _selectedAudio = null;
+              _resetQualitySelection();
+            }),
+          ),
+        ));
+      }
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    );
+  }
+
+  /// Passo 2 — Áudio (só quando a fonte tem mais de um).
+  Widget _buildAudioStep(List<VideoSource> sources) {
+    final audios = _audiosFor(sources);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         ...audios.map((a) => Padding(
               padding: const EdgeInsets.symmetric(vertical: 5),
               child: _QualityItem(
                 quality: _audioLabel(a),
+                selected: _selectedAudio == a,
                 onTap: () => setState(() {
                   _selectedAudio = a;
                   _resetQualitySelection();
                 }),
-                selected: _selectedAudio == a,
               ),
             )),
-      ];
-    }
+        _stepBack(() => setState(() {
+              _selectedProvider = null;
+              _selectedAudio = null;
+              _resetQualitySelection();
+            })),
+      ],
+    );
+  }
 
-    List<Widget> qualitySection(List<VideoSource> sources) {
-      final audios = _audiosFor(sources);
-      // Com >1 áudio e nada escolhido, a qualidade espera o áudio.
-      if (audios.length > 1 && _selectedAudio == null) {
-        return const [];
-      }
-      final visible = _visibleSources(sources);
-      if (visible.isEmpty) return const [];
-      return [
-        const Divider(color: ThemeConstants.surfaceLight),
-        const Text(
-          'Qualidade',
-          style: TextStyle(
-            color: ThemeConstants.textSecondary,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
+  /// Passo 3 — Qualidade. Em fonte japonesa segue para Legenda; nas demais
+  /// toca direto ao escolher.
+  Widget _buildQualityStep(List<VideoSource> sources) {
+    final visible = _visibleSources(sources);
+    final hasAudioStep = _audiosFor(sources).length > 1;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         ...visible.asMap().entries.map((q) {
           final idx = q.key;
           return Padding(
@@ -1724,42 +1790,50 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
             child: _QualityItem(
               quality: q.value.quality,
               selected: _selectedQualityIdx == idx,
-              onTap: () => setState(() => _selectedQualityIdx = idx),
+              onTap: () {
+                if (_selectedProvider!.language == SourceLanguage.japanese) {
+                  setState(() => _selectedQualityIdx = idx);
+                } else {
+                  _navigateToPlayer(_selectedProvider!, idx,
+                      visibleSources: visible);
+                }
+              },
             ),
           );
         }),
-      ];
-    }
+        _stepBack(() => setState(() {
+              if (hasAudioStep) {
+                _selectedAudio = null;
+              } else {
+                _selectedProvider = null;
+              }
+              _resetQualitySelection();
+            })),
+      ],
+    );
+  }
 
-    /// Etapa Legenda (card separado, opt-in): só aparece após escolher a
-    /// qualidade. "Sem legenda" toca direto; "Legenda IA…" abre o card
-    /// inline (nada baixa sem toque explícito).
-    List<Widget> subtitleStep(List<VideoSource> visible) {
-      final idx = _selectedQualityIdx;
-      if (idx == null || idx >= visible.length) return const [];
-      return [
-        const Divider(color: ThemeConstants.surfaceLight),
-        const Text(
-          'Legenda',
-          style: TextStyle(
-            color: ThemeConstants.textSecondary,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
+  /// Passo 4 — Legenda (só fonte japonesa): "Sem Legenda" toca direto;
+  /// "Legendado por AI" abre o card inline (nada baixa sem toque explícito).
+  Widget _buildSubtitleStep(List<VideoSource> sources) {
+    final idx = _selectedQualityIdx!;
+    final visible = _visibleSources(sources);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: _QualityItem(
-            quality: 'Sem legenda',
-            onTap: () =>
-                _navigateToPlayer(selected!, idx, visibleSources: visible),
+            quality: 'Sem Legenda',
+            onTap: () => _navigateToPlayer(_selectedProvider!, idx,
+                visibleSources: visible),
           ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: _QualityItem(
-            quality: 'Legenda IA…',
+            quality: 'Legendado por AI',
             selected: _aiStepOpen,
             onTap: () => setState(() => _aiStepOpen = !_aiStepOpen),
           ),
@@ -1772,34 +1846,14 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
               episode: widget.episode,
               episodeIndex: widget.episodeIndex,
               episodeList: widget.episodeList,
-              provider: selected!,
+              provider: _selectedProvider!,
               sources: visible,
             ),
           ),
-      ];
-    }
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Fonte',
-          style: TextStyle(
-            color: ThemeConstants.textSecondary,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (selected == null)
-          ...providerList
-        else ...[
-          ...providerList,
-          ...audioSection(providers[selected]!),
-          ...qualitySection(providers[selected]!),
-          ...subtitleStep(_visibleSources(providers[selected]!)),
-        ],
+        _stepBack(() => setState(() {
+              _resetQualitySelection();
+              _aiStepOpen = false;
+            })),
       ],
     );
   }

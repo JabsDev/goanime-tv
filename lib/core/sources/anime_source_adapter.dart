@@ -118,6 +118,34 @@ abstract class AnimeSourceAdapter {
     }
   }
 
+  /// URL da página do episódio no site do provedor, para o fallback por
+  /// WebView (quando a extração nativa falha). Padrão: a própria URL do
+  /// episódio — nos temas DooPlay/AnimesOnline ela JÁ é a página assistível
+  /// (ex.: `.../episodios/x-1x1/`). Providers cuja API vive em outro host
+  /// (AnimeFire) sobrescrevem.
+  Future<String?> watchUrl(Anime anime, int episodeNumber) async {
+    final match = await resolveAnime(anime);
+    if (match == null) return null;
+    return watchUrlForMatched(match, episodeNumber);
+  }
+
+  /// Igual a [watchUrl], mas com a página já casada (evita re-buscar).
+  Future<String?> watchUrlForMatched(Anime match, int episodeNumber) async {
+    final eps = await getEpisodes(match);
+    if (eps is! Success<List<Episode>>) return null;
+    final list = eps.data;
+    Episode? target;
+    for (final e in list) {
+      if (int.tryParse(e.number) == episodeNumber) {
+        target = e;
+        break;
+      }
+    }
+    target ??= list.isNotEmpty ? list.first : null;
+    if (target == null || target.url.isEmpty) return null;
+    return target.url;
+  }
+
   /// Picks the candidate whose title best matches [query]. Prefers exact,
   /// prefix and containment matches; shorter/closer titles win ties; spin-offs
   /// (films, movies, OVAs, specials) are penalized so the catalog title maps to

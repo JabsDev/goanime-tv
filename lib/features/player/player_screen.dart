@@ -12,11 +12,13 @@ import '../../core/aniskip/aniskip_models.dart';
 import '../../core/aniskip/aniskip_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
+import '../../core/sources/source_registry.dart';
 import '../../core/utils/quality_picker.dart';
 import '../../core/device/device_type.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import 'dash_manifest_proxy.dart';
 import 'resume_seek_tracker.dart';
+import 'webview_player_screen.dart';
 
 class PlayerScreen extends StatefulWidget {
   final Anime anime;
@@ -1673,6 +1675,27 @@ class _PlayerScreenState extends State<PlayerScreen>
     _initPlayer();
   }
 
+  Future<void> _openWebFallback() async {
+    final adapter = SourceRegistry.forSource(widget.provider);
+    String? url;
+    try {
+      url = await adapter.watchUrl(widget.anime, widget.episodeIndex + 1);
+    } catch (_) {}
+    if (!mounted) return;
+    if (url == null || url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Não consegui montar a página do site para esta fonte.'),
+      ));
+      return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => WebViewPlayerScreen(
+        url: url!,
+        title: '${widget.anime.name} · EP${widget.episodeIndex + 1}',
+      ),
+    ));
+  }
+
   Widget _buildErrorState() {
     return Center(
       child: Padding(
@@ -1712,6 +1735,35 @@ class _PlayerScreenState extends State<PlayerScreen>
                           style: TextStyle(
                               color: Colors.white,
                               fontSize: 18,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Focus(
+              onKeyEvent: (node, event) =>
+                  FocusKeyHandler.handle(node, event, _openWebFallback),
+              child: Semantics(
+                button: true,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: _openWebFallback,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: ThemeConstants.accent.withValues(alpha: 0.7)),
+                      ),
+                      child: const Text('Abrir no navegador',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
                               fontWeight: FontWeight.w600)),
                     ),
                   ),
