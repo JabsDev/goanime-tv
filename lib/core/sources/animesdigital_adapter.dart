@@ -294,30 +294,75 @@ class AnimesDigitalAdapter extends AnimeSourceAdapter {
           '',
         ),
       ),
-    };
-    for (final q in queries) {
-      if (q.isEmpty) continue;
-      final result = await search(q);
+    }.where((q) => q.isNotEmpty).toList();
+    // Buscas em paralelo: uma ida e volta em vez de até três em sequência.
+    final results = await Future.wait(queries.map(search));
+    for (final result in results) {
       switch (result) {
         case Success(data: final candidates):
           for (final a in candidates) {
             if (a.url.isNotEmpty && urls.add(a.url)) seen.add(a);
           }
-          if (seen.isNotEmpty) break; // 1ª query com hits basta
         default:
           continue;
       }
     }
     if (seen.isEmpty) return null;
-    return _pickBest(animeRef, seen);
+    return _pickBestAsync(animeRef, seen);
   }
 
-  /// Desambiguação LOCAL. O base [bestMatch] usa `seasonOfCandidateUrl` (cauda
-  /// da URL), mas nesta fonte a temporada vive no TÍTULO ("… 4th Season
-  /// Dublado", "… 2ª temporada") e `normalize` EMPATA os variantes (dublado e
-  /// "Todos os Episódios" viram lixo). Score: tiers do baseMatch + temporada
-  /// pelo título + penalidade de filme/ova.
-  static Anime _pickBest(Anime ref, List<Anime> cands) {
+  /// Temporada de um candidato: pelo título ("… 4th Season Dublado") ou pelo
+  /// slug da URL, sem os sufixos de variante. Slime 4 ("…-ken-4-todos-episodios")
+  /// só é reconhecida pela URL — o título cru "… Ken 4" não tem a palavra
+  /// "season".
+  static int? _seasonOfCandidate(Anime a) {
+    final fromName = TextUtils.seasonOf(a.name);
+    if (fromName != null) return fromName;
+    final stripped = a.url
+        .replaceAll(RegExp(r'/+$'), '')
+        .replaceAll(
+          RegExp(r'(?:-(?:dublado|legendado|todos-episodios))+$'),
+          '',
+        );
+    return AnimeSourceAdapter.seasonOfCandidateUrl(stripped);
+  }
+
+  @visibleForTesting
+  static int? seasonOfCandidateForTest(String url) => _seasonOfCandidate(
+        Anime(name: '', url: url, source: AnimeSource.animesDigital),
+      );
+
+  /// Escolhe entre os candidatos. Se o topo empata (variantes da mesma
+  /// temporada, ex.: "dublado" incompleto × "todos os episódios"), vence a que
+  /// lista mais episódios na primeira página — um GET por candidato, em paralelo.
+  Future<Anime> _pickBestAsync(Anime ref, List<Anime> cands) async {
+    final ranked = _rank(ref, cands);
+    final top = ranked.where((r) => r.$2 >= ranked.first.$2 - 10).take(3);
+    final tied = top.toList();
+    if (tied.length < 2) return tied.first.$1;
+    final counts = await Future.wait(tied.map((r) async {
+      try {
+        final res = await _get(Uri.parse(r.$1.url.replaceAll(RegExp(r'/+$'), '')));
+        if (res.statusCode != 200) return 0;
+        var max = 0;
+        for (final (_, num, _) in parseEpisodePage(res.body)) {
+          final v = int.tryParse(num) ?? 0;
+          if (v > max) max = v;
+        }
+        return max;
+      } catch (_) {
+        return 0;
+      }
+    }));
+    var best = 0;
+    for (var i = 1; i < tied.length; i++) {
+      if (counts[i] > counts[best]) best = i;
+    }
+    return tied[best].$1;
+  }
+
+  /// Candidatos com nota, do melhor para o pior (desempate por URL).
+  static List<(Anime, int)> _rank(Anime ref, List<Anime> cands) {
     final q = AnimeSourceAdapter.normalize(ref.name);
     final qSeason = TextUtils.seasonOf(ref.name);
     int score(Anime a) {
@@ -339,7 +384,7 @@ class AnimesDigitalAdapter extends AnimeSourceAdapter {
       }
       s -= ((t.length - q.length).abs()) ~/ 8;
       if (qSeason != null) {
-        final cs = TextUtils.seasonOf(a.name);
+        final cs = _seasonOfCandidate(a);
         s += cs == qSeason ? 40 : (cs != null ? -40 : 0);
       }
       for (final tok in const [
@@ -353,17 +398,28 @@ class AnimesDigitalAdapter extends AnimeSourceAdapter {
       ]) {
         if (t.contains(tok) && !q.contains(tok)) s -= 25;
       }
-      if (qSeason == null && TextUtils.seasonOf(a.name) != null) s -= 5;
+      if (qSeason == null && _seasonOfCandidate(a) != null) s -= 5;
       return s;
     }
 
-    final sorted = [...cands]
-      ..sort((a, b) {
-        final c = score(b).compareTo(score(a));
+    final list = [for (final a in cands) (a, score(a))]
+      ..sort((x, y) {
+        final c = y.$2.compareTo(x.$2);
         if (c != 0) return c;
-        return a.url.compareTo(b.url);
+        return x.$1.url.compareTo(y.$1.url);
       });
-    return sorted.first;
+    return list;
+  }
+
+  /// Só a primeira página: a lista é newest-first, então basta ver se há itens.
+  /// (O padrão paginaria as ~18 páginas do One Piece, ~10 s — estourava o
+  /// timeout e derrubava um match que estava bom.)
+  @override
+  Future<bool> isPageAlive(Anime anime) async {
+    final base = anime.url.replaceAll(RegExp(r'/+$'), '');
+    final res = await _get(Uri.parse(base));
+    if (res.statusCode != 200) return false;
+    return parseEpisodePage(res.body).isNotEmpty;
   }
 
   @override
@@ -466,13 +522,13 @@ class AnimesDigitalAdapter extends AnimeSourceAdapter {
     return max;
   }
 
-  /// Acha o item de EP [n] em [target] descerndo as páginas em ordem.
-  /// A paginação do site é irregalar (stride 47-51 com 14-18 itens/página e
-  /// buracos — medido 07/10), então sem matemática: desce até a página cujo
-  /// `max < n` (monotônico descendente — depois disso n não aparece) e devolve
-  /// o item quando o número casa. Buracos/EPs não renderizados → null (honesto;
-  /// a fonte serve bem os lançamentos recentes e falha silenciosa nos antigos).
+  /// Acha o item de EP [n] em [target] indo direto à página provável. A lista é
+  /// newest-first (~50 itens por página, com buracos e stride irregular): a
+  /// página ≈ 1 + (maxNum − n) ÷ itens-da-página-1, e depois anda ±1 conforme os
+  /// números da página caem acima ou abaixo de n. No máximo [maxFetches] GETs —
+  /// antes descia página a página (até 17 GETs num aparelho lento).
   Future<Episode?> _locateEpisode(Anime target, int n) async {
+    const maxFetches = 5;
     final base = target.url.replaceAll(RegExp(r'/+$'), '');
     final deadline = DateTime.now().add(const Duration(seconds: 6));
     final http.Response r1;
@@ -484,18 +540,53 @@ class AnimesDigitalAdapter extends AnimeSourceAdapter {
     }
     if (r1.statusCode != 200) return null;
     final maxPages = parseMaxPage(r1.body);
-    var items = parseEpisodePage(r1.body);
-    var maxNum = 0;
-    for (final (_, num, _) in items) {
-      final v = int.tryParse(num) ?? 0;
-      if (v > maxNum) maxNum = v;
-    }
+    final first = parseEpisodePage(r1.body);
+    final maxNum = _maxNumOf(first);
     if (maxNum <= 0) return null;
     if (n > maxNum) return null; // futuro/não lançado
-    Episode? found;
+    final direct = _episodeIn(first, n, target);
+    if (direct != null) return direct;
+    if (first.isEmpty) return null;
+
+    var page = (1 + (maxNum - n) ~/ first.length).clamp(2, maxPages);
+    final tried = <int>{1};
+    for (var fetches = 0; fetches < maxFetches; fetches++) {
+      if (page < 2 || page > 40 || page > maxPages) break;
+      if (!tried.add(page)) break;
+      if (DateTime.now().isAfter(deadline)) break;
+      final http.Response rp;
+      try {
+        rp = await _get(Uri.parse('$base/page/$page/'));
+      } catch (_) {
+        break;
+      }
+      if (rp.statusCode != 200) break;
+      final items = parseEpisodePage(rp.body);
+      final ep = _episodeIn(items, n, target);
+      if (ep != null) return ep;
+      if (items.isEmpty) {
+        page++;
+        continue;
+      }
+      if (_maxNumOf(items) < n) {
+        page--; // n é mais novo: página anterior
+      } else if (_minNumOf(items) > n) {
+        page++; // n é mais antigo: próxima página
+      } else {
+        return null; // n está no intervalo da página mas não listado: buraco
+      }
+    }
+    return null;
+  }
+
+  Episode? _episodeIn(
+    List<(String, String, String)> items,
+    int n,
+    Anime target,
+  ) {
     for (final (url, num, raw) in items) {
       if ((int.tryParse(num) ?? -1) == n) {
-        found = Episode(
+        return Episode(
           number: num,
           url: url,
           season: null,
@@ -503,43 +594,28 @@ class AnimesDigitalAdapter extends AnimeSourceAdapter {
           title: raw,
           description: audioOf(target.name),
         );
-        return found;
       }
-    }
-    // Desce as páginas seguintes; para no cruzamento (monotônico).
-    for (var page = 2; page <= maxPages && page <= 40; page++) {
-      if (DateTime.now().isAfter(deadline)) break;
-      final http.Response rp;
-      try {
-        rp = await _get(Uri.parse('$base/page/$page/'));
-      } catch (e) {
-        break;
-      }
-      if (rp.statusCode != 200) continue;
-      items = parseEpisodePage(rp.body);
-      if (items.isEmpty) continue;
-      for (final (url, num, raw) in items) {
-        if ((int.tryParse(num) ?? -1) == n) {
-          return Episode(
-            number: num,
-            url: url,
-            season: null,
-            owner: target,
-            title: raw,
-            description: audioOf(target.name),
-          );
-        }
-      }
-      // Se TODOS os números desta página já ficaram abaixo de n, monotônico
-      // descendente ⇒ nas outras páginas também. Honestamente vazio.
-      var pageMax = 0;
-      for (final (_, num, _) in items) {
-        final v = int.tryParse(num) ?? 0;
-        if (v > pageMax) pageMax = v;
-      }
-      if (pageMax < n) break;
     }
     return null;
+  }
+
+  static int _maxNumOf(List<(String, String, String)> items) {
+    var max = 0;
+    for (final (_, num, _) in items) {
+      final v = int.tryParse(num) ?? 0;
+      if (v > max) max = v;
+    }
+    return max;
+  }
+
+  static int _minNumOf(List<(String, String, String)> items) {
+    int? min;
+    for (final (_, num, _) in items) {
+      final v = int.tryParse(num);
+      if (v == null || v <= 0) continue;
+      if (min == null || v < min) min = v;
+    }
+    return min ?? 0;
   }
 
   /// Percorre as abas (player1/player2/…) e devolve um `VideoSource` por
@@ -572,19 +648,20 @@ class AnimesDigitalAdapter extends AnimeSourceAdapter {
         }
         for (final (m3u8, label) in await _resolvePlayable(media, jar)) {
           if (!seen.add(m3u8.toLowerCase())) continue;
-          final h = RegExp(r'(\d{3,4})').firstMatch(label)?.group(1);
-          final nice = label.contains(RegExp(r'\d[0-9]*'))
-              ? label.trim().split(RegExp(r'\s+')).first
-              : (label.trim().isEmpty ? 'Auto' : label.trim());
+          // O rótulo do jwplayer ("720p HD") não é confiável: o stream medido
+          // em 07/10 era 1920×1080. Mostra "HD" e não passa altura para o
+          // proxy/picker, para não prometer uma resolução que não existe.
+          final label720 = label;
+          const nice = 'HD';
           debugPrint(
             '[AnimesDigital] ep=${episode.number} p$tab -> '
-            '$nice ($m3u8)',
+            '$nice (site: $label720) ($m3u8)',
           );
           out.add(
             VideoSource(
               url: m3u8,
               quality: nice,
-              dashHeight: h == null ? null : int.tryParse(h),
+              dashHeight: null,
               headers: {'User-Agent': _userAgent, 'Referer': _videoReferer},
               audio: audio.isNotEmpty ? audio : null,
             ),

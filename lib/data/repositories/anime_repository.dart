@@ -68,6 +68,9 @@ class AnimeRepository {
   /// In `partial` mode, how long to wait for the best provider to produce
   /// video before returning with what's already resolved. The providers still
   /// running continue in the background and stream in via [onUpdate].
+  /// Fontes resolvidas ao mesmo tempo (ver `resolveProvidersForEpisode`).
+  static const int maxConcurrentProviders = 3;
+
   static const Duration partialGateDeadline = Duration(milliseconds: 3500);
 
   Future<List<Anime>> searchAnime(String query) async {
@@ -250,16 +253,14 @@ class AnimeRepository {
   /// page still lists at least one episode. Time-boxed like every other
   /// provider step; any failure counts as dead so the caller drops the stale
   /// match and re-discovers instead of replaying a dead page forever.
-  Future<bool> _pageAlive(AnimeSourceAdapter adapter, Anime match) async {
+  /// `false` = página confirmadamente sem episódios (remove o match); `null` =
+  /// não deu para saber (timeout/rede). Timeout NÃO derruba o match salvo — antes
+  /// um site lento apagava a página boa e forçava nova busca a cada toque.
+  Future<bool?> _pageAlive(AnimeSourceAdapter adapter, Anime match) async {
     try {
-      final eps =
-          await adapter.getEpisodes(match).timeout(providerStepTimeout);
-      return switch (eps) {
-        Success(data: final data) => data.isNotEmpty,
-        _ => false,
-      };
+      return await adapter.isPageAlive(match).timeout(providerStepTimeout);
     } catch (_) {
-      return false;
+      return null;
     }
   }
 
@@ -290,9 +291,14 @@ class AnimeRepository {
     int episodeNumber, {
     bool partial = false,
     void Function(EpisodeResolution resolution)? onUpdate,
+    Set<AnimeSource>? only,
   }) async {
     final identity = ProviderMatchStore.identity(anime);
-    final cacheKey = '$identity:$episodeNumber';
+    // [only] restringe o fan-out a alguns provedores (player/prefetch só do
+    // provedor escolhido). Chave própria: não mistura com a resolução completa.
+    final cacheKey = only == null
+        ? '$identity:$episodeNumber'
+        : '$identity:$episodeNumber:${(only.map((s) => s.name).toList()..sort()).join(',')}';
     // Only the happy-path map is cached; unavailable/notFound states are cheap
     // to re-derive and shouldn't stick for 30 minutes.
     final cached =
@@ -318,7 +324,10 @@ class AnimeRepository {
     final matchedUnavailable = <AnimeSource>{};
     final notFound = <AnimeSource>{};
     final errored = <AnimeSource>{};
-    final adapters = _adapters.where((a) => a.implemented).toList();
+    final adapters = _adapters
+        .where((a) => a.implemented && (only == null || only.contains(a.source)))
+        .toList()
+      ..sort((a, b) => a.source.priority.compareTo(b.source.priority));
     final done = <AnimeSource>{};
 
     // Best-effort snapshot of the current (possibly partial) resolution.
@@ -382,7 +391,7 @@ class AnimeRepository {
           // step 2 instead of pinning every episode to matchedUnavailable.
           // A page that lists episodes but yields no video keeps its match
           // (the extractor is what failed, not the page).
-          if (!await _pageAlive(adapter, match)) {
+          if (await _pageAlive(adapter, match) == false) {
             await ProviderMatchStore.removeMatch(identity, src);
             match = Anime(name: anime.name, url: '', source: src);
           }
@@ -430,7 +439,23 @@ class AnimeRepository {
       }
     }
 
-    final futures = adapters.map(resolve).toList();
+    // Pool limitado: no Fire Stick (1 GB, swap cheio) disparar todas as fontes
+    // ao mesmo tempo estourava memória e rede. Ordem por prioridade, então a
+    // melhor fonte começa primeiro.
+    Future<void> runPool() async {
+      var next = 0;
+      Future<void> worker() async {
+        while (next < adapters.length) {
+          await resolve(adapters[next++]);
+        }
+      }
+      final workers = adapters.length < maxConcurrentProviders
+          ? adapters.length
+          : maxConcurrentProviders;
+      await Future.wait([for (var i = 0; i < workers; i++) worker()]);
+    }
+
+    final futures = [runPool()];
 
     if (useGate) {
       await gate!.future.timeout(partialGateDeadline, onTimeout: () {});

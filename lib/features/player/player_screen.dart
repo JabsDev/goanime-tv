@@ -206,6 +206,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         final providers = await _repo.resolveProvidersForEpisode(
           widget.anime,
           widget.episodeIndex + 1,
+          only: {widget.provider},
         );
         sources = providers.providers[widget.provider] ?? const <VideoSource>[];
       }
@@ -394,6 +395,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (_videoReady) {
         _saveProgress();
         _updateActiveSkip();
+        _maybePrefetchNext();
       }
     });
     _durationSub = _player.stream.duration.listen((d) {
@@ -410,7 +412,6 @@ class _PlayerScreenState extends State<PlayerScreen>
         // tracker via eventos de posição, não por tentativa única aqui.
         _resumeSeek.markVideoReady();
         _showControls();
-        _prefetchNextEpisode();
         _fetchSkips();
         debugPrint('[Player] Video is ready, duration: ${_durationSec}s');
       } else if (_videoReady && _skipFailedWithEstimate) {
@@ -491,11 +492,23 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// pronto; `resolveProvidersForEpisode` cacheia o resultado, então o auto-
   /// next (ou o próximo tap) abre sem a fila de resolução das 4 fontes.
   /// Fire-and-forget — nunca bloqueia o playback atual.
+  /// Prefetch só nos últimos ~2 min, e só do provedor que está tocando. Antes
+  /// disparava ao vídeo ficar pronto e resolvia TODAS as fontes em paralelo,
+  /// em cima do buffer do mpv (ver Fase 0: pico de memória e timeouts de rede).
+  void _maybePrefetchNext() {
+    if (_prefetchStarted || _durationSec < 10) return;
+    if (_durationSec - _positionSec > 120) return;
+    _prefetchStarted = true;
+    _prefetchNextEpisode();
+  }
+
+  bool _prefetchStarted = false;
+
   void _prefetchNextEpisode() {
     if (widget.episodeIndex >= widget.episodeList.length - 1) return;
     final next = widget.episodeIndex + 2; // 1-based número do próximo ep
     _repo
-        .resolveProvidersForEpisode(widget.anime, next)
+        .resolveProvidersForEpisode(widget.anime, next, only: {widget.provider})
         .then((_) {}, onError: (e) =>
             debugPrint('[Player] Prefetch next ep $next failed: $e'));
   }

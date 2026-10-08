@@ -158,6 +158,9 @@ class AnimeScraper {
 
   /// Per-query fan-out over every implemented provider. Results are cached per
   /// cleaned query, so variant retries (Fase 1) stay one-call-per-provider.
+  /// Teto de tempo por fonte numa busca (fontes que passam disso são ignoradas).
+  static const Duration sourceSearchTimeout = Duration(seconds: 12);
+
   static Future<List<Anime>> _search(String query) async {
     final cacheKey = query.toLowerCase();
     final cached = AppCaches.search.get<List<Anime>>(cacheKey);
@@ -172,7 +175,10 @@ class AnimeScraper {
           .where((a) => a.implemented)
           .map((a) async {
         try {
-          return await a.search(query);
+          // Teto por fonte: o cliente HTTP repete em timeout, então uma fonte
+          // lenta/travada segurava a busca inteira por minutos (medido no Fire
+          // Stick: "Slime 4th Season" sem resposta após 110 s).
+          return await a.search(query).timeout(sourceSearchTimeout);
         } catch (e) {
           debugPrint('[AnimeScraper] Unhandled exception from ${a.source}: $e');
           return ScraperResult<List<Anime>>.failure(UnknownError(

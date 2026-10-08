@@ -111,8 +111,8 @@ void main() {
     final result = await adapter.resolveVideo(anime(), 1, catalog: anime());
     expect(result, hasLength(1));
     expect(result.single.url, 'https://cdn-s01.stream/kimi/01.mp4/index.m3u8');
-    expect(result.single.quality, '720p');
-    expect(result.single.dashHeight, 720);
+    expect(result.single.quality, 'HD');
+    expect(result.single.dashHeight, isNull);
     // O fluxo inteiro passou pela cadeia, incluindo o probe do manifest:
     expect(calls, contains('m3u8probe'));
   });

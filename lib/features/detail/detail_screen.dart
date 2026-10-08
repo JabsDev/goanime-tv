@@ -1562,7 +1562,10 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
       anime: widget.anime,
     );
     final unavailable = _matchedUnavailable.isNotEmpty;
-    final failed = _errored.isNotEmpty && !unavailable;
+    // Timeout/erro de rede tem prioridade sobre "sem vídeo": uma fonte que só
+    // não respondeu a tempo não significa que o episódio não existe.
+    final failed = _errored.isNotEmpty;
+    final animeFireDown = _matchedUnavailable.contains(AnimeSource.animeFire);
     return Padding(
       padding: const EdgeInsets.all(8),
       child: Column(
@@ -1580,10 +1583,10 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           Text(
             notAired != null
                 ? 'Episódio ainda não lançado'
-                : unavailable
-                    ? 'Episódio sem vídeo disponível'
-                    : failed
-                        ? 'Falha ao buscar fontes'
+                : failed
+                    ? 'Fontes não responderam'
+                    : unavailable
+                        ? 'Episódio sem vídeo disponível'
                         : 'Nenhuma fonte disponível',
             style: const TextStyle(
                 color: Colors.white,
@@ -1593,15 +1596,15 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           const SizedBox(height: 10),
           Text(
             notAired ??
-                (unavailable
-                    ? 'O Ep ${widget.episode.number} existe na fonte, mas o '
-                        'vídeo não é suportado por ela neste momento (player '
-                        'de vídeo sem stream recuperável). Pode ser que outra '
-                        'fonte sirva o episódio.'
-                    : failed
-                        ? 'As fontes falharam com erro de rede ou tempo '
-                            'esgotado e nenhuma entregou vídeo. Toque em '
-                            'tentar novamente.'
+                (failed
+                    ? 'Algumas fontes não responderam a tempo (rede lenta ou '
+                        'site instável) e nenhuma entregou vídeo. Toque em '
+                        'tentar novamente.'
+                    : unavailable
+                        ? 'O Ep ${widget.episode.number} existe na fonte, mas o '
+                            'vídeo não é suportado por ela neste momento. Pode '
+                            'ser que outra fonte sirva o episódio.'
+                            '${animeFireDown ? ' O AnimeFire está instável agora (streams fora do ar).' : ''}'
                         : 'Nenhuma fonte resolveu um stream para o Ep '
                             '${widget.episode.number} deste anime agora. '
                             'Possíveis motivos: Cloudflare, fonte fora do ar ou o '

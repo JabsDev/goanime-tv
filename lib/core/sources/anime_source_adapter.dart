@@ -33,6 +33,17 @@ abstract class AnimeSourceAdapter {
 
   Future<ScraperResult<List<Episode>>> getEpisodes(Anime anime);
 
+  /// Probe barato da página persistida: true quando ainda lista episódios.
+  /// Padrão = lista inteira ([getEpisodes]); adapters com paginação
+  /// sobrescrevem para checar só a primeira página.
+  Future<bool> isPageAlive(Anime anime) async {
+    final r = await getEpisodes(anime);
+    return switch (r) {
+      Success(data: final data) => data.isNotEmpty,
+      _ => false,
+    };
+  }
+
   Future<ScraperResult<List<VideoSource>>> getVideoSources(
     Episode episode, {
     Anime? anime,
