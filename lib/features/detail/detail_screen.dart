@@ -1210,6 +1210,11 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   /// Providers já sondados p/ legenda HLS nesta sessão do dialog.
   final Set<AnimeSource> _subsProbed = {};
 
+  /// Sessão de etapa: bump quando a etapa muda (vai/volta) — remonta o passo
+  /// (KeyedSubtree) para o AUTOfocus do 1º item pedir foco de novo.
+  int _stepSession = 0;
+  _PickerStep? _lastStep;
+
   @override
   void initState() {
     super.initState();
@@ -1391,6 +1396,17 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   @override
   Widget build(BuildContext context) {
     final screen = MediaQuery.sizeOf(context);
+    // Sessão de etapa: bump pós-frame quando a etapa corrente muda — o
+    // KeyedSubtree re-monta e o autofocus do 1º item dispara de novo.
+    final hasProviders = _providers != null && _providers!.isNotEmpty;
+    final currentStep = hasProviders ? _currentStep(_providers!) : null;
+    if (currentStep != _lastStep) {
+      _lastStep = currentStep;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() => _stepSession++);
+      });
+    }
     return Dialog(
       backgroundColor: ThemeConstants.surface,
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
@@ -1710,6 +1726,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
       SourceLanguage.english,
     ];
     final children = <Widget>[];
+    var firstInteractive = true;
     for (final lang in order) {
       final list = groups[lang] ?? const <AnimeSource>[];
       if (list.isEmpty) continue;
@@ -1725,12 +1742,15 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
         ),
       ));
       for (final s in list) {
+        final stop = firstInteractive;
+        firstInteractive = false;
         children.add(Padding(
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: _ProviderItem(
             label: _sourceName(s),
             ping: _pingLabel(s),
             isSelected: false,
+            autofocus: stop,
             onTap: () => setState(() {
               _selectedProvider = s;
               _selectedAudio = null;
@@ -1740,37 +1760,47 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
         ));
       }
     }
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: children,
+    return KeyedSubtree(
+      key: ValueKey('step:$_stepSession'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
     );
   }
 
   /// Passo 2 — Áudio (só quando a fonte tem mais de um).
   Widget _buildAudioStep(List<VideoSource> sources) {
     final audios = _audiosFor(sources);
-    return Column(
+    return KeyedSubtree(
+      key: ValueKey('step:$_stepSession'),
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ...audios.map((a) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 5),
-              child: _QualityItem(
-                quality: _audioLabel(a),
-                selected: _selectedAudio == a,
-                onTap: () => setState(() {
-                  _selectedAudio = a;
-                  _resetQualitySelection();
-                }),
-              ),
-            )),
+        ...audios.indexed.map((rec) {
+          final (i, a) = rec;
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: _QualityItem(
+              quality: _audioLabel(a),
+              selected: _selectedAudio == a,
+              autofocus: i == 0,
+              onTap: () => setState(() {
+                _selectedAudio = a;
+                _resetQualitySelection();
+              }),
+            ),
+          );
+        }),
         _stepBack(() => setState(() {
               _selectedProvider = null;
               _selectedAudio = null;
               _resetQualitySelection();
             })),
       ],
+      ),
     );
   }
 
@@ -1779,7 +1809,9 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   Widget _buildQualityStep(List<VideoSource> sources) {
     final visible = _visibleSources(sources);
     final hasAudioStep = _audiosFor(sources).length > 1;
-    return Column(
+    return KeyedSubtree(
+      key: ValueKey('step:$_stepSession'),
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1790,6 +1822,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
             child: _QualityItem(
               quality: q.value.quality,
               selected: _selectedQualityIdx == idx,
+              autofocus: idx == 0,
               onTap: () {
                 if (_selectedProvider!.language == SourceLanguage.japanese) {
                   setState(() => _selectedQualityIdx = idx);
@@ -1810,6 +1843,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
               _resetQualitySelection();
             })),
       ],
+      ),
     );
   }
 
@@ -1818,7 +1852,9 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   Widget _buildSubtitleStep(List<VideoSource> sources) {
     final idx = _selectedQualityIdx!;
     final visible = _visibleSources(sources);
-    return Column(
+    return KeyedSubtree(
+      key: ValueKey('step:$_stepSession'),
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1826,6 +1862,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: _QualityItem(
             quality: 'Sem Legenda',
+            autofocus: !_aiStepOpen,
             onTap: () => _navigateToPlayer(_selectedProvider!, idx,
                 visibleSources: visible),
           ),
@@ -1835,6 +1872,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
           child: _QualityItem(
             quality: 'Legendado por AI',
             selected: _aiStepOpen,
+            autofocus: _aiStepOpen,
             onTap: () => setState(() => _aiStepOpen = !_aiStepOpen),
           ),
         ),
@@ -1855,6 +1893,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
               _aiStepOpen = false;
             })),
       ],
+      ),
     );
   }
 
@@ -1901,8 +1940,14 @@ class _QualityItem extends StatefulWidget {
   /// Marca visual de escolhido (passo de áudio). Null/false = sem marca.
   final bool selected;
 
+  /// B-novo: foco inicial no 1º item do passo (o d-pad fica preso sem isso).
+  final bool autofocus;
+
   const _QualityItem(
-      {required this.quality, required this.onTap, this.selected = false});
+      {required this.quality,
+      required this.onTap,
+      this.selected = false,
+      this.autofocus = false});
 
   @override
   State<_QualityItem> createState() => _QualityItemState();
@@ -1914,6 +1959,7 @@ class _QualityItemState extends State<_QualityItem> {
   @override
   Widget build(BuildContext context) {
     return Focus(
+      autofocus: widget.autofocus,
       onFocusChange: (f) => setState(() => _isFocused = f),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
       child: Semantics(
@@ -1997,11 +2043,15 @@ class _ProviderItem extends StatefulWidget {
   final bool isSelected;
   final VoidCallback onTap;
 
+  /// B-novo: foco inicial no 1º item (mesma regra do _QualityItem).
+  final bool autofocus;
+
   const _ProviderItem({
     required this.label,
     required this.isSelected,
     required this.onTap,
     this.ping,
+    this.autofocus = false,
   });
 
   @override
@@ -2014,6 +2064,7 @@ class _ProviderItemState extends State<_ProviderItem> {
   @override
   Widget build(BuildContext context) {
     return Focus(
+      autofocus: widget.autofocus,
       onFocusChange: (f) => setState(() => _isFocused = f),
       onKeyEvent: (node, event) => FocusKeyHandler.handle(node, event, widget.onTap),
       child: Semantics(
