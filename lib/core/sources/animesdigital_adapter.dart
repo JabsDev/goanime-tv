@@ -99,9 +99,14 @@ class AnimesDigitalAdapter extends AnimeSourceAdapter {
 
   static final _episodeNumber = RegExp(r'Epis[óo]dio\s*([\d,.]+)');
 
-  /// Capa anti-bot de cada aba (player1/player2/…).
+  /// Capa/iframe de cada aba (`player1`/`player2`/…). A fonte rende DOIS
+  /// formatos ao vivo (07/10/2026):
+  ///  - formato antigo: `<a class="ad-protected-cover" href="…campaign.php?token=…">`
+  ///  - formato novo: `<iframe class="metaframe…" src="https://api.anivideo.net/videohls.php?d=…">`
+  /// on o group(3) já é a media-url direta.
   static final _coverHref = RegExp(
-    r'id="player(\d+)"[^>]*>\s*<a class="ad-protected-cover" href="([^"]+)"',
+    r'id="player(\d+)"[^>]*>\s*(?:<a class="ad-protected-cover" href="([^"]+)"'
+    r'|<iframe[^>]*src="([^"]+)")',
   );
 
   static final _metaRefresh = RegExp(
@@ -179,7 +184,8 @@ class AnimesDigitalAdapter extends AnimeSourceAdapter {
     final out = <(int, String)>[];
     for (final m in _coverHref.allMatches(html)) {
       final tab = int.tryParse(m.group(1)!) ?? 0;
-      final href = m.group(2)!.replaceAll('&amp;', '&');
+      final href = (m.group(2) ?? m.group(3))?.replaceAll('&amp;', '&') ?? '';
+      if (href.isEmpty || !href.startsWith('http')) continue;
       out.add((tab, href));
     }
     out.sort((a, b) => a.$1.compareTo(b.$1));
@@ -552,9 +558,14 @@ class AnimesDigitalAdapter extends AnimeSourceAdapter {
     if (page.statusCode != 200) return out;
     final jar = CookieJar();
     for (final (tab, cover) in parseCovers(page.body)) {
-      if (!cover.contains('campaign.php?token=')) continue;
+      if (!cover.contains('campaign.php?token=') &&
+          !cover.contains('videohls.php')) {
+        continue;
+      }
       try {
-        final media = await _unwrapCampaign(cover, episode.url, jar);
+        final media = cover.contains('videohls.php')
+            ? cover // formato novo: iframe já entrega a media-url
+            : await _unwrapCampaign(cover, episode.url, jar);
         if (media == null) {
           debugPrint('[AnimesDigital] player$tab: cover wrap falhou');
           continue;
