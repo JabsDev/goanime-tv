@@ -199,3 +199,35 @@ Aprovado. A busca responde, o episódio 23 da 4ª temporada resolve e o playback
 - A comparação de rede **não é isolada**: o teste de hoje roda com o aparelho mais limpo (app reinstalado, sem o app antigo em segundo plano), o CDN é outro (AnimeGG em vez de Animes Digital) e o Wi-Fi pode ter mudado. A melhoria é grande e na direção esperada, mas não dá para atribuir todo o ganho só ao código.
 - O prefetch tardio foi validado **pelo lado negativo** (não disparou cedo, como esperado). Não validei o lado positivo (disparar perto do fim), que exigiria avançar o episódio até o fim.
 - A queda do swap deve-se em boa parte ao ambiente mais limpo, não só ao pool de 3 fontes.
+
+## Fase 6 — Release publicada
+
+- Commit: `49753a2` em `master` (push para `origin/master`).
+- Tag anotada: **`v1.4.11+1000077`**. O changelog da release é a mensagem da tag (é assim que o workflow monta o diálogo de update do app).
+- Workflow "Release APK": **concluído com sucesso**
+  (https://github.com/JabsDev/goanime-tv/actions/runs/37856047849).
+- Release: https://github.com/JabsDev/goanime-tv/releases/tag/v1.4.11%2B1000077
+  (marcada como *prerelease*, igual às três anteriores — padrão do projeto).
+- APK: `goanime-tv-v1.4.11+1000077.apk` (212.285.260 bytes).
+
+### Assinatura (o ponto que estava em aberto)
+
+A keystore **não** foi perdida: ela vive no segredo `ANDROID_DEBUG_KEYSTORE_B64`
+do repositório, e o workflow a restaura antes do build. Conferido comparando
+impressões digitais SHA-256 dos certificados:
+
+| APK | SHA-256 do certificado |
+|---|---|
+| v1.4.7+1000073 (última oficial) | `cba763116b7e62744cbf00c72337e32d11d770da7e1e70207a87e67a99e5c7db` |
+| v1.4.11+1000077 (esta) | `cba763116b7e62744cbf00c72337e32d11d770da7e1e70207a87e67a99e5c7db` |
+
+Iguais → **o auto-update instala por cima do app dos aparelhos**, sem
+desinstalar e sem perder dados. Não é preciso trocar o segredo do GitHub.
+
+### Nota sobre o aparelho de teste
+
+O Fire Stick está com o APK **local** (chave debug desta máquina), não com o do
+CI. Instalar o da release por cima nele vai falhar por assinatura — é o
+comportamento esperado e não afeta os aparelhos com o app oficial. Para o
+aparelho de teste ficar igual ao de produção, basta instalar
+`goanime-tv-v1.4.11+1000077.apk` manualmente (desinstalando antes o build local).

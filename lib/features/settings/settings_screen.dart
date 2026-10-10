@@ -16,6 +16,7 @@ import '../../shared/widgets/tv_button.dart';
 import '../ai_subtitle/ai_model_row.dart';
 import 'legendai_pair_screen.dart';
 import 'legendai_queue_card.dart';
+import 'tmdb_settings_section.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -149,6 +150,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: () =>
                           SettingsService.instance.setUserPreference(false),
                     ),
+                    const SizedBox(height: 32),
+                    const TmdbSettingsSection(),
                     const SizedBox(height: 32),
                     const Text(
                       'Filtro de conteúdo',

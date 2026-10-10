@@ -719,6 +719,71 @@ class AniListService {
     }
   }
 
+  /// Página arbitrária do catálogo, ordenada por popularidade.
+  ///
+  /// Existe para a **varredura do índice alfabético**
+  /// (`CatalogBrowseService`): nem AniList nem TMDB ordenam por letra, então
+  /// o índice local é montado varrendo páginas de popularidade. Paginado e
+  /// sem cache — ao contrário de [_catalog], que é cacheado em disco para a
+  /// Home; quem chama aqui já controla o teto de entradas.
+  static Future<List<Anime>> catalogPage({
+    int page = 1,
+    int perPage = 50,
+  }) async {
+    final query = '''
+      query (\$page: Int, \$perPage: Int) {
+        Page(page: \$page, perPage: \$perPage) {
+          media(type: ANIME, sort: [POPULARITY_DESC], isAdult: false) {
+            id idMal duration
+            title { romaji english native }
+            coverImage { extraLarge large medium }
+            bannerImage description episodes status averageScore genres
+          }
+        }
+      }
+    ''';
+    try {
+      final res = await _anilistPost(query,
+          variables: {'page': page, 'perPage': perPage});
+      if (res.statusCode != 200) return const [];
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+      if (json.containsKey('errors')) return const [];
+      final media = json['data']?['Page']?['media'] as List? ?? const [];
+      return media
+          .map((m) => _mediaToAnime(m as Map<String, dynamic>))
+          .where((a) => a.name.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('[AniList] catalogPage($page) error: $e');
+      return const [];
+    }
+  }
+
+  /// Página do catálogo filtrada por **gênero** — a base das categorias da
+  /// tela Explorar. [genre] é o nome exato do `GenreCollection`
+  /// ('Action', 'Mahou Shoujo', …).
+  static Future<List<Anime>> catalogByGenre(
+    String query,
+    String genre, {
+    int perPage = 40,
+  }) async {
+    try {
+      final res =
+          await _anilistPost(query, variables: {'genre': genre, 'n': perPage});
+      if (res.statusCode != 200) return const [];
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+      if (json.containsKey('errors')) return const [];
+      final media = json['data']?['Page']?['media'] as List? ?? const [];
+      return media
+          .map((m) => _mediaToAnime(m as Map<String, dynamic>))
+          .where((a) => a.name.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('[AniList] catalogByGenre($genre) error: $e');
+      return const [];
+    }
+  }
+
   static String _seasonFor(int month) {
     if (month <= 3) return 'WINTER';
     if (month <= 6) return 'SPRING';

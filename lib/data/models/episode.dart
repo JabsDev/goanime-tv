@@ -96,6 +96,17 @@ class VideoSource {
   /// skips the audio step and shows qualities directly.
   final String? audio;
 
+  /// Áudios que a FONTE anunciava neste episódio mas que não sobreviveram à
+  /// checagem de vivacidade (ex.: o legendado do Slime S4E23 no AnimeFire,
+  /// cujo manifesto responde 404 enquanto o dublado responde 200).
+  ///
+  /// Só é preenchido quando havia mais de um áudio anunciado: aí a escolha
+  /// existia de verdade e o silêncio do player pareceria uma decisão do app
+  /// em vez de uma indisponibilidade do provedor. A UI usa isto para dizer
+  /// "Legendado indisponível nesta fonte" em vez de simplesmente pular o
+  /// passo de áudio e tocar o que sobrou. Vazio = nada a avisar.
+  final List<String> unavailableAudios;
+
   /// Legendas candidatas resolvidas pelo provider (tracks embutidas ou
   /// `.srt`/`.vtt` lado-a-lado). `subtitleUrls` é alias de leitura.
   final List<SubtitleRef> subtitleCandidates;
@@ -107,6 +118,7 @@ class VideoSource {
     this.headers = const {},
     this.dashHeight,
     this.audio,
+    this.unavailableAudios = const [],
     this.subtitleCandidates = const [],
   });
 
@@ -117,6 +129,18 @@ class VideoSource {
         headers: headers,
         dashHeight: dashHeight,
         audio: audio,
+        unavailableAudios: unavailableAudios,
         subtitleCandidates: [...subtitleCandidates, sub],
+      );
+
+  /// Cópia carimbando os áudios que a fonte anunciava mas não entregou.
+  VideoSource withUnavailableAudios(List<String> missing) => VideoSource(
+        url: url,
+        quality: quality,
+        headers: headers,
+        dashHeight: dashHeight,
+        audio: audio,
+        unavailableAudios: missing,
+        subtitleCandidates: subtitleCandidates,
       );
 }

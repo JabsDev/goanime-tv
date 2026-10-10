@@ -13,6 +13,16 @@ class Anime {
   List<String> genres;
   int? anilistId;
   int? idMal;
+
+  /// TMDB id — presente só em títulos vindos do catálogo TMDB (drama,
+  /// donghua, novela, filme). O app ainda usa o AniList como catálogo
+  /// canônico de episódios, então um título só-TMDB entra pela busca por nome.
+  int? tmdbId;
+
+  /// Tipo do conteúdo no catálogo de origem: 'anime' | 'tv' | 'movie'.
+  /// Usado para agrupar a listagem (categorias/alfabeto) e rotular o card.
+  String? mediaType;
+
   int? duration;
 
   /// AniList `isAdult` flag — canonical NSFW signal used by [NsfwFilter].
@@ -47,6 +57,8 @@ class Anime {
     this.englishName,
     this.anilistId,
     this.idMal,
+    this.tmdbId,
+    this.mediaType,
     this.duration,
     this.isAdult,
     this.nextAiringEpisode,
@@ -78,6 +90,8 @@ enum AnimeSource {
   animesOnlineIo,
   archiveJp,
   animeGg,
+  donghuaNoSekai,
+  doramasflix,
 }
 
 extension AnimeSourcePriority on AnimeSource {
@@ -98,7 +112,8 @@ extension AnimeSourcePriority on AnimeSource {
       this == AnimeSource.animesOnlineHdk ||
       this == AnimeSource.animesOrion ||
       this == AnimeSource.animesHd ||
-      this == AnimeSource.animesOnlineIo;
+      this == AnimeSource.animesOnlineIo ||
+      this == AnimeSource.donghuaNoSekai;
 
   /// Ordering priority for display/selection: lower = higher priority.
   /// PT-BR sources with reliable playback come first; AllAnime (EN, currently
@@ -143,6 +158,10 @@ extension AnimeSourcePriority on AnimeSource {
         return 16;
       case AnimeSource.animeGg:
         return 17;
+      case AnimeSource.donghuaNoSekai:
+        return 18;
+      case AnimeSource.doramasflix:
+        return 19;
     }
   }
 }
@@ -188,19 +207,25 @@ extension AnimeSourceDisplay on AnimeSource {
         return 'Internet Archive';
       case AnimeSource.animeGg:
         return 'AnimeGG';
+      case AnimeSource.donghuaNoSekai:
+        return 'DonghuaNoSekai';
+      case AnimeSource.doramasflix:
+        return 'Doramasflix';
     }
   }
 }
 
 /// Idioma do conteúdo entregue pela fonte — usado para agrupar o seletor.
 /// Fontes japonesas recebem o passo extra de "Legenda" antes de tocar.
-enum SourceLanguage { portuguese, japanese, english }
+enum SourceLanguage { portuguese, spanish, japanese, english }
 
 extension SourceLanguageLabel on SourceLanguage {
   String get languageLabel {
     switch (this) {
       case SourceLanguage.portuguese:
         return 'Português';
+      case SourceLanguage.spanish:
+        return 'Latino';
       case SourceLanguage.japanese:
         return 'Japonês';
       case SourceLanguage.english:
@@ -233,18 +258,13 @@ extension AnimeSourceLanguage on AnimeSource {
       case AnimeSource.animesOrion:
       case AnimeSource.animesHd:
       case AnimeSource.animesOnlineIo:
+      case AnimeSource.donghuaNoSekai:
         return SourceLanguage.portuguese;
+      case AnimeSource.doramasflix:
+        // Acervo Latino (auditoria 10/10/2026: 800 dramas, zero Português).
+        return SourceLanguage.spanish;
     }
   }
 
-  String get languageLabel {
-    switch (language) {
-      case SourceLanguage.portuguese:
-        return 'Português';
-      case SourceLanguage.japanese:
-        return 'Japonês';
-      case SourceLanguage.english:
-        return 'Inglês';
-    }
-  }
+  String get languageLabel => SourceLanguageLabel(language).languageLabel;
 }

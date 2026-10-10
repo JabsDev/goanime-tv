@@ -230,6 +230,9 @@ class AnimeScraper {
             return a.url.isNotEmpty;
           case AnimeSource.animeGg:
             return a.url.isNotEmpty;
+          case AnimeSource.donghuaNoSekai:
+          case AnimeSource.doramasflix:
+            return a.url.isNotEmpty;
           case AnimeSource.anilist:
             return false; // metadata provider, no stream URL
         }

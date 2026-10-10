@@ -12,6 +12,8 @@ import '../sources/goyabu_adapter.dart';
 import '../sources/dooplay_adapter.dart';
 import '../sources/animeplayer_adapter.dart';
 import '../sources/animesonline_adapter.dart';
+import '../sources/donghua_no_sekai_adapter.dart';
+import '../sources/doramasflix_adapter.dart';
 
 /// Holds the available source adapters and provides lookups by [AnimeSource].
 class SourceRegistry {
@@ -38,6 +40,11 @@ class SourceRegistry {
     AllAnimeAdapter(),
     ArchiveJpAdapter(),
     AnimeGgAdapter(),
+    // Donghua (animação chinesa) PT-BR — HLS limpo, sem anti-bot.
+    DonghuaNoSekaiAdapter(),
+    // Catálogo de K/C/J-drama via GraphQL público. Acervo Latino, não
+    // PT-BR: entra DEPOIS das fontes PT para não competir no ranking.
+    DoramasflixAdapter(),
   ];
 
   static List<AnimeSourceAdapter> get adapters => _adapters;
@@ -59,6 +66,8 @@ class SourceRegistry {
       AnimeSource.animesOnlineIo,
       AnimeSource.archiveJp,
       AnimeSource.animeGg,
+      AnimeSource.donghuaNoSekai,
+      AnimeSource.doramasflix,
     ];
   }
 
@@ -102,12 +111,19 @@ class SourceRegistry {
         return 16;
       case AnimeSource.animeGg:
         return 17;
+      case AnimeSource.donghuaNoSekai:
+        return 18;
+      case AnimeSource.doramasflix:
+        return 19;
     }
   }
 
   static AnimeSourceAdapter forSource(AnimeSource source) {
     return _adapters.firstWhere(
-      (a) => source == AnimeSource.animeFire && a is AnimeFireAdapter ||
+      (a) => source == AnimeSource.archiveJp && a is ArchiveJpAdapter ||
+              source == AnimeSource.donghuaNoSekai && a is DonghuaNoSekaiAdapter ||
+              source == AnimeSource.doramasflix && a is DoramasflixAdapter ||
+              source == AnimeSource.animeFire && a is AnimeFireAdapter ||
              source == AnimeSource.animesDigital && a is AnimesDigitalAdapter ||
              source == AnimeSource.goyabu && a is GoyabuAdapter ||
              source == AnimeSource.animePlayer && a is AnimePlayerAdapter ||

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-br" dir="ltr" data-cast-api-enabled="true">
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="robots" content="noindex">
+        <title>Player</title>
+        <script src="https://code.jquery.com/jquery-2.2.4.min.js" integrity="sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=" crossorigin="anonymous"></script>
+        <style>
+            html,
+            body {
+                height:100%;
+                width:100%;
+                margin:0;
+                overflow:hidden;
+                background: #000;
+            }
+            iframe {
+                height:100%;
+                width:100%;
+            }
+			#v-xpKcgUvs-1,
+			.video-player {
+				height: 100%;
+			}
+        </style>
+                <script>
+        if (document.addEventListener) {
+            document.addEventListener("keydown", bloquearSource);
+        } else { //Versões antigas do IE
+            document.attachEvent("onkeydown", bloquearSource);
+        }
+
+        function bloquearSource(e) {
+            e = e || window.event;
+
+            var code = e.which || e.keyCode;
+
+            if (
+                e.ctrlKey &&
+                (code == 83 || code == 85) //83 = S, 85 = U
+            ) {
+                if (e.preventDefault) {
+                    e.preventDefault();
+                } else {
+                    e.returnValue = false;
+                }
+
+                return false;
+                window.location.href="https://facebook.com";
+                window.replace.href="https://facebook.com";
+            }
+        }
+        if (document.addEventListener) {
+            document.addEventListener("keydown", bloquearSource);
+        } else { //Versões antigas do IE
+            document.attachEvent("onkeydown", bloquearSource);
+        }
+
+        function bloquearSource(e) {
+            e = e || window.event;
+
+            var code = e.which || e.keyCode;
+
+            if (
+                e.ctrlKey &&
+                (code == 160 || code == 73) //73 = I, 160 = LShift
+            ) {
+                if (e.preventDefault) {
+                    e.preventDefault();
+                } else {
+                    e.returnValue = false;
+                }
+
+                return false;
+                 window.location.href="https://facebook.com";
+                window.replace.href="https://facebook.com";
+            }
+        }
+          window.onload = function() {
+            document.addEventListener("contextmenu", function(e){
+              e.preventDefault();
+            }, false);
+            document.addEventListener("keydown", function(e) {
+            //document.onkeydown = function(e) {
+              // "I" key
+              if (e.ctrlKey && e.shiftKey && e.keyCode == 73) {
+                disabledEvent(e);
+              }
+              // "J" key
+              if (e.ctrlKey && e.shiftKey && e.keyCode == 74) {
+                disabledEvent(e);
+              }
+              // "S" key + macOS
+              if (e.keyCode == 83 && (navigator.platform.match("Mac") ? e.metaKey : e.ctrlKey)) {
+                disabledEvent(e);
+              }
+              // "U" key
+              if (e.ctrlKey && e.keyCode == 85) {
+                disabledEvent(e);
+              }
+              // "F12" key
+              if (event.keyCode == 123) {
+                disabledEvent(e);
+              }
+            }, false);
+            function disabledEvent(e){
+              if (e.stopPropagation){
+                e.stopPropagation();
+              } else if (window.event){
+                window.event.cancelBubble = true;
+              }
+              e.preventDefault();
+              window.location.href = "https://facebook.com";
+              window.location.replace('https://facebook.com');
+              
+            }
+          };
+        </script>
+        
+    </head>
+     
+     
+       
+    <body>
+        <iframe src="https://player.donghuanosekai.com/player-nativov2.php?v=https://cdn-s02.star-wallpaper-4k.pictures/stream/swallowed-star/season5/243_1080p_c9c70f13.mp4/index.m3u8" width="100%" height="100%" frameborder="0" allowfullscreen="allowfullscreen"></iframe>            <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4888ed41d10ac41',t:'MTc5MTY2NjA2MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
+
+<!-- Dynamic page generated in 0.117 seconds. -->
+<!-- Cached page generated by WP-Super-Cache on 2026-10-10 17:34:51 -->
+
+<!-- Compression = gzip -->

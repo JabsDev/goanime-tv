@@ -23,6 +23,13 @@ class SettingsService {
   static const _kLegendAiPort = 'settings_legendai_port';
   static const _kSubtitleSource = 'settings_subtitle_source'; // 'device'|'pc'
 
+  // Catálogo TMDB (drama/dorama/donghua/novela). A chave v3 é do USUÁRIO —
+  // o app não tem backend, e embutir uma chave no APK a entregaria a
+  // qualquer um que descompactasse o pacote (e o GitHub pode marcar como
+  // segredo exposto). Vazio = TMDB desligado, tudo continua no AniList.
+  static const _kTmdbApiKey = 'settings_tmdb_api_key';
+  static const _kTmdbEnabled = 'settings_tmdb_enabled';
+
   /// Whitelist do setter. Poda Fase 1: só os tiers ALTOS. Inválido → default
   /// ('sensevoice'/'manga'), nunca nos tiers baixos removidos (tiny/leve).
   static const _sttTiers = {'sensevoice', 'jav03'};
@@ -86,6 +93,59 @@ class SettingsService {
   ValueListenable<String> get auditKindListenable => _auditKindVN;
   String get auditKind => _auditKind;
 
+  /// TMDB: chave v3 do usuário + toggle. Só "ativo" com chave preenchida —
+  /// sem chave o catálogo TMDB é ignorado silenciosamente.
+  String _tmdbApiKey = '';
+  final ValueNotifier<String> _tmdbApiKeyVN = ValueNotifier<String>('');
+  ValueListenable<String> get tmdbApiKeyListenable => _tmdbApiKeyVN;
+
+  bool _tmdbEnabled = true;
+  final ValueNotifier<bool> _tmdbEnabledVN = ValueNotifier<bool>(true);
+  ValueListenable<bool> get tmdbEnabledListenable => _tmdbEnabledVN;
+
+  String get tmdbApiKey => _tmdbApiKey;
+  bool get tmdbEnabled => _tmdbEnabled;
+
+  /// Só vale quando há chave: sem ela qualquer chamada ao TMDB volta 401
+  /// (e o app não deve gastar requisição nisso).
+  bool get tmdbConfigured =>
+      _tmdbEnabled && _tmdbApiKey.trim().length >= 16;
+
+  /// Máscara para exibir sem despejar a chave inteira na tela.
+  String get tmdbApiKeyMasked {
+    final k = _tmdbApiKey.trim();
+    if (k.length < 8) return '';
+    return '${k.substring(0, 4)}…${k.substring(k.length - 4)}';
+  }
+
+  /// Auditoria de formato da chave v3 do TMDB (hex de 32).
+  static String? validateTmdbKey(String raw) {
+    final k = raw.trim();
+    if (k.isEmpty) return 'Informe a chave.';
+    if (!RegExp(r'^[0-9a-f]{32}$', caseSensitive: false).hasMatch(k)) {
+      return 'A chave v3 do TMDB tem 32 caracteres hexadecimais.';
+    }
+    return null;
+  }
+
+  Future<void> setTmdbApiKey(String v) async {
+    _tmdbApiKey = v.trim();
+    _tmdbApiKeyVN.value = _tmdbApiKey.isEmpty ? '' : tmdbApiKeyMasked;
+    final prefs = await SharedPreferences.getInstance();
+    if (_tmdbApiKey.isEmpty) {
+      await prefs.remove(_kTmdbApiKey);
+    } else {
+      await prefs.setString(_kTmdbApiKey, _tmdbApiKey);
+    }
+  }
+
+  Future<void> setTmdbEnabled(bool v) async {
+    _tmdbEnabled = v;
+    _tmdbEnabledVN.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kTmdbEnabled, v);
+  }
+
   Future<void> init() async {
     LocalStorage.ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
@@ -122,6 +182,10 @@ class SettingsService {
     // Auditoria saiu do fluxo: o valor persistido é ignorado (sempre 'off').
     _auditKind = 'off';
     _auditKindVN.value = _auditKind;
+    _tmdbApiKey = (prefs.getString(_kTmdbApiKey) ?? '').trim();
+    _tmdbApiKeyVN.value = _tmdbApiKey.isEmpty ? '' : tmdbApiKeyMasked;
+    _tmdbEnabled = prefs.getBool(_kTmdbEnabled) ?? true;
+    _tmdbEnabledVN.value = _tmdbEnabled;
     debugPrint(
       '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value nsfw=$_nsfwFilter autoSkip=$_autoSkipIntro',
     );

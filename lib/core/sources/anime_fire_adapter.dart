@@ -430,10 +430,19 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
       final seen = <String>{};
       var skippedOffline = 0;
       var skippedDead = 0;
+      // Áudios anunciados vs. realmente entregues (lowercase). O payload
+      // mente sobre disponibilidade: marca `is_offline: false` num stream cujo
+      // manifesto responde 404 (Slime S4E22/23, out/2026). Sem isso, o passo de
+      // áudio some por `length > 1` e o app troca o áudio em silêncio.
+      final advertised = <String>{};
+      final aliveAudios = <String>{};
+      final deadAudios = <String>{};
       for (final item in raw) {
         if (item is! Map) continue;
         final url = item['url']?.toString() ?? '';
         final audio = item['audio']?.toString() ?? '';
+        final trackKey = audio.trim().toLowerCase();
+        if (trackKey.isNotEmpty) advertised.add(trackKey);
         if (url.isEmpty) {
           skippedOffline++;
           continue;
@@ -441,10 +450,12 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
         // Link que o CDN não serve (404) = stream morto, não ofereça.
         if (!await _manifestAlive(url, _headers)) {
           skippedDead++;
+          if (trackKey.isNotEmpty) deadAudios.add(trackKey);
           debugPrint(
               '[AnimeFire] Dead CDN stream (404) for $epId audio=$audio');
           continue;
         }
+        if (trackKey.isNotEmpty) aliveAudios.add(trackKey);
         // ponytail: dedup por (url, áudio) — por URL pura colapsaria áudios
         // se um dia compartilharem o manifesto.
         final streamKey = '${url.toLowerCase()}|${audio.toLowerCase()}';
@@ -503,6 +514,19 @@ class AnimeFireAdapter extends AnimeSourceAdapter {
             : 'No video sources found';
         return ScraperResult.failure(
             EmptyResultError(message: reason, source: source));
+      }
+      // Carimba os áudios que a fonte anunciava mas não entregou. Só quando
+      // havia MAIS DE UM anunciado: aí o usuário foi encurralado com uma
+      // escolha que sumiu (o passo de áudio existiria se o manifesto
+      // respondesse) e precisa saber que ela não está disponível. Com um único
+      // anunciado não há escolha a comunicar — é só indisponibilidade do ep.
+      final missing = deadAudios.difference(aliveAudios).toList()..sort();
+      if (missing.isNotEmpty && advertised.length > 1) {
+        debugPrint('[AnimeFire] $epId audio lost: $missing '
+            '(offered: ${aliveAudios.toList()..sort()})');
+        return ScraperResult.success([
+          for (final s in sources) s.withUnavailableAudios(missing),
+        ]);
       }
       return ScraperResult.success(sources);
     } catch (e) {

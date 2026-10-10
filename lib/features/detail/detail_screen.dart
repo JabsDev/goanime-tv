@@ -1682,6 +1682,60 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     return audio[0].toUpperCase() + audio.substring(1);
   }
 
+  /// Áudios que a fonte anunciava e não entregou (stream morto no CDN),
+  /// deduplicados e ordenados. Vazio quando não há o que avisar.
+  List<String> _missingAudios(List<VideoSource> sources) {
+    final set = <String>{};
+    for (final s in sources) {
+      for (final a in s.unavailableAudios) {
+        final v = a.trim().toLowerCase();
+        if (v.isNotEmpty) set.add(v);
+      }
+    }
+    final list = set.toList()..sort();
+    int rank(String v) => v == 'dublado' ? 0 : (v == 'legendado' ? 1 : 2);
+    list.sort((a, b) {
+      final r = rank(a).compareTo(rank(b));
+      return r != 0 ? r : a.compareTo(b);
+    });
+    return list;
+  }
+
+  /// Aviso de áudio indisponível. O provider anuncia "Dublado & Legendado" e
+  /// entrega só um deles; sem isto o passo de áudio simplesmente some (só há
+  /// um `audio` sobrevivente) e o app toca o outro sem explicar — foi o que
+  /// aconteceu no Slime S4E23, onde o legendado dá 404 e o usuário levou
+  /// dublado sem saber que a escolha existia.
+  Widget? _missingAudioNotice(List<VideoSource> sources) {
+    final missing = _missingAudios(sources);
+    if (missing.isEmpty) return null;
+    final labels = missing.map(_audioLabel).join(', ');
+    final text = missing.length == 1
+        ? '$labels indisponível nesta fonte'
+        : '$labels indisponíveis nesta fonte';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline,
+              size: 18, color: ThemeConstants.textSecondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: ThemeConstants.textSecondary,
+                fontSize: 13,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Seletor em etapas (card único): Fontes (agrupadas por idioma) →
   /// Áudio (só quando há >1) → Qualidade → Legenda (só fonte japonesa).
   Widget _buildProviderSelector() {
@@ -1818,6 +1872,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (_missingAudioNotice(sources) case final notice?) notice,
         ...visible.asMap().entries.map((q) {
           final idx = q.key;
           return Padding(

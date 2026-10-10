@@ -18,6 +18,7 @@ import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/cached_image.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import '../search/search_screen.dart';
+import '../browse/browse_screen.dart';
 import '../profiles/profile_switcher_screen.dart';
 import '../profiles/widgets/profile_avatar.dart';
 import 'anilist_banner.dart';
@@ -273,6 +274,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const SearchScreen()),
+                    ),
+                  ),
+                  const SizedBox(width: 24),
+                  _FocusableNavItem(
+                    icon: Icons.explore,
+                    label: 'Explorar',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const BrowseScreen()),
                     ),
                   ),
                   const SizedBox(width: 24),
