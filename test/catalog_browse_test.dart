@@ -240,5 +240,47 @@ void main() {
       expect(semChave.any((c) => c.anilistGenre != null), isTrue);
       expect(semChave.any((c) => c.isTmdb), isFalse);
     });
+
+    test('categorias AniList têm rótulo legível e único', () async {
+      final cats = await CatalogBrowseService.categories();
+      final ids = cats.map((c) => c.id).toSet();
+      expect(ids.length, cats.length, reason: 'ids duplicados quebram o Wrap');
+      for (final c in cats.where((c) => c.anilistGenre != null)) {
+        expect(c.label, isNotEmpty);
+        expect(c.anilistGenre, isNotEmpty);
+      }
+    });
+
+    // Live: valida a query GraphQL de gênero ponta a ponta. O resto do
+    // arquivo é puro, mas uma query com nome de variável errado voltaria
+    // vazia sem erro visível — foi exatamente o modo de falha que derrubou
+    // o TMDB na v1.5.0.
+    test('itemsOf devolve títulos reais para uma categoria AniList', () async {
+      const drama = BrowseCategory(
+          id: 'anilist:Drama', label: 'Drama', anilistGenre: 'Drama');
+      final items = await CatalogBrowseService.itemsOf(drama);
+      expect(items, isNotEmpty, reason: 'categoria AniList voltou vazia');
+      expect(items.length, greaterThan(5));
+      // Todo item tem id do AniList (é o que abre o detalhe).
+      expect(items.every((a) => a.anilistId != null), isTrue,
+          reason: 'sem anilistId o card não abre detalhe');
+      // E todos são de verdade do gênero pedido.
+      expect(items.every((a) => a.genres.contains('Drama')), isTrue,
+          reason: 'filtro de gênero não aplicado');
+      expect(items.first.name, isNotEmpty);
+    }, timeout: const Timeout(Duration(seconds: 60)));
+
+    test('itemsOf de categoria TMDB sem chave devolve só o que houver', () async {
+      const cat = BrowseCategory(
+        id: 'tmdb:tv:18',
+        label: 'Drama',
+        tmdbGenre: 18,
+        mediaType: 'tv',
+      );
+      // Sem chave configurada, o TMDB é ignorado silenciosamente: não pode
+      // lançar nem estourar a tela.
+      final items = await CatalogBrowseService.itemsOf(cat);
+      expect(items, isNotNull);
+    });
   });
 }

@@ -8,6 +8,7 @@ import '../../shared/widgets/app_top_bar.dart';
 import '../../shared/widgets/focusable_card.dart';
 import '../../shared/widgets/focus_key_handler.dart';
 import '../detail/detail_screen.dart';
+import '../browse/browse_screen.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -111,9 +112,27 @@ class _SearchScreenState extends State<SearchScreen> {
               _searchController.clear();
               setState(() => _results = []);
             }),
+          // Atalho para a navegação por categoria/letra: quem não sabe o
+          // nome do título precisa de um caminho a partir da busca.
+          Focus(
+            onKeyEvent: (node, event) =>
+                FocusKeyHandler.handle(node, event, _openBrowse),
+            child: Tooltip(
+              message: 'Explorar por categoria ou letra',
+              child: IconButton(
+                icon: const Icon(Icons.explore,
+                    color: ThemeConstants.primary, size: 28),
+                onPressed: _openBrowse,
+              ),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  void _openBrowse() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const BrowseScreen()));
   }
 
   Widget _buildBody() {
