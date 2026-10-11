@@ -8,10 +8,20 @@ import '../../core/tmdb/tmdb_service.dart';
 
 /// Seção "Catálogo TMDB": liga o catálogo de drama/dorama/donghua/novela.
 ///
-/// A chave v3 é **do usuário**. O app não tem backend, então não existe onde
-/// guardar um segredo do lado do servidor: uma chave embutida no APK sai
-/// qualquer pessoa que descompactar o pacote. Sem chave, tudo aqui continua
-/// funcionando — só a aba de dramas fica desligada.
+/// **Chave padrão no app.** A chave v3 do TMDB é feita para viver no
+/// cliente — a própria documentação do TMDB pede isso — então embuti-la no
+/// APK não é vazar segredo, é o desenho da API. O que não pode é deixá-la
+/// no repositório git (o secret scanning do GitHub marcaria o repo). Ela
+/// entra no build por `--dart-define=TMDB_API_KEY_DEFAULT=...`, injetada
+/// pelo CI a partir do secret `TMDB_API_KEY_DEFAULT`.
+///
+/// Consequênciashonestas, ditas na tela em vez de escondidas:
+///  - a chave padrão é **compartilhada**: se alguém abusar, a cota de todo
+///    mundo cai. Por isso existe "usar a minha chave", que tem precedência;
+///  - o rim de troca é rápido (trocar a define e republicar).
+///
+/// Sem chave nenhuma (build local sem a define), o app segue funcionando
+/// só com AniList e o campo manual continua disponível.
 class TmdbSettingsSection extends StatefulWidget {
   const TmdbSettingsSection({super.key});
 
@@ -52,7 +62,7 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
     }
     setState(() => _busy = true);
     await SettingsService.instance.setTmdbApiKey(raw);
-    // Índice precisa ser reconstruído: ele foi populado sem o TMDB.
+    // Índice precisa ser reconstruído: ele foi populado com outra origem.
     await CatalogBrowseService.clearIndex();
     if (!mounted) return;
     setState(() {
@@ -63,26 +73,43 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
     CatalogBrowseService.warmUpInBackground();
   }
 
+  Future<void> _useDefault() async {
+    if (!SettingsService.instance.tmdbHasDefaultKey) {
+      _snack('Este build não traz chave padrão — cole a sua abaixo.');
+      return;
+    }
+    setState(() => _busy = true);
+    await SettingsService.instance.useTmdbDefaultKey();
+    _controller.clear();
+    await CatalogBrowseService.clearIndex();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _editing = false;
+    });
+    _snack('Usando a chave padrão do app. Reindexando…');
+    CatalogBrowseService.warmUpInBackground();
+  }
+
   Future<void> _clear() async {
     await SettingsService.instance.setTmdbApiKey('');
     _controller.clear();
     await CatalogBrowseService.clearIndex();
     if (!mounted) return;
     setState(() => _editing = false);
-    _snack('Chave removida. O catálogo volta a ser só AniList.');
+    _snack('Chave removida.');
+    CatalogBrowseService.warmUpInBackground();
   }
 
-  /// Testa a chave de verdade contra a API. Sem isto o usuário não tem como
-  /// saber se salvou uma chave válida: uma chave inválida só produz busca
-  /// vazia, silenciosamente.
+  /// Testa a chave de verdade contra a API.
   Future<void> _testKey() async {
     setState(() => _busy = true);
     var ok = false;
     var detail = '';
     try {
       // Diagnóstico completo: valida a chave E faz uma descoberta real sem
-      // filtro. Assim separa "chave recusada" de "chave ok mas filtro sem
-      // resultado" — duas causas que antes chegavam iguais à tela.
+      // filtro, para separar "chave recusada" de "chave ok mas filtro sem
+      // resultado" — que antes chegavam iguais à tela.
       final r = await TmdbService.diagnose();
       ok = r.ok;
       detail = r.message;
@@ -92,6 +119,27 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
     if (!mounted) return;
     setState(() => _busy = false);
     _snack(ok ? detail : '$detail Sem chave, o app segue só com AniList.');
+  }
+
+  /// Abre a página de API do TMDB no navegador. Reusa o canal nativo do
+  /// updater (Intent VIEW) em vez de trazer `url_launcher` — menos uma
+  /// dependência e nada de `<queries>` no manifest. Se não conseguir abrir,
+  /// copia o link: o usuário ainda consegue colar no celular.
+  Future<void> _openTmdbSignup() async {
+    // themoviedb.org/settings/api fica DENTRO da conta: quem não tem conta
+    // precisa criar antes. Mandamos direto pra lá e o texto explica.
+    const url = 'https://www.themoviedb.org/settings/api';
+    var opened = false;
+    try {
+      opened = await const MethodChannel('goanime_tv/updater')
+          .invokeMethod<bool>('openUrl', {'url': url}) ??
+          false;
+    } catch (_) {
+      opened = false;
+    }
+    if (opened) return;
+    await Clipboard.setData(const ClipboardData(text: url));
+    _snack('Não consegui abrir o navegador — link copiado: $url');
   }
 
   @override
@@ -114,9 +162,9 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Adiciona dramas, doramas, donghua e novelas ao acervo. Colque '
-              'a sua chave v3 (grátis em themoviedb.org → Settings → API). '
-              'A chave fica só neste aparelho.',
+              'Adiciona dramas, doramas, donghua e novelas ao acervo. O app já '
+              'traz uma chave padrão — use a sua se preferir (tem precedência) '
+              'ou para não depender da cota compartilhada.',
               style: TextStyle(
                 fontSize: 16,
                 color: ThemeConstants.textSecondary,
@@ -126,16 +174,16 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
             const SizedBox(height: 16),
             _StatusLine(
               configured: configured,
+              usingDefault: TmdbService.usingDefaultKey,
               masked: masked,
+              hasDefault: s.tmdbHasDefaultKey,
               enabled: s.tmdbEnabled,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             if (_editing) ...[
               Row(
                 children: [
-                  Expanded(
-                    child: _KeyField(controller: _controller),
-                  ),
+                  Expanded(child: _KeyField(controller: _controller)),
                   const SizedBox(width: 12),
                   _ActionButton(
                     label: 'Salvar',
@@ -153,51 +201,111 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
               ),
               const SizedBox(height: 10),
               _ActionButton(
-                label: 'Remover chave',
-                danger: true,
-                onTap: _busy ? null : _clear,
+                label: 'Obter chave grátis no TMDB',
+                onTap: _busy ? null : _openTmdbSignup,
               ),
             ] else ...[
-              _ActionButton(
-                label: s.tmdbApiKey.isEmpty
-                    ? 'Adicionar chave'
-                    : 'Trocar chave',
-                onTap: () => setState(() => _editing = true),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _ActionButton(
+                    label: 'Testar chave',
+                    onTap: (_busy || !configured) ? null : _testKey,
+                  ),
+                  _ActionButton(
+                    label: s.tmdbUsesOwnKey ? 'Trocar minha chave' : 'Usar a minha chave',
+                    onTap: _busy ? null : () => setState(() => _editing = true),
+                  ),
+                  if (s.tmdbUsesOwnKey)
+                    _ActionButton(
+                      label: 'Voltar à chave padrão',
+                      onTap: (_busy || !s.tmdbHasDefaultKey) ? null : _useDefault,
+                    )
+                  else
+                    _ActionButton(
+                      label: 'Obter chave grátis',
+                      onTap: _busy ? null : _openTmdbSignup,
+                    ),
+                ],
               ),
-              if (s.tmdbApiKey.isNotEmpty) ...[
-                const SizedBox(width: 10),
+              if (s.tmdbUsesOwnKey) ...[
+                const SizedBox(height: 10),
                 _ActionButton(
-                  label: 'Testar chave',
-                  onTap: _busy ? null : _testKey,
+                  label: 'Remover minha chave',
+                  danger: true,
+                  onTap: _busy ? null : _clear,
                 ),
               ],
             ],
+            const SizedBox(height: 12),
+            _Note(text: _noteFor(s)),
           ],
         );
       },
+    );
+  }
+
+  String _noteFor(SettingsService s) {
+    if (!s.tmdbHasDefaultKey) {
+      return 'Este build não traz chave padrão. Pegue a sua em '
+          'themoviedb.org → Settings → API (crie conta grátis) e cole acima. '
+          'Ela fica só neste aparelho.';
+    }
+    if (s.tmdbUsesOwnKey) {
+      return 'Usando a sua chave. Ela fica só neste aparelho.';
+    }
+    return 'Usando a chave padrão do app, compartilhada por todos. Se '
+        'algum dia o catálogo vier vazio ou com erro, pode ser cota '
+        'compartilhada esgotada — nesse caso use a sua.';
+  }
+}
+
+class _Note extends StatelessWidget {
+  final String text;
+  const _Note({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 15,
+        color: ThemeConstants.textMuted,
+        height: 1.4,
+      ),
     );
   }
 }
 
 class _StatusLine extends StatelessWidget {
   final bool configured;
+  final bool usingDefault;
   final String masked;
+  final bool hasDefault;
   final bool enabled;
 
   const _StatusLine({
     required this.configured,
+    required this.usingDefault,
     required this.masked,
+    required this.hasDefault,
     required this.enabled,
   });
 
   @override
   Widget build(BuildContext context) {
     final color = configured ? ThemeConstants.primary : ThemeConstants.textMuted;
-    final label = !enabled
-        ? 'Desligado'
-        : configured
-            ? 'Ativo · chave $masked'
-            : 'Sem chave — só AniList por enquanto';
+    final String label;
+    if (!enabled) {
+      label = 'Desligado';
+    } else if (!configured) {
+      label = hasDefault ? 'Sem chave — só AniList' : 'Sem chave — só AniList';
+    } else if (usingDefault) {
+      label = 'Ativo · chave padrão do app';
+    } else {
+      label = 'Ativo · sua chave $masked';
+    }
     return Row(
       children: [
         Container(
@@ -206,8 +314,7 @@ class _StatusLine extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 10),
-        Text(label,
-            style: TextStyle(fontSize: 16, color: color)),
+        Expanded(child: Text(label, style: TextStyle(fontSize: 16, color: color))),
       ],
     );
   }

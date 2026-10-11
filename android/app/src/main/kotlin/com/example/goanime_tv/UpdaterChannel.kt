@@ -56,6 +56,25 @@ class UpdaterChannel(
                 launchSystemInstaller(File(path), result)
             }
             "getFreeBytes" -> result.success(freeBytes())
+            // Abre uma URL no navegador (usado por "obter chave TMDB").
+            // `launchUrl` do url_launcher exigiria dependência nova + <queries>
+            // no manifest; um Intent VIEW resolve sem nada disso.
+            "openUrl" -> {
+                val url = call.argument<String>("url")
+                if (url.isNullOrEmpty()) {
+                    result.error("bad_args", "url ausente", null)
+                    return
+                }
+                try {
+                    activity.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("open_failed", e.message, null)
+                }
+            }
             else -> result.notImplemented()
         }
     }

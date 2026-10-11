@@ -77,6 +77,15 @@ jobs:
           EOF
 
       - name: Build APK release (mesma chave dos instalados)
+        env:
+          # Chave padrão do catálogo TMDB (drama/dorama/donghua/novela).
+          #
+          # 🔑 Vai embutida no APK de propósito: a chave v3 do TMDB é feita
+          # para viver no cliente — a doc do próprio TMDB pede isso. O que
+          # NÃO pode é ficar no repositório, por isso vem de secret e nunca
+          # de um literal no código. Build local sem a secret = app sem
+          # chave padrão (o usuário ainda pode colar a sua nas Configurações).
+          TMDB_API_KEY_DEFAULT: ${{ secrets.TMDB_API_KEY_DEFAULT }}
         run: |
           TAG="${{ github.ref_name }}"
           BUILD_NAME="${TAG#v}"
@@ -84,7 +93,8 @@ jobs:
           flutter build apk --release \
             --build-name "$BUILD_NAME" \
             --build-number "${TAG##*+}" \
-            --dart-define=WEBVIEW_NAV=true
+            --dart-define=WEBVIEW_NAV=true \
+            --dart-define=TMDB_API_KEY_DEFAULT="$TMDB_API_KEY_DEFAULT"
 
       - name: Cria release com APK + SHA256
         env:

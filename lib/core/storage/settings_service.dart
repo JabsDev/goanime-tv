@@ -29,6 +29,10 @@ class SettingsService {
   // segredo exposto). Vazio = TMDB desligado, tudo continua no AniList.
   static const _kTmdbApiKey = 'settings_tmdb_api_key';
   static const _kTmdbEnabled = 'settings_tmdb_enabled';
+  // Só false quando o usuário desliga explicitamente. Vazio (default) deixa
+  // a chave padrão do build em paz — quem não fez nada não deve perder o
+  // catálogo de dramas.
+  static const _kTmdbUseDefault = 'settings_tmdb_use_default';
 
   /// Whitelist do setter. Poda Fase 1: só os tiers ALTOS. Inválido → default
   /// ('sensevoice'/'manga'), nunca nos tiers baixos removidos (tiny/leve).
@@ -102,14 +106,33 @@ class SettingsService {
   bool _tmdbEnabled = true;
   final ValueNotifier<bool> _tmdbEnabledVN = ValueNotifier<bool>(true);
   ValueListenable<bool> get tmdbEnabledListenable => _tmdbEnabledVN;
-
-  String get tmdbApiKey => _tmdbApiKey;
   bool get tmdbEnabled => _tmdbEnabled;
 
-  /// Só vale quando há chave: sem ela qualquer chamada ao TMDB volta 401
-  /// (e o app não deve gastar requisição nisso).
-  bool get tmdbConfigured =>
-      _tmdbEnabled && _tmdbApiKey.trim().length >= 16;
+  String get tmdbApiKey => _tmdbApiKey;
+
+  /// O usuário pediu para usar a chave padrão do build em vez da própria?
+  /// `true` apaga a chave do usuário; `false` é ignorado (sem chave própria,
+  /// a padrão vale de qualquer forma).
+  bool? _tmdbUseDefault;
+  final ValueNotifier<bool?> _tmdbUseDefaultVN = ValueNotifier<bool?>(null);
+  ValueListenable<bool?> get tmdbUseDefaultListenable => _tmdbUseDefaultVN;
+  bool? get tmdbUseDefault => _tmdbUseDefault;
+
+  /// A chave padrão do build (se houver). Injetada pelo CI via
+  /// `--dart-define=TMDB_API_KEY_DEFAULT=...`; nunca versionada no git.
+  static const defaultKey =
+      String.fromEnvironment('TMDB_API_KEY_DEFAULT', defaultValue: '');
+
+  bool get tmdbHasDefaultKey => defaultKey.trim().isNotEmpty;
+
+  /// Há alguma chave utilizável (do usuário ou padrão do build)?
+  bool get _hasAnyKey => tmdbUsesOwnKey || tmdbHasDefaultKey;
+
+  bool get tmdbUsesOwnKey => _tmdbApiKey.trim().isNotEmpty;
+
+  /// Habilitado quando há chave do usuário OU o build traz uma padrão. A
+  /// precedência (usuário > padrão) é do [TmdbService].
+  bool get tmdbConfigured => _tmdbEnabled && _hasAnyKey;
 
   /// Máscara para exibir sem despejar a chave inteira na tela.
   String get tmdbApiKeyMasked {
@@ -131,12 +154,31 @@ class SettingsService {
   Future<void> setTmdbApiKey(String v) async {
     _tmdbApiKey = v.trim();
     _tmdbApiKeyVN.value = _tmdbApiKey.isEmpty ? '' : tmdbApiKeyMasked;
+    // Salvar uma chave própria é escolher explicitamente por ela.
+    _tmdbUseDefault = _tmdbApiKey.isEmpty ? null : false;
+    _tmdbUseDefaultVN.value = _tmdbUseDefault;
     final prefs = await SharedPreferences.getInstance();
     if (_tmdbApiKey.isEmpty) {
       await prefs.remove(_kTmdbApiKey);
     } else {
       await prefs.setString(_kTmdbApiKey, _tmdbApiKey);
     }
+    if (_tmdbUseDefault == null) {
+      await prefs.remove(_kTmdbUseDefault);
+    } else {
+      await prefs.setBool(_kTmdbUseDefault, _tmdbUseDefault!);
+    }
+  }
+
+  /// Volta a usar a chave padrão do build, apagando a chave do usuário.
+  Future<void> useTmdbDefaultKey() async {
+    _tmdbApiKey = '';
+    _tmdbApiKeyVN.value = '';
+    _tmdbUseDefault = true;
+    _tmdbUseDefaultVN.value = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kTmdbApiKey);
+    await prefs.setBool(_kTmdbUseDefault, true);
   }
 
   Future<void> setTmdbEnabled(bool v) async {
@@ -186,6 +228,8 @@ class SettingsService {
     _tmdbApiKeyVN.value = _tmdbApiKey.isEmpty ? '' : tmdbApiKeyMasked;
     _tmdbEnabled = prefs.getBool(_kTmdbEnabled) ?? true;
     _tmdbEnabledVN.value = _tmdbEnabled;
+    _tmdbUseDefault = prefs.getBool(_kTmdbUseDefault);
+    _tmdbUseDefaultVN.value = _tmdbUseDefault;
     debugPrint(
       '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value nsfw=$_nsfwFilter autoSkip=$_autoSkipIntro',
     );

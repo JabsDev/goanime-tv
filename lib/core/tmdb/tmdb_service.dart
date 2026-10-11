@@ -142,13 +142,46 @@ class TmdbService {
   /// chegam a dezenas de votos; dramas conhecidos passam de centenas.
   static const _minVotes = '30';
 
+  /// Chave padrão embutida NO BUILD, via `--dart-define`.
+  ///
+  /// 🔑 A chave do TMDB é feita para viver no cliente (a doc do TMDB pede
+  /// exatamente isso), então tê-la no APK não é vazar segredo: é o
+  /// desenho da API. O que NÃO pode é **entrar no repositório git** — o
+  /// secret scanning do GitHub marcaria o repo na hora. Por isso ela vem
+  /// de `--dart-define=TMDB_API_KEY_DEFAULT=...`, injetada pelo CI a partir
+  /// do secret `TMDB_API_KEY_DEFAULT`. Nunca commitar o valor literal.
+  ///
+  /// Vazio (build local sem a define) = app sem chave padrão, e o usuário
+  /// ainda pode colar a própria nas Configurações.
+  static const defaultApiKey =
+      String.fromEnvironment('TMDB_API_KEY_DEFAULT', defaultValue: '');
+
+  /// Existe chave padrão embutida neste build?
+  static bool get hasDefaultKey => defaultApiKey.trim().isNotEmpty;
+
   /// Catálogo TMDB só opera com chave válida + toggle ligado.
   static bool get isConfigured => SettingsService.instance.tmdbConfigured;
 
+  /// Chave em uso: a do usuário tem precedência sobre a padrão do build.
+  /// Permite que qualquer usuário troque por uma própria (ou por uma que
+  /// não esteja saturada) sem esperar o próximo build.
   static String? get _apiKey {
     if (!isConfigured) return null;
-    final k = SettingsService.instance.tmdbApiKey.trim();
-    return k.isEmpty ? null : k;
+    final own = SettingsService.instance.tmdbApiKey.trim();
+    if (own.isNotEmpty) return own;
+    final fallback = defaultApiKey.trim();
+    return fallback.isEmpty ? null : fallback;
+  }
+
+  /// A chave em uso veio do build, não do usuário?
+  static bool get usingDefaultKey =>
+      SettingsService.instance.tmdbApiKey.trim().isEmpty && hasDefaultKey;
+
+  /// Rótulo curto da origem da chave, para a UI explicar ao usuário.
+  static String get keyOriginLabel {
+    if (!isConfigured) return 'desligado';
+    if (!usingDefaultKey) return 'sua chave';
+    return 'chave padrão do app';
   }
 
   static Future<http.Response> _get(String path, Map<String, String> q) async {
