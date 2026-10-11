@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/catalog/catalog_browse_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/settings_service.dart';
+import '../../core/tmdb/tmdb_service.dart';
 
 /// Seção "Catálogo TMDB": liga o catálogo de drama/dorama/donghua/novela.
 ///
@@ -69,6 +70,27 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
     if (!mounted) return;
     setState(() => _editing = false);
     _snack('Chave removida. O catálogo volta a ser só AniList.');
+  }
+
+  /// Testa a chave de verdade contra a API. Sem isto o usuário não tem como
+  /// saber se salvou uma chave válida: uma chave inválida só produz busca
+  /// vazia, silenciosamente.
+  Future<void> _testKey() async {
+    setState(() => _busy = true);
+    var ok = false;
+    var detail = '';
+    try {
+      final res = await TmdbService.discover(mediaType: 'tv');
+      ok = res.isNotEmpty;
+      detail = ok
+          ? 'Chave válida — ${res.length} títulos retornados.'
+          : 'A chave parece inválida (a API não retornou nada).';
+    } catch (e) {
+      detail = 'Falhou: $e';
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    _snack(ok ? detail : '$detail Sem chave, o app segue só com AniList.');
   }
 
   @override
@@ -141,6 +163,13 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
                     : 'Trocar chave',
                 onTap: () => setState(() => _editing = true),
               ),
+              if (s.tmdbApiKey.isNotEmpty) ...[
+                const SizedBox(width: 10),
+                _ActionButton(
+                  label: 'Testar chave',
+                  onTap: _busy ? null : _testKey,
+                ),
+              ],
             ],
           ],
         );

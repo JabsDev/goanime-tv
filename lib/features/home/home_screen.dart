@@ -11,6 +11,7 @@ import '../../core/anilist/anilist_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/profile/profile_service.dart';
 import '../../core/storage/settings_service.dart';
+import '../../core/tmdb/tmdb_service.dart';
 import '../../data/models/profile.dart';
 import '../../core/utils/nsfw_filter.dart';
 import '../../shared/widgets/focusable_card.dart';
@@ -39,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Anime> _trending = [];
   List<Anime> _recent = [];
   List<Anime> _tomorrow = [];
+  List<Anime> _drama = [];
   bool _isLoading = true;
   bool _anilistLoggedIn = false;
   AniListUser? _anilistUser;
@@ -117,7 +119,32 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Catálogo TMDB (drama/dorama/donghua/novela). Só carrega com a chave
+  /// configurada — sem ela a linha simplesmente não aparece.
+  Future<void> _loadDramaRow() async {
+    if (!TmdbService.isConfigured) return;
+    try {
+      final rows = await Future.wait([
+        TmdbService.discover(mediaType: 'tv'),
+        TmdbService.discover(mediaType: 'tv', genreId: 18),
+      ]);
+      final merged = <Anime>[];
+      final seen = <int>{};
+      for (final r in [...rows.first, ...rows.last]) {
+        if (r.tmdbId == null || !seen.add(r.tmdbId!)) continue;
+        merged.add(r);
+      }
+      if (merged.isEmpty || !mounted) return;
+      setState(() => _drama = merged);
+    } catch (e) {
+      debugPrint('[Home] TMDB drama row falhou: $e');
+    }
+  }
+
   Future<void> _loadAnimeLists() async {
+    // Linha de dramas é independente do AniList: uma falha aqui não pode
+    // derrubar as linhas de anime (e vice-versa).
+    _loadDramaRow();
     try {
       final results = await Future.wait([
         AniListService.getTrending(),
@@ -306,6 +333,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const SearchScreen()),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _FocusableNavItem(
+                  icon: Icons.explore,
+                  label: 'Explorar',
+                  compact: true,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const BrowseScreen()),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -621,6 +658,15 @@ class _HomeScreenState extends State<HomeScreen> {
               buffer: 80),
         if (_tomorrow.isNotEmpty)
           ...section('Amanhã', _tomorrow.take(20).toList(), cardHeight,
+              (item) => FocusableCard(
+                    imageUrl: (item as Anime).imageUrl,
+                    title: item.name,
+                    width: cardWidth,
+                    height: cardHeight,
+                    onTap: () => openDetail(context, item),
+                  )),
+        if (_drama.isNotEmpty)
+          ...section('Dramas e Doramas', _drama.take(20).toList(), cardHeight,
               (item) => FocusableCard(
                     imageUrl: (item as Anime).imageUrl,
                     title: item.name,

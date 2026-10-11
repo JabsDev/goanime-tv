@@ -3,6 +3,7 @@ import '../anilist/anilist_service.dart';
 import '../cache/app_caches.dart';
 import '../sources/anime_source_adapter.dart';
 import '../sources/source_registry.dart';
+import '../tmdb/tmdb_service.dart';
 import '../utils/text_utils.dart';
 import '../../data/models/anime.dart';
 import 'scraper_result.dart';
@@ -161,6 +162,40 @@ class AnimeScraper {
   /// Teto de tempo por fonte numa busca (fontes que passam disso são ignoradas).
   static const Duration sourceSearchTimeout = Duration(seconds: 12);
 
+  /// Um resultado só é "abrirável" se carregar o identificador que a grade de
+/// episódios vai precisar. AniList puro é metadata e sai do resultado, mas o
+/// mesmo [AnimeSource.anilist] marca os títulos do catálogo TMDB
+/// (drama/dorama/donghua) — esses precisam passar, senão a busca de dramas
+/// volta vazia mesmo com a chave configurada.
+static bool isOpenable(Anime a) {
+  switch (a.source) {
+    case AnimeSource.allAnime:
+      return a.allAnimeId != null;
+    case AnimeSource.anilist:
+      return a.tmdbId != null;
+    case AnimeSource.animeFire:
+    case AnimeSource.animesDigital:
+    case AnimeSource.goyabu:
+    case AnimeSource.betterAnime:
+    case AnimeSource.animesRoll:
+    case AnimeSource.dooPlay:
+    case AnimeSource.animePlayer:
+    case AnimeSource.animesOnlineCloud:
+    case AnimeSource.animesDrive:
+    case AnimeSource.animeQ:
+    case AnimeSource.animePlay:
+    case AnimeSource.animesOnlineHdk:
+    case AnimeSource.animesOrion:
+    case AnimeSource.animesHd:
+    case AnimeSource.animesOnlineIo:
+    case AnimeSource.archiveJp:
+    case AnimeSource.animeGg:
+    case AnimeSource.donghuaNoSekai:
+    case AnimeSource.doramasflix:
+      return a.url.isNotEmpty;
+  }
+}
+
   static Future<List<Anime>> _search(String query) async {
     final cacheKey = query.toLowerCase();
     final cached = AppCaches.search.get<List<Anime>>(cacheKey);
@@ -171,23 +206,43 @@ class AnimeScraper {
 
       // Per-future error isolation: one adapter's unhandled exception does not
       // kill other adapter futures via Future.wait (Pitfall 1).
-      final futures = SourceRegistry.adapters
-          .where((a) => a.implemented)
-          .map((a) async {
-        try {
-          // Teto por fonte: o cliente HTTP repete em timeout, então uma fonte
-          // lenta/travada segurava a busca inteira por minutos (medido no Fire
-          // Stick: "Slime 4th Season" sem resposta após 110 s).
-          return await a.search(query).timeout(sourceSearchTimeout);
-        } catch (e) {
-          debugPrint('[AnimeScraper] Unhandled exception from ${a.source}: $e');
-          return ScraperResult<List<Anime>>.failure(UnknownError(
-            message: 'Unhandled: $e',
-            source: a.source,
-            originalError: e,
-          ));
-        }
-      });
+      final futures = <Future<ScraperResult<List<Anime>>>>[
+        for (final a in SourceRegistry.adapters.where((a) => a.implemented))
+          () async {
+            try {
+              // Teto por fonte: o cliente HTTP repete em timeout, então uma
+              // fonte lenta/travada segurava a busca inteira por minutos
+              // (medido no Fire Stick: "Slime 4th Season" sem resposta
+              // após 110 s).
+              return await a.search(query).timeout(sourceSearchTimeout);
+            } catch (e) {
+              debugPrint('[AnimeScraper] Unhandled exception from ${a.source}: $e');
+              return ScraperResult<List<Anime>>.failure(UnknownError(
+                message: 'Unhandled: $e',
+                source: a.source,
+                originalError: e,
+              ));
+            }
+          }(),
+        // Catálogo TMDB: dramas, doramas, donghua e novelas. Não é um
+        // adapter porque não serve vídeo — é catálogo puro, e some quando
+        // não há chave configurada.
+        if (TmdbService.isConfigured)
+          () async {
+            try {
+              final found = await TmdbService.search(query)
+                  .timeout(sourceSearchTimeout);
+              return ScraperResult<List<Anime>>.success(found);
+            } catch (e) {
+              debugPrint('[AnimeScraper] TMDB falhou: $e');
+              return ScraperResult<List<Anime>>.failure(UnknownError(
+                message: 'TMDB: $e',
+                source: AnimeSource.anilist,
+                originalError: e,
+              ));
+            }
+          }(),
+      ];
       final results = await Future.wait(futures);
 
       final allAnimes = <Anime>[];
@@ -203,41 +258,7 @@ class AnimeScraper {
         }
       }
 
-      // Filter out results that lack the identifier needed for episode loading.
-      // This mirrors the validity check in _findBySource so that tapping a
-      // search result always leads to resolvable episodes.
-      bool hasValidId(Anime a) {
-        switch (a.source) {
-          case AnimeSource.allAnime:
-            return a.allAnimeId != null;
-          case AnimeSource.animeFire:
-          case AnimeSource.animesDigital:
-          case AnimeSource.goyabu:
-          case AnimeSource.betterAnime:
-          case AnimeSource.animesRoll:
-          case AnimeSource.dooPlay:
-          case AnimeSource.animePlayer:
-          case AnimeSource.animesOnlineCloud:
-          case AnimeSource.animesDrive:
-          case AnimeSource.animeQ:
-          case AnimeSource.animePlay:
-          case AnimeSource.animesOnlineHdk:
-          case AnimeSource.animesOrion:
-          case AnimeSource.animesHd:
-          case AnimeSource.animesOnlineIo:
-            return a.url.isNotEmpty;
-          case AnimeSource.archiveJp:
-            return a.url.isNotEmpty;
-          case AnimeSource.animeGg:
-            return a.url.isNotEmpty;
-          case AnimeSource.donghuaNoSekai:
-          case AnimeSource.doramasflix:
-            return a.url.isNotEmpty;
-          case AnimeSource.anilist:
-            return false; // metadata provider, no stream URL
-        }
-      }
-      allAnimes.removeWhere((a) => !hasValidId(a));
+      allAnimes.removeWhere((a) => !isOpenable(a));
 
       // Enrichment is cached + deduped per cleaned title inside AniListService,
       // so the same show appearing in multiple sources is only fetched once.
