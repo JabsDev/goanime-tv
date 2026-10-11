@@ -43,6 +43,64 @@ class TmdbService {
   /// Cliente injetável (testes).
   static http.Client? httpOverride;
 
+  /// Último erro visto pela API. Antes these campos não existiam e TODA
+  /// resposta não-200 virava `[]` — o "Testar chave" então acusava a chave
+  /// do usuário por qualquer falha (rede, 429, 404), que é exatamente o
+  /// tipo de diagnóstico inútil que o fez acreditar ter errado algo.
+  static int? lastStatusCode;
+  static String? lastErrorMessage;
+
+  /// Verificação barata e inequívoca da chave: um id fixo e pequeno em vez
+  /// de `discover` (que carrega filtros e pode devolver vazio legítimamente).
+  static Future<({bool ok, String message})> verifyKey() async {
+    if (!isConfigured) {
+      return (ok: false, message: 'Nenhuma chave configurada.');
+    }
+    lastStatusCode = null;
+    lastErrorMessage = null;
+    try {
+      // Fight Club (id 550): existe sempre, é minúsculo, e o TMDB só
+      // responde 200 se a chave v3 for aceita.
+      final res = await _get('/movie/550', const {});
+      lastStatusCode = res.statusCode;
+      if (res.statusCode == 200) {
+        return (ok: true, message: 'Chave válida — a API respondeu 200.');
+      }
+      return (ok: false, message: _diagnose(res));
+    } catch (e) {
+      lastErrorMessage = '$e';
+      return (ok: false, message: 'Erro de rede: $e');
+    }
+  }
+
+  /// Mensagem legível a partir de uma resposta de erro do TMDB.
+  static String _diagnose(http.Response res) {
+    var msg = 'HTTP ${res.statusCode}';
+    try {
+      final d = jsonDecode(res.body);
+      if (d is Map && d['status_message'] is String) {
+        msg = '${d['status_message']} (HTTP ${res.statusCode})';
+        lastErrorMessage = 'status_code ${d['status_code']}: ${d['status_message']}';
+      } else {
+        lastErrorMessage = msg;
+      }
+    } catch (_) {
+      lastErrorMessage = msg;
+    }
+    switch (res.statusCode) {
+      case 401:
+        return 'Chave recusada pelo TMDB — $msg';
+      case 403:
+        return 'Acesso negado pelo TMDB — $msg';
+      case 404:
+        return 'Recurso não encontrado no TMDB — $msg';
+      case 429:
+        return 'Limite de requisições do TMDB estourado — $msg';
+      default:
+        return 'Falha na API do TMDB — $msg';
+    }
+  }
+
   static const _userAgent =
       'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36';
 
@@ -208,7 +266,10 @@ class TmdbService {
         'page': '$page',
         'include_adult': 'false',
       });
-      if (res.statusCode != 200) return const [];
+      if (res.statusCode != 200) {
+        debugPrint('[TMDB] search falhou: ${_diagnose(res)}');
+        return const [];
+      }
       return parseSearchMulti(res.body);
     } catch (e) {
       debugPrint('[TMDB] search error: $e');
@@ -238,7 +299,10 @@ class TmdbService {
           'with_type': '1',
         },
       });
-      if (res.statusCode != 200) return const [];
+      if (res.statusCode != 200) {
+        debugPrint('[TMDB] discover falhou: ${_diagnose(res)}');
+        return const [];
+      }
       return parseDiscover(res.body, mediaType);
     } catch (e) {
       debugPrint('[TMDB] discover error: $e');

@@ -80,11 +80,13 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
     var ok = false;
     var detail = '';
     try {
-      final res = await TmdbService.discover(mediaType: 'tv');
-      ok = res.isNotEmpty;
-      detail = ok
-          ? 'Chave válida — ${res.length} títulos retornados.'
-          : 'A chave parece inválida (a API não retornou nada).';
+      // Antes usava `discover` e, como TODO erro não-200 virava lista vazia,
+      // respondia "chave inválida" para qualquer problema — inclusive rede
+      // quebrada ou limite de requisições. `verifyKey` bate num id fixo e
+      // separa "chave recusada" de erro de transporte.
+      final r = await TmdbService.verifyKey();
+      ok = r.ok;
+      detail = r.message;
     } catch (e) {
       detail = 'Falhou: $e';
     }
