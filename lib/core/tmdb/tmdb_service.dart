@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -200,9 +201,19 @@ class TmdbService {
 
   static Anime? _toAnime(Map raw, String mediaType) {
     final id = raw['id'];
+    if (id is! num) return null;
+    // `??` NÃO cai quando o campo existe mas está VAZIO: um item do
+    // /discover/tv com `name: ""` (comum em entrada sem título localizado)
+    // descartava o título em vez de tentar `original_name`.
+    String pick(String key) {
+      final v = raw[key];
+      return (v == null) ? '' : v.toString().trim();
+    }
+
     final title = TextUtils.cleanTitle(
-        (raw['name'] ?? raw['title'] ?? raw['original_name'] ?? '').toString());
-    if (id is! num || title.isEmpty) return null;
+        [pick('name'), pick('title'), pick('original_name')]
+            .firstWhere((t) => t.isNotEmpty, orElse: () => ''));
+    if (title.isEmpty) return null;
     final poster = raw['poster_path']?.toString() ?? '';
     final backdrop = raw['backdrop_path']?.toString() ?? '';
     final overview = raw['overview']?.toString() ?? '';
@@ -278,11 +289,17 @@ class TmdbService {
   }
 
   /// Categoria + ordenação. [genreId] do mapa de [genres].
+  ///
+  /// `filters` deixa os parâmetros opcionais de fora virem opt-in: o default
+  /// é o conjunto mínimo que o TMDB **garante** devolver resultados. Filtrar
+  /// demais já custou duas rodadas de "volta vazio" sem explicação.
   static Future<List<Anime>> discover({
     required String mediaType,
     int? genreId,
     int page = 1,
     String sortBy = 'popularity.desc',
+    bool onlyAsianOrigin = true,
+    bool scriptedOnly = true,
   }) async {
     if (!isConfigured) return const [];
     final path = mediaType == 'movie' ? '/discover/movie' : '/discover/tv';
@@ -291,23 +308,54 @@ class TmdbService {
         if (genreId != null) 'with_genres': '$genreId',
         'sort_by': sortBy,
         'page': '$page',
-        'include_adult': 'false',
-        // Anime é `tv` com origem japonesa: sem isso o catálogo mistura
-        // reality/talk show e infiltra conteúdo que o app não tem como servir.
-        if (mediaType == 'tv') ...{
+        if (scriptedOnly && mediaType == 'tv') 'with_type': '1',
+        if (onlyAsianOrigin && mediaType == 'tv')
           'with_original_language': 'ja,ko,zh,th',
-          'with_type': '1',
-        },
       });
       if (res.statusCode != 200) {
         debugPrint('[TMDB] discover falhou: ${_diagnose(res)}');
+        lastDiscoverDiagnostics =
+            'discover ${_diagnose(res)} · body: ${res.body.substring(0, math.min(200, res.body.length))}';
         return const [];
       }
-      return parseDiscover(res.body, mediaType);
+      final list = parseDiscover(res.body, mediaType);
+      lastDiscoverDiagnostics =
+          'discover 200 · ${list.length} títulos · body: ${res.body.substring(0, math.min(120, res.body.length))}';
+      return list;
     } catch (e) {
       debugPrint('[TMDB] discover error: $e');
+      lastErrorMessage = '$e';
       return const [];
     }
+  }
+
+  /// Relatório legível da última chamada de `discover`. Exposto porque
+  /// "volta vazio" não informa nada — com isto o usuário consegue dizer
+  /// **onde** a chamada quebrrou (status, filtro, resposta).
+  static String lastDiscoverDiagnostics = '(sem chamada ainda)';
+
+  /// Diagnóstico completo para o botão "Testar chave": valida a chave E
+  /// faz uma descoberta real, para separar "chave aceita" de "filtro sem
+  /// resultado".
+  static Future<({bool ok, String message})> diagnose() async {
+    final v = await verifyKey();
+    if (!v.ok) return v;
+
+    // Mesma chamada que a Home usa, sem filtro nenhum.
+    final res = await discover(mediaType: 'tv', scriptedOnly: false,
+        onlyAsianOrigin: false);
+    if (res.isNotEmpty) {
+      return (
+        ok: true,
+        message: 'Chave válida e catálogo respondendo (${res.length} títulos).'
+      );
+    }
+    // Chave aceita mas descoberta vazia: o problema é filtro, não chave.
+    return (
+      ok: false,
+      message: 'Chave válida, mas a descoberta não trouxe nada. '
+          '$lastDiscoverDiagnostics'
+    );
   }
 
   /// Categorias de séries (drama/dorama/novela/anime).

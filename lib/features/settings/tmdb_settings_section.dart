@@ -80,11 +80,10 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
     var ok = false;
     var detail = '';
     try {
-      // Antes usava `discover` e, como TODO erro não-200 virava lista vazia,
-      // respondia "chave inválida" para qualquer problema — inclusive rede
-      // quebrada ou limite de requisições. `verifyKey` bate num id fixo e
-      // separa "chave recusada" de erro de transporte.
-      final r = await TmdbService.verifyKey();
+      // Diagnóstico completo: valida a chave E faz uma descoberta real sem
+      // filtro. Assim separa "chave recusada" de "chave ok mas filtro sem
+      // resultado" — duas causas que antes chegavam iguais à tela.
+      final r = await TmdbService.diagnose();
       ok = r.ok;
       detail = r.message;
     } catch (e) {
