@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../constants/app_constants.dart';
 import 'update_constants.dart';
+import 'version_compare.dart';
 
 /// Modelo de uma release que o app pode instalar. Instâncias só existem para
 /// releases que possuem asset `.apk` e não são `prerelease`/`draft`.
@@ -122,50 +123,70 @@ class ReleaseCheckResult {
 
 /// Busca a última release com asset `.apk` do repositório.
 ///
-/// Caminho rápido: `GET /releases/latest`. Se essa for *docs-only* (sem APK),
-/// cai para `GET /releases?per_page=20` e toma a última com asset `.apk`
-/// (correção D1 do plano v2). A release mais nova não-instalável é capturada
-/// em `blockedNewer` para o feedback ("versão nova ainda não disponível").
+/// **Por que não basta o `/releases/latest`:** o GitHub nem sempre devolve
+/// ali a release mais nova. Medido em 11/10/2026 neste repositório, logo
+/// depois de promover v1.5.5+1000083 de pre-release para release:
+/// `/releases/latest` continuou devolvendo **v1.4.7+1000073**, quatro
+/// versões atrás. Como o caminho rápido devolvia algo instalável, o app
+/// parava ali e nunca olhava a lista — travando toda atualização futura
+/// em silêncio.
+///
+/// Então: consulta os dois, junta os candidatos instaláveis e escolhe pelo
+/// **maior build number** (`vX.Y.Z+N`), não pela ordem do JSON.
+/// `prerelease`/`draft` sem APK vão para `blockedNewer` (só feedback).
 ///
 /// Nunca lança exceção: erros de rede/HTTP são "sem update" silencioso.
 Future<ReleaseCheckResult> fetchLatestRelease({http.Client? client}) async {
   final c = client ?? http.Client();
   try {
     ReleaseInfo? blocked;
+    final candidates = <ReleaseInfo>[];
+    // Alguma requisição respondeu com HTTP válido? Se nem `/latest` nem a
+    // lista responderam (403/429/timeout), isto é checagem INVÁLIDA: o
+    // chamador não pode gravar o throttle de 24h, senão uma falha
+    // transitória da API tranca o app sem atualização por um dia (D4).
+    var anyOk = false;
+
     final latest = await _getJson(c, '/releases/latest');
     if (latest.$2) {
-      final latestRaw = latest.$1;
-      if (latestRaw is Map<String, dynamic>) {
+      anyOk = true;
+      if (latest.$1 is Map<String, dynamic>) {
+        final latestRaw = latest.$1 as Map<String, dynamic>;
         final info = ReleaseInfo.tryParse(latestRaw);
-        if (info != null) return ReleaseCheckResult(info, true);
-        // latest docs-only (ou draft): captura o primeiro "bloqueado".
-        blocked ??= _blockedFrom(latestRaw);
-      } else if (latestRaw == null) {
+        if (info != null) {
+          candidates.add(info);
+        } else {
+          blocked ??= _blockedFrom(latestRaw);
+        }
+      } else if (latest.$1 == null) {
         // 404: repositório sem releases — checagem válida e silenciosa.
         return const ReleaseCheckResult(null, true);
       }
     }
 
     final list = await _getJson(c, '/releases?per_page=20');
-    if (list.$2) {
-      final listRaw = list.$1;
-      if (listRaw is List) {
-        // per_page retorna do mais novo para o mais velho. A primeira
-        // instalável é a info; o primeiro não-instalável encontrado é o
-        // blocked (só se o caminho latest ainda não tiver definido um).
-        for (final r in listRaw.cast<Map<String, dynamic>>()) {
-          final info = ReleaseInfo.tryParse(r);
-          if (info != null) {
-            return ReleaseCheckResult(info, true, blockedNewer: blocked);
-          }
-          blocked ??= _blockedFrom(r);
+    if (list.$2 && list.$1 is List) {
+      anyOk = true;
+      for (final r in (list.$1 as List).cast<Map<String, dynamic>>()) {
+        final info = ReleaseInfo.tryParse(r);
+        if (info != null) {
+          candidates.add(info);
+          continue;
         }
-        // 200 com lista sem APK: checagem válida, sem update (pode ter blocked).
-        return ReleaseCheckResult(null, true, blockedNewer: blocked);
+        blocked ??= _blockedFrom(r);
       }
     }
 
-    return const ReleaseCheckResult(null, false);
+    if (candidates.isEmpty) {
+      // HTTP válido mas nada instalável → "sem update" (pode ter blocked).
+      // Nenhum HTTP válido → erro de API, não trancar o throttle.
+      return ReleaseCheckResult(null, anyOk, blockedNewer: anyOk ? blocked : null);
+    }
+    return ReleaseCheckResult(
+      _newestByBuild(candidates),
+      true,
+      blockedNewer: blocked,
+    );
   } catch (e) {
     // ignore: avoid_print
     print('[updater] github_release_api error: $e');
@@ -173,6 +194,23 @@ Future<ReleaseCheckResult> fetchLatestRelease({http.Client? client}) async {
   } finally {
     if (client == null) c.close();
   }
+}
+
+/// Release de maior build number. Tag sem `+N` perde para uma com `+N`
+/// (o build é o critério autoritativo do projeto); empate/desempate vai
+/// para a primeira da lista.
+ReleaseInfo _newestByBuild(List<ReleaseInfo> candidates) {
+  var best = candidates.first;
+  var bestBuild = parseBuildNumber(best.tagName);
+  for (final c in candidates.skip(1)) {
+    final b = parseBuildNumber(c.tagName);
+    if (b == null) continue; // sem build: nunca ganha de uma com build
+    if (bestBuild == null || b > bestBuild) {
+      best = c;
+      bestBuild = b;
+    }
+  }
+  return best;
 }
 
 /// GET com headers obrigatórios da API. Retorna `(corpo, ok)`.

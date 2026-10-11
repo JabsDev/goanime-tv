@@ -103,7 +103,14 @@ jobs:
             CHANGELOG=""
           fi
           printf '%s\n\n---\n\nSHA256: %s\n' "$CHANGELOG" "$SHA256" > release-notes.md
+          # Release estável por padrão; pre-release só com sufixo `-rc` na
+          # tag (ex.: v1.6.0-rc+1000085). O app IGNORA pre-release
+          # (ReleaseInfo.tryParse rejeita) — publicar toda tag como
+          # pre-release deixava os aparelhos instalados sem nunca receber
+          # atualização.
+          PRERELEASE_FLAG=""
+          if [[ "$NAME" == *-rc ]]; then PRERELEASE_FLAG="--prerelease"; fi
           gh release create "$TAG" "$ASSET" \
             --title "$TAG" \
-            --prerelease \
+            $PRERELEASE_FLAG \
             --notes-file release-notes.md
