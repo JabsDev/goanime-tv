@@ -105,6 +105,43 @@ class TmdbService {
   static const _userAgent =
       'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36';
 
+  /// Idiomas do acervo asiático, separados por **pipe**.
+  ///
+  /// ⚠️ Público de propósito: é a constante que já quebrou o catálogo inteiro
+  /// duas vezes com um caractere. Se puder ser testado, tem que ser testado.
+  ///
+  /// Pipe, não vírgula. Na documentação do TMDB: comma = AND, pipe = OR.
+  /// Com vírgula, `ja,ko,zh,th` vira "idioma original é japonês **E** coreano
+  /// **E** chinês **E** tailandês" — impossível — e o TMDB responde
+  /// **HTTP 200 com `results: []`**, sem nenhum erro. Foi exatamente essa
+  /// falha silenciosa que fez o app nunca mostrar nada do catálogo TMDB
+  /// mesmo com a chave válida (verificado com curl em 11/10/2026:
+  /// vírgula → total_results 0; pipe → 20001).
+  static const asianLanguages = 'ja|ko|zh|th';
+
+  /// Idiomas da linha **"Dramas e Doramas"**: coreano, chinês e tailandês.
+  ///
+  /// `ja` fica de fora de propósito: o sort por popularidade em japonês é
+  /// dominado por anime (Naruto, Bleach, Doraemon…), que o AniList já
+  /// cataloga com metadados melhores — incluir aqui só duplicaria card.
+  /// Dorama japonês ao vivo pode voltar depois com filtro dedicado.
+  static const dramaLanguages = 'ko|zh|th';
+
+  /// `with_type` do TMDB para **Scripted** (drama/série de ficção).
+  ///
+  /// ⚠️ A numeração NÃO é a óbvia. Verificado contra a API em 11/10/2026:
+  ///   0=Documentário · 1=Notícia · 2=Minissérie · 3=Reality
+  ///   **4=Scripted** · 5=Talk Show · 6=Vídeo
+  /// Usar 1 (achando que era "Scripted") devolvia programas de notícia e
+  /// variedade em coreano/japonês — sem nenhum drama — e ainda zerava a
+  /// lista quando combinado com `vote_count`. Segundo erro de suposição
+  /// nesta API depois do separador vírgula/pipe.
+  static const typeScripted = '4';
+
+  /// Mínimo de votos para a linha de dramas. Notícias e variedades mal
+  /// chegam a dezenas de votos; dramas conhecidos passam de centenas.
+  static const _minVotes = '30';
+
   /// Catálogo TMDB só opera com chave válida + toggle ligado.
   static bool get isConfigured => SettingsService.instance.tmdbConfigured;
 
@@ -214,6 +251,12 @@ class TmdbService {
         [pick('name'), pick('title'), pick('original_name')]
             .firstWhere((t) => t.isNotEmpty, orElse: () => ''));
     if (title.isEmpty) return null;
+
+    // Sem tradução PT-BR, o TMDB devolve o título original em coreano/
+    // japonês/chinês — inútil para o público do app e ocuparia um card com
+    // texto ilegível. Fica só o que tem alfabeto latino; a rede de filtragem
+    // da query já remove a maior parte, isto é a rede de segurança.
+    if (!RegExp(r'[A-Za-z]').hasMatch(title)) return null;
     final poster = raw['poster_path']?.toString() ?? '';
     final backdrop = raw['backdrop_path']?.toString() ?? '';
     final overview = raw['overview']?.toString() ?? '';
@@ -300,6 +343,9 @@ class TmdbService {
     String sortBy = 'popularity.desc',
     bool onlyAsianOrigin = true,
     bool scriptedOnly = true,
+    /// Idiomas do filtro de origem. Null usa [asianLanguages].
+    String? languages,
+    bool minVotes = false,
   }) async {
     if (!isConfigured) return const [];
     final path = mediaType == 'movie' ? '/discover/movie' : '/discover/tv';
@@ -308,9 +354,10 @@ class TmdbService {
         if (genreId != null) 'with_genres': '$genreId',
         'sort_by': sortBy,
         'page': '$page',
-        if (scriptedOnly && mediaType == 'tv') 'with_type': '1',
+        if (scriptedOnly && mediaType == 'tv') 'with_type': typeScripted,
         if (onlyAsianOrigin && mediaType == 'tv')
-          'with_original_language': 'ja,ko,zh,th',
+          'with_original_language': languages ?? asianLanguages,
+        if (minVotes && mediaType == 'tv') 'vote_count.gte': _minVotes,
       });
       if (res.statusCode != 200) {
         debugPrint('[TMDB] discover falhou: ${_diagnose(res)}');

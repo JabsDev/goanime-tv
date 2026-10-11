@@ -122,11 +122,24 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Catálogo TMDB (drama/dorama/donghua/novela). Só carrega com a chave
   /// configurada — sem ela a linha simplesmente não aparece.
   Future<void> _loadDramaRow() async {
+    // Log de rastreio: o row de dramas é alimentado pelo TMDB e "sumir sem
+    // explicar" já custou duas rodadas de depuração.
+    debugPrint('[Home] drama row start: isConfigured=${TmdbService.isConfigured}'
+        ' keyLen=${SettingsService.instance.tmdbApiKey.length}');
     if (!TmdbService.isConfigured) return;
     try {
       final rows = await Future.wait([
-        TmdbService.discover(mediaType: 'tv'),
-        TmdbService.discover(mediaType: 'tv', genreId: 18),
+        // ko|zh|th de propósito: o japonês no sort de popularidade é
+        // dominado por anime (Naruto, Bleach, Doraemon), que o AniList já
+        // cataloga melhor. Aqui entra só o que falta: K-drama, C-drama,
+        // donghua e tailandês.
+        TmdbService.discover(
+            mediaType: 'tv', languages: TmdbService.dramaLanguages, minVotes: true),
+        TmdbService.discover(
+            mediaType: 'tv',
+            genreId: 18,
+            languages: TmdbService.dramaLanguages,
+            minVotes: true),
       ]);
       final merged = <Anime>[];
       final seen = <int>{};
@@ -134,8 +147,13 @@ class _HomeScreenState extends State<HomeScreen> {
         if (r.tmdbId == null || !seen.add(r.tmdbId!)) continue;
         merged.add(r);
       }
-      if (merged.isEmpty || !mounted) return;
+      if (merged.isEmpty || !mounted) {
+        debugPrint('[Home] drama row: 0 títulos — '
+            '${TmdbService.lastDiscoverDiagnostics}');
+        return;
+      }
       setState(() => _drama = merged);
+      debugPrint('[Home] drama row: ${merged.length} títulos');
     } catch (e) {
       debugPrint('[Home] TMDB drama row falhou: $e');
     }

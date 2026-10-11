@@ -236,11 +236,11 @@ class CatalogBrowseService {
         10768: 'Guerra e história',
       };
       for (final e in wanted.entries) {
-        final name = tv[e.key];
-        if (name == null) continue;
+        // Existe no catálogo do TMDB? Sem isso o chip não aparece.
+        if (tv[e.key] == null) continue;
         out.add(BrowseCategory(
           id: 'tmdb:tv:${e.key}',
-          label: name,
+          label: e.value,
           tmdbGenre: e.key,
           mediaType: 'tv',
         ));

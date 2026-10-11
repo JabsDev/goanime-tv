@@ -61,6 +61,13 @@ android {
     }
 
     buildTypes {
+        // Instala LADO A LADO com o release (`...goanime_tv.debug`): testar
+        // no aparelho não pode exigir desinstalar o app do usuário — isso
+        // apagaria perfis, favoritos e histórico local.
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             val p = loadReleaseKeystore()
             if (p != null) {
