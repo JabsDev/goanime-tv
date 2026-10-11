@@ -85,6 +85,11 @@ jobs:
           # NÃO pode é ficar no repositório, por isso vem de secret e nunca
           # de um literal no código. Build local sem a secret = app sem
           # chave padrão (o usuário ainda pode colar a sua nas Configurações).
+          # Opcional: se você criar o secret `TMDB_API_KEY_DEFAULT`, ele
+          # sobrescreve a chave embutida no código — útil para trocar a
+          # chave padrão sem editar o repositório (ex.: cota esgotada).
+          # Sem o secret, o build usa a chave já compilada em
+          # `tmdb_service.dart` e o app funciona igual.
           TMDB_API_KEY_DEFAULT: ${{ secrets.TMDB_API_KEY_DEFAULT }}
         run: |
           TAG="${{ github.ref_name }}"

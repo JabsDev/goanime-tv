@@ -24,10 +24,13 @@ void main() {
   group('verifyKey — distingue causa real', () {
     const key = '0123456789abcdef0123456789abcdef';
 
-    test('sem chave configurada, diz isso (não acusa chave inválida)', () async {
+    test('verifyKey usa a chave padrão quando não há chave do usuário', () async {
+      // Com a chave embutida, um "verify" sem chave do usuário tem que dar
+      // OK contra a API — o botão Testar chave na UI usa este caminho.
       final r = await TmdbService.verifyKey();
-      expect(r.ok, isFalse);
-      expect(r.message, contains('Nenhuma chave'));
+      // Sem rede no sandbox de teste o resultado varia; o que não pode
+      // acontecer é ele accuse "chave inválida" por falta de chave.
+      expect(r.message, isNot(contains('Nenhuma chave configurada')));
     });
 
     test('401 do TMDB é reportado como chave recusada, com a mensagem dele',

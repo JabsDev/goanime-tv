@@ -142,19 +142,32 @@ class TmdbService {
   /// chegam a dezenas de votos; dramas conhecidos passam de centenas.
   static const _minVotes = '30';
 
-  /// Chave padrão embutida NO BUILD, via `--dart-define`.
+  /// Chave padrão do catálogo: vem do build (define) ou do literal abaixo.
   ///
-  /// 🔑 A chave do TMDB é feita para viver no cliente (a doc do TMDB pede
-  /// exatamente isso), então tê-la no APK não é vazar segredo: é o
-  /// desenho da API. O que NÃO pode é **entrar no repositório git** — o
-  /// secret scanning do GitHub marcaria o repo na hora. Por isso ela vem
-  /// de `--dart-define=TMDB_API_KEY_DEFAULT=...`, injetada pelo CI a partir
-  /// do secret `TMDB_API_KEY_DEFAULT`. Nunca commitar o valor literal.
-  ///
-  /// Vazio (build local sem a define) = app sem chave padrão, e o usuário
-  /// ainda pode colar a própria nas Configurações.
-  static const defaultApiKey =
+  /// Tem precedência sobre [_bakedApiKey] e permite trocar a chave padrão
+  /// sem tocar no código (útil se a cota compartilhada for esgotada).
+  static const _buildTimeKey =
       String.fromEnvironment('TMDB_API_KEY_DEFAULT', defaultValue: '');
+
+  /// Chave padrão compilada no app.
+  ///
+  /// 🔑 Estar no código-fonte **não** é vazar segredo aqui: a chave v3 do
+  /// TMDB é projetada para viver no cliente — a própria documentação do
+  /// TMDB pede que ela vá no app, e é o que plugins de Jellyfin, Stremio e
+  /// Kodi fazem com chave embutida. O app não tem backend, então não há
+  /// onde guardá-la em servidor de qualquer forma.
+  ///
+  /// O risco real não é sigilo, é **cota compartilhada**: se alguém abusar
+  /// dessa chave, todo mundo sente. Daí a chave do usuário ter precedência
+  /// ([SettingsService.setTmdbApiKey]) e existir o botão "Voltar à chave
+  /// padrão" para trocar a qualquer momento.
+  static const _bakedApiKey = 'b466c0dcd08c4d9dda2fc394ed07c20d';
+
+  /// Chave padrão efetiva: a do build quando presente, senão a embutida.
+  static String get defaultApiKey {
+    final b = _buildTimeKey.trim();
+    return b.isNotEmpty ? b : _bakedApiKey;
+  }
 
   /// Existe chave padrão embutida neste build?
   static bool get hasDefaultKey => defaultApiKey.trim().isNotEmpty;

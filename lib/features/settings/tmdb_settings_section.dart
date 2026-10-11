@@ -74,7 +74,7 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
   }
 
   Future<void> _useDefault() async {
-    if (!SettingsService.instance.tmdbHasDefaultKey) {
+    if (!SettingsService.tmdbHasDefaultKey) {
       _snack('Este build não traz chave padrão — cole a sua abaixo.');
       return;
     }
@@ -176,7 +176,7 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
               configured: configured,
               usingDefault: TmdbService.usingDefaultKey,
               masked: masked,
-              hasDefault: s.tmdbHasDefaultKey,
+              hasDefault: SettingsService.tmdbHasDefaultKey,
               enabled: s.tmdbEnabled,
             ),
             const SizedBox(height: 14),
@@ -220,7 +220,7 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
                   if (s.tmdbUsesOwnKey)
                     _ActionButton(
                       label: 'Voltar à chave padrão',
-                      onTap: (_busy || !s.tmdbHasDefaultKey) ? null : _useDefault,
+                      onTap: (_busy || !SettingsService.tmdbHasDefaultKey) ? null : _useDefault,
                     )
                   else
                     _ActionButton(
@@ -247,7 +247,7 @@ class _TmdbSettingsSectionState extends State<TmdbSettingsSection> {
   }
 
   String _noteFor(SettingsService s) {
-    if (!s.tmdbHasDefaultKey) {
+    if (!SettingsService.tmdbHasDefaultKey) {
       return 'Este build não traz chave padrão. Pegue a sua em '
           'themoviedb.org → Settings → API (crie conta grátis) e cole acima. '
           'Ela fica só neste aparelho.';

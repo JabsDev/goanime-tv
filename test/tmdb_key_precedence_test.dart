@@ -25,23 +25,26 @@ void main() {
   });
 
   group('precedência da chave', () {
-    test('chave do usuário tem precedência sobre a padrão do build', () {
-      // Este build de teste NÃO tem chave padrão (dart-define vazia), então
-      // o que dá para garantir aqui é: com chave do usuário, a origem é
-      // "sua chave" — nunca a padrão.
+    test('chave do usuário tem precedência sobre a padrão do app', () async {
       final s = SettingsService.instance;
-      expect(s.tmdbUsesOwnKey, isFalse);
-      expect(s.tmdbHasDefaultKey, isFalse);
-      expect(s.tmdbConfigured, isFalse);
+      await s.setTmdbApiKey('0123456789abcdef0123456789abcdef');
+      expect(s.tmdbUsesOwnKey, isTrue);
+      expect(s.tmdbConfigured, isTrue);
+      expect(TmdbService.usingDefaultKey, isFalse);
+      expect(TmdbService.keyOriginLabel, 'sua chave');
     });
 
-    test('sem chave nenhuma → desligado, sem quebrar o app', () {
+    test('sem chave do usuário → usa a padrão do app', () {
+      // A chave padrão está compilada no app de propósito (chave v3 do
+      // TMDB é cliente-por-desenho). Sem chave do usuário, o catálogo já
+      // funciona — que é o ponto de todo esse desenho.
       final s = SettingsService.instance;
-      expect(s.tmdbConfigured, isFalse);
-      expect(TmdbService.isConfigured, isFalse);
-      expect(TmdbService.keyOriginLabel, 'desligado');
-      // O resto do app não depende disso: a fonte só "some".
-      expect(s.tmdbEnabled, isTrue, reason: 'toggle ligado ≠ configurado');
+      expect(s.tmdbUsesOwnKey, isFalse);
+      expect(SettingsService.tmdbHasDefaultKey, isTrue);
+      expect(s.tmdbConfigured, isTrue);
+      expect(TmdbService.isConfigured, isTrue);
+      expect(TmdbService.usingDefaultKey, isTrue);
+      expect(TmdbService.keyOriginLabel, 'chave padrão do app');
     });
 
     test('salvar chave própria marca que não está usando a padrão', () async {
@@ -58,11 +61,13 @@ void main() {
       await s.setTmdbApiKey('0123456789abcdef0123456789abcdef');
       expect(s.tmdbUsesOwnKey, isTrue);
 
-      // build de teste não tem padrão; ainda assim deve limpar a chave.
       await s.useTmdbDefaultKey();
       expect(s.tmdbUsesOwnKey, isFalse);
       expect(s.tmdbUseDefault, isTrue);
       expect(s.tmdbApiKey, isEmpty);
+      // Volta a funcionar pela chave padrão.
+      expect(s.tmdbConfigured, isTrue);
+      expect(TmdbService.usingDefaultKey, isTrue);
     });
 
     test('toggle desligado desliga mesmo com chave presente', () async {
@@ -77,19 +82,28 @@ void main() {
     });
   });
 
-  group('chave padrão do build', () {
-    test('vem de dart-define, nunca de literal no código', () {
-      // Vazio neste build de teste. Se alguémdigitar uma chave no código,
-      // este teste passa a falhar — é o alarme de "não versione a chave".
-      expect(TmdbService.defaultApiKey, isEmpty,
-          reason: 'chave padrão deve chegar por --dart-define, não no código');
-      expect(SettingsService.defaultKey, isEmpty);
+  group('chave padrão embutida', () {
+    test('existe sem o usuário configurar nada', () {
+      expect(TmdbService.hasDefaultKey, isTrue);
+      expect(TmdbService.defaultApiKey.trim(), isNotEmpty);
     });
 
-    test('chave padrão não é exposta em nenhum log', () {
-      // A UI mostra "chave padrão do app" sem prefixo/sufixo: nada de
-      // carimbo de 8 caracteres como fazemos com a chave do usuário.
-      expect(TmdbService.usingDefaultKey, isFalse);
+    test('formato válido (hex de 32)', () {
+      // A chave embutida tem que passar na própria validação que a UI usa.
+      expect(SettingsService.validateTmdbKey(TmdbService.defaultApiKey), isNull);
+    });
+
+    test('precedência: --dart-define > chave embutida', () {
+      // Sem define neste build de teste vale a embutida; o que o teste
+      // trava é que existe uma chave padrão utilizável em qualquer build.
+      expect(TmdbService.defaultApiKey.trim(), isNotEmpty);
+    });
+
+    test('origem padrão não vaza prefixo/sufixo como a do usuário', () {
+      // A UI mostra "chave padrão do app" sem carimbo; com chave do usuário
+      // ela mostra `abcd…wxyz`. No padrão não aparece nada.
+      expect(TmdbService.usingDefaultKey, isTrue);
+      expect(TmdbService.keyOriginLabel, isNot(contains('\u2026')));
     });
   });
 

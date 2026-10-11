@@ -234,11 +234,13 @@ void main() {
   });
 
   group('Categorias', () {
-    test('AniList sempre disponível; TMDB só com chave', () async {
-      final semChave = await CatalogBrowseService.categories();
-      expect(semChave, isNotEmpty);
-      expect(semChave.any((c) => c.anilistGenre != null), isTrue);
-      expect(semChave.any((c) => c.isTmdb), isFalse);
+    test('AniList sempre; TMDB aparece porque há chave padrão', () async {
+      // A chave padrão está embutida no app, então as categorias TMDB
+      // existem mesmo sem o usuário configurar nada.
+      final cats = await CatalogBrowseService.categories();
+      expect(cats, isNotEmpty);
+      expect(cats.any((c) => c.anilistGenre != null), isTrue);
+      expect(cats.any((c) => c.isTmdb), isTrue);
     });
 
     test('categorias AniList têm rótulo legível e único', () async {

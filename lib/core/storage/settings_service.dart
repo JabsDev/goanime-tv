@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../storage/local_storage.dart';
+import '../tmdb/tmdb_service.dart';
 import '../utils/device_capability.dart';
 import '../utils/nsfw_filter.dart';
 
@@ -118,12 +119,9 @@ class SettingsService {
   ValueListenable<bool?> get tmdbUseDefaultListenable => _tmdbUseDefaultVN;
   bool? get tmdbUseDefault => _tmdbUseDefault;
 
-  /// A chave padrão do build (se houver). Injetada pelo CI via
-  /// `--dart-define=TMDB_API_KEY_DEFAULT=...`; nunca versionada no git.
-  static const defaultKey =
-      String.fromEnvironment('TMDB_API_KEY_DEFAULT', defaultValue: '');
-
-  bool get tmdbHasDefaultKey => defaultKey.trim().isNotEmpty;
+  /// Chave padrão do app. A precedência é do [TmdbService] (que sabe da
+  /// `--dart-define`); aqui só interessa se existe alguma chave padrão.
+  static bool get tmdbHasDefaultKey => TmdbService.hasDefaultKey;
 
   /// Há alguma chave utilizável (do usuário ou padrão do build)?
   bool get _hasAnyKey => tmdbUsesOwnKey || tmdbHasDefaultKey;
