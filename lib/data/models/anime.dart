@@ -74,6 +74,7 @@ enum AnimeSource {
   animeFire,
   goyabu,
   animesDigital,
+  sushiAnimes,
   allAnime,
   betterAnime,
   animesRoll,
@@ -81,6 +82,7 @@ enum AnimeSource {
   animePlayer,
   anilist,
   animesOnlineCloud,
+  animesOnlineCc,
   animesDrive,
   animeQ,
   animePlay,
@@ -101,11 +103,13 @@ extension AnimeSourcePriority on AnimeSource {
       this == AnimeSource.animeFire ||
       this == AnimeSource.goyabu ||
       this == AnimeSource.animesDigital ||
+      this == AnimeSource.sushiAnimes ||
       this == AnimeSource.betterAnime ||
       this == AnimeSource.animesRoll ||
       this == AnimeSource.dooPlay ||
       this == AnimeSource.animePlayer ||
       this == AnimeSource.animesOnlineCloud ||
+      this == AnimeSource.animesOnlineCc ||
       this == AnimeSource.animesDrive ||
       this == AnimeSource.animeQ ||
       this == AnimeSource.animePlay ||
@@ -124,6 +128,8 @@ extension AnimeSourcePriority on AnimeSource {
         return 0;
       case AnimeSource.animesDigital:
         return 1;
+      case AnimeSource.sushiAnimes:
+        return 2;
       case AnimeSource.anilist:
         return 1;
       case AnimeSource.goyabu:
@@ -135,6 +141,8 @@ extension AnimeSourcePriority on AnimeSource {
       case AnimeSource.dooPlay:
         return 5;
       case AnimeSource.animesOnlineCloud:
+        return 6;
+      case AnimeSource.animesOnlineCc:
         return 6;
       case AnimeSource.animesDrive:
         return 7;
@@ -173,6 +181,8 @@ extension AnimeSourceDisplay on AnimeSource {
         return 'AnimeFire';
       case AnimeSource.animesDigital:
         return 'Animes Digital';
+      case AnimeSource.sushiAnimes:
+        return 'Sushi Animes';
       case AnimeSource.anilist:
         return 'AniList';
       case AnimeSource.allAnime:
@@ -189,6 +199,8 @@ extension AnimeSourceDisplay on AnimeSource {
         return 'Anime Player';
       case AnimeSource.animesOnlineCloud:
         return 'Animes Online';
+      case AnimeSource.animesOnlineCc:
+        return 'Animes Online CC';
       case AnimeSource.animesDrive:
         return 'Animes Drive';
       case AnimeSource.animeQ:
@@ -244,6 +256,7 @@ extension AnimeSourceLanguage on AnimeSource {
         return SourceLanguage.english;
       case AnimeSource.animeFire:
       case AnimeSource.animesDigital:
+      case AnimeSource.sushiAnimes:
       case AnimeSource.goyabu:
       case AnimeSource.betterAnime:
       case AnimeSource.animesRoll:
@@ -251,6 +264,7 @@ extension AnimeSourceLanguage on AnimeSource {
       case AnimeSource.animePlayer:
       case AnimeSource.anilist:
       case AnimeSource.animesOnlineCloud:
+      case AnimeSource.animesOnlineCc:
       case AnimeSource.animesDrive:
       case AnimeSource.animeQ:
       case AnimeSource.animePlay:

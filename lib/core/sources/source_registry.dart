@@ -4,6 +4,7 @@ import '../scraper/scraper_result.dart';
 import '../sources/anime_source_adapter.dart';
 import '../sources/anime_fire_adapter.dart';
 import '../sources/animesdigital_adapter.dart';
+import '../sources/sushi_animes_adapter.dart';
 import '../sources/animesonline_io_adapter.dart';
 import '../sources/all_anime_adapter.dart';
 import '../sources/anime_gg_adapter.dart';
@@ -26,9 +27,11 @@ class SourceRegistry {
   static final List<AnimeSourceAdapter> _adapters = [
     AnimeFireAdapter(),
     AnimesDigitalAdapter(),
+    SushiAnimesAdapter(),
     GoyabuAdapter(),
     DooPlayAdapter(source: AnimeSource.dooPlay),
     AnimesOnlineAdapter(source: AnimeSource.animesOnlineCloud),
+    AnimesOnlineAdapter(source: AnimeSource.animesOnlineCc),
     AnimesOnlineAdapter(source: AnimeSource.animesDrive),
     AnimesOnlineAdapter(source: AnimeSource.animeQ),
     AnimesOnlineAdapter(source: AnimeSource.animePlay),
@@ -53,9 +56,11 @@ class SourceRegistry {
     return [
       AnimeSource.animeFire,
       AnimeSource.animesDigital,
+      AnimeSource.sushiAnimes,
       AnimeSource.goyabu,
       AnimeSource.dooPlay,
       AnimeSource.animesOnlineCloud,
+      AnimeSource.animesOnlineCc,
       AnimeSource.animesDrive,
       AnimeSource.animeQ,
       AnimeSource.animePlay,
@@ -77,11 +82,15 @@ class SourceRegistry {
         return 0;
       case AnimeSource.animesDigital:
         return 1;
+      case AnimeSource.sushiAnimes:
+        return 2;
       case AnimeSource.goyabu:
         return 2;
       case AnimeSource.dooPlay:
         return 2;
       case AnimeSource.animesOnlineCloud:
+        return 3;
+      case AnimeSource.animesOnlineCc:
         return 3;
       case AnimeSource.animesDrive:
         return 4;
@@ -125,6 +134,7 @@ class SourceRegistry {
               source == AnimeSource.doramasflix && a is DoramasflixAdapter ||
               source == AnimeSource.animeFire && a is AnimeFireAdapter ||
              source == AnimeSource.animesDigital && a is AnimesDigitalAdapter ||
+             source == AnimeSource.sushiAnimes && a is SushiAnimesAdapter ||
              source == AnimeSource.goyabu && a is GoyabuAdapter ||
              source == AnimeSource.animePlayer && a is AnimePlayerAdapter ||
              source == AnimeSource.allAnime && a is AllAnimeAdapter ||

@@ -175,12 +175,14 @@ static bool isOpenable(Anime a) {
       return a.tmdbId != null;
     case AnimeSource.animeFire:
     case AnimeSource.animesDigital:
+    case AnimeSource.sushiAnimes:
     case AnimeSource.goyabu:
     case AnimeSource.betterAnime:
     case AnimeSource.animesRoll:
     case AnimeSource.dooPlay:
     case AnimeSource.animePlayer:
     case AnimeSource.animesOnlineCloud:
+    case AnimeSource.animesOnlineCc:
     case AnimeSource.animesDrive:
     case AnimeSource.animeQ:
     case AnimeSource.animePlay:

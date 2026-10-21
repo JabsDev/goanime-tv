@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:html/dom.dart' show Document;
 import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
 import '../../data/models/anime.dart';
@@ -8,14 +9,17 @@ import '../network/api_client.dart';
 import '../scraper/scraper_result.dart';
 import '../utils/text_utils.dart';
 import 'anime_source_adapter.dart';
+import 'blogger_spa_resolver.dart';
 import 'cdn_resolver.dart';
 import 'dooplay_v2_extractor.dart';
 
 /// AnimesOnline-cluster provider (PT-BR): `animesonline.cloud`, its clones
 /// `animesdrive.cloud` and `animeq.cloud` (same database, `wp_json` transport)
-/// and `animeplay.cloud` (`admin_ajax` transport). Search and episode listing
-/// are HTML scraping; video resolves through [DooPlayV2Extractor] (Layer A)
-/// with the CDN probe fallback (Layer B) as last resort.
+/// and `animeplay.cloud` (`admin_ajax` transport). `animesonlinecc.to` é o
+/// tema antigo do cluster, mantido como espelho desligado (player Blogger).
+/// Search and episode listing are HTML scraping; video resolves through
+/// [DooPlayV2Extractor] (Layer A) with the CDN probe fallback (Layer B) as
+/// last resort.
 ///
 /// Domain note (06/10/2026): `animesdrive.online` → 301 → `animesdrive.cloud`
 /// and `animeq.blog` → 301 → `animeq.cloud`; the constants below point
@@ -40,6 +44,7 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
 
   static const Map<AnimeSource, String> baseUrls = {
     AnimeSource.animesOnlineCloud: 'https://animesonline.cloud',
+    AnimeSource.animesOnlineCc: 'https://animesonlinecc.to',
     AnimeSource.animesDrive: 'https://animesdrive.cloud',
     AnimeSource.animeQ: 'https://animeq.cloud',
     AnimeSource.animePlay: 'https://animeplay.cloud',
@@ -60,8 +65,16 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
 
   /// animeplay.cloud devolve 403 em todas as rotas (verificado 09/09/2026) —
   /// fica fora do fan-out até voltar. Os outros 3 do cluster respondem 200.
+  ///
+  /// `animesonlinecc.to` é o tema antigo do cluster: catálogo e listagem
+  /// funcionam, mas o player é um iframe do Blogger e o `googlevideo` devolve
+  /// 403 (token sem `pot`), o mesmo sintoma do Meus Animes/anroll.cc em
+  /// 21/10/2026. Fica como espelho DESLIGADO do fan-out até o player voltar —
+  /// aí basta remover a condição abaixo.
   @override
-  bool get implemented => _source != AnimeSource.animePlay;
+  bool get implemented =>
+      _source != AnimeSource.animePlay &&
+      _source != AnimeSource.animesOnlineCc;
 
   @override
   Future<Anime?> resolveAnime(Anime animeRef) async {
@@ -175,6 +188,9 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
         ));
       }
       final doc = html_parser.parse(res.body);
+      if (_source == AnimeSource.animesOnlineCc) {
+        return _episodesFromOldTheme(doc, anime);
+      }
       final list = <Episode>[];
       for (final card in doc.querySelectorAll('.episode-card')) {
         final numAttr = card.attributes['data-episode-number'];
@@ -217,6 +233,96 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
     }
   }
 
+  /// Grade do tema ANTIGO (`animesonlinecc.to`): `#seasons .se-c` agrupa uma
+  /// temporada (`.se-t` = número) e `ul.episodios li a[href*="/episodio/"]`
+  /// lista os episódios. O mesmo link aparece duas vezes (capa + título), por
+  /// isso o dedupe por href.
+  ScraperResult<List<Episode>> _episodesFromOldTheme(
+      Document doc, Anime anime) {
+    final list = <Episode>[];
+    final seen = <String>{};
+    for (final block in doc.querySelectorAll('#seasons .se-c')) {
+      final season = int.tryParse(block.querySelector('.se-t')?.text.trim() ?? '');
+      for (final a in block.querySelectorAll('ul.episodios li a[href*="/episodio/"]')) {
+        final href = a.attributes['href'] ?? '';
+        if (href.isEmpty || !seen.add(href)) continue;
+        final m = RegExp(r'-episodio-(\d+)/?$').firstMatch(href);
+        if (m == null) continue;
+        final li = a.parent?.parent;
+        list.add(Episode(
+          number: m.group(1)!,
+          url: href,
+          title: a.text.trim().isEmpty ? null : a.text.trim(),
+          thumbnail: li?.querySelector('img')?.attributes['src'],
+          season: season,
+          owner: anime,
+          source: source,
+        ));
+      }
+    }
+    list.sort((a, b) {
+      final sa = a.season ?? 0;
+      final sb = b.season ?? 0;
+      if (sa != sb) return sa.compareTo(sb);
+      return (int.tryParse(a.number) ?? 0)
+          .compareTo(int.tryParse(b.number) ?? 0);
+    });
+    if (list.isEmpty) {
+      return ScraperResult.failure(EmptyResultError(
+        message: 'No episodes found in HTML',
+        source: source,
+      ));
+    }
+    return ScraperResult.success(list);
+  }
+
+  /// Player do tema antigo: iframes diretos do Blogger. Passa pelo
+  /// [BloggerSpaResolver] (o mesmo dos outros DooPlay) e, se nada responder,
+  /// cai no CDN por título+episódio (Layer B).
+  Future<ScraperResult<List<VideoSource>>> _videoFromOldTheme(
+      Episode episode, Anime? anime) async {
+    try {
+      final res = await _httpGet(Uri.parse(episode.url), headers: {'User-Agent': _ua});
+      if (res.statusCode == 200) {
+        final doc = html_parser.parse(res.body);
+        final resolver = BloggerSpaResolver(client: _client);
+        for (final iframe in doc.querySelectorAll('iframe[src]')) {
+          final src = iframe.attributes['src'] ?? '';
+          if (!src.contains('blogger.com')) continue;
+          final sources =
+              await resolver.resolve(embedUrl: src, referer: episode.url);
+          if (sources.isNotEmpty) return ScraperResult.success(sources);
+        }
+      }
+      final ctx = anime ?? episode.owner;
+      final title = ctx?.name ?? '';
+      final ep = int.tryParse(episode.number);
+      if (title.isNotEmpty && ep != null) {
+        final url = await CdnResolver(client: _client)
+            .resolve(title, ep, englishName: ctx?.englishName);
+        if (url != null) {
+          return ScraperResult.success([
+            VideoSource(
+              url: url,
+              quality: 'Auto',
+              headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'},
+            ),
+          ]);
+        }
+      }
+      return ScraperResult.failure(BloggerUnsupportedError(
+        message: 'Blogger-only player (googlevideo 403)',
+        source: source,
+      ));
+    } catch (e) {
+      return ScraperResult.failure(UnknownError(
+        message: 'Video source extraction failed: $e',
+        source: source,
+        originalError: e,
+      ));
+    }
+  }
+
   int? _episodeNumber(String url) {
     final m = RegExp(r'episodio[^/]*?[-]?(\d+)\s*/?$').firstMatch(url);
     return m == null ? null : int.tryParse(m.group(1)!);
@@ -227,6 +333,9 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
     Episode episode, {
     Anime? anime,
   }) async {
+    if (_source == AnimeSource.animesOnlineCc) {
+      return _videoFromOldTheme(episode, anime);
+    }
     try {
       final extractor = DooPlayV2Extractor(baseUrl: baseUrl, client: _client);
       final sources = await extractor.extractPlayable(episode.url);
