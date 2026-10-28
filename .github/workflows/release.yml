@@ -123,6 +123,10 @@ jobs:
           # (ReleaseInfo.tryParse rejeita) — publicar toda tag como
           # pre-release deixava os aparelhos instalados sem nunca receber
           # atualização.
+          # BUGFIX: `NAME` era definido só no step de validação (env não passa
+          # entre steps) — toda tag `-rc` saía como release ESTÁVEL. Recalcula
+          # aqui, que é onde a flag é decidida.
+          NAME="${TAG%%+*}"
           PRERELEASE_FLAG=""
           if [[ "$NAME" == *-rc ]]; then PRERELEASE_FLAG="--prerelease"; fi
           gh release create "$TAG" "$ASSET" \
