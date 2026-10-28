@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -11,6 +12,7 @@ import '../../core/anilist/anilist_service.dart';
 import '../../core/aniskip/aniskip_models.dart';
 import '../../core/aniskip/aniskip_service.dart';
 import '../../core/constants/theme_constants.dart';
+import '../../core/player/av_sync.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/sources/source_registry.dart';
 import '../../core/utils/quality_picker.dart';
@@ -26,7 +28,11 @@ class PlayerScreen extends StatefulWidget {
   final List<CatalogEpisode> episodeList;
   final int episodeIndex;
   final List<VideoSource>? initialSources;
-  final int initialIndex;
+
+  /// Índice da qualidade escolhida explicitamente no diálogo. `null` = não
+  /// houve escolha (auto-next, card de legenda IA): o player aplica o teto do
+  /// modo lite (`kDefaultMaxQualityHeight`).
+  final int? initialIndex;
 
   const PlayerScreen({
     super.key,
@@ -35,7 +41,7 @@ class PlayerScreen extends StatefulWidget {
     required this.episodeList,
     required this.episodeIndex,
     this.initialSources,
-    this.initialIndex = 0,
+    this.initialIndex,
   });
 
   @override
@@ -93,6 +99,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   double _subDelay = 0;
   static const _subDelays = [0.0, 0.5, -0.5];
 
+  // Sincronia A/V (mpv `audio-delay`): calibração do aparelho, persistida em
+  // SettingsService. ◀ ▶ no botão A/V ajustam ±50 ms; Select reseta.
+  int _audioDelayMs = 0;
+
   // Proxy local de manifestos DASH (AnimeFire): re-serve o MPD com extensão
   // `.mpd` (o `/m.jpg` do CDN não abre no demuxer) e filtra a representação
   // da qualidade escolhida. Uma instância por tela, fechada no dispose.
@@ -116,6 +126,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   late final FocusNode _qualityNode = FocusNode();
   late final FocusNode _subNode = FocusNode();
   late final FocusNode _delayNode = FocusNode();
+  late final FocusNode _avNode = FocusNode();
   late final FocusNode _visibilityNode = FocusNode();
   late final FocusNode _replayNode = FocusNode();
   late final FocusNode _playNode = FocusNode();
@@ -126,6 +137,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _qualityNode,
         _subNode,
         _delayNode,
+        _avNode,
         _visibilityNode,
         _replayNode,
         _playNode,
@@ -152,6 +164,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     WidgetsBinding.instance.addObserver(this);
     DeviceType.lockLandscapeForPlayer();
     _enterImmersive();
+    _audioDelayMs = SettingsService.instance.audioDelayMs;
     _player = Player();
     _videoController = VideoController(_player);
     _initPlayer();
@@ -195,7 +208,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     // garante que cada troca de fonte re-aplica a retomada (Furo 3).
     try {
       List<VideoSource> sources;
-      int startIndex = widget.initialIndex;
       // ponytail: retry re-resolve as fontes do provider escolhido — a URL pode
       // ter expirado/403. Antes o "Tentar novamente" só rejogava as mortas.
       if (widget.initialSources != null && !_forceReresolve) {
@@ -218,22 +230,24 @@ class _PlayerScreenState extends State<PlayerScreen>
         });
         return;
       }
-      if (startIndex >= sources.length) startIndex = 0;
       // Fase 3: auto-seleciona a melhor qualidade quando o usuário não fez
-      // escolha explícita (auto-next). O índice explícito vindo do diálogo é
-      // remapeado para a ordem nova (por identidade; após re-resolve do
-      // retry, por qualidade+url — o retry repete a MESMA qualidade, nunca
-      // pula para outra sozinho).
-      final chosen = sources[startIndex];
+      // escolha explícita (auto-next). Sem escolha, o modo lite aplica o teto
+      // de 720p (com fallback para a menor fonte quando só há 1080p+).
       final ordered = sortBestFirst(sources);
-      var mapped = ordered.indexWhere((s) => identical(s, chosen));
-      mapped = mapped >= 0
-          ? mapped
-          : ordered.indexWhere(
-              (s) => s.quality == chosen.quality && s.url == chosen.url);
-      startIndex = mapped >= 0 ? mapped : 0;
+      final startIndex = resolveStartIndex(
+        ordered,
+        sources,
+        requested: widget.initialIndex,
+        maxHeight: SettingsService.instance.liteModeActive
+            ? kDefaultMaxQualityHeight
+            : null,
+      );
       debugPrint('[Player] Resolved ${widget.provider} sources: '
           '${ordered.map((s) => '${s.quality}:${Uri.parse(s.url).host}').join(' | ')}');
+      debugPrint('[Player] Start index $startIndex '
+          '(${ordered[startIndex].quality}, '
+          'escolha explícita=${widget.initialIndex != null}, '
+          'lite=${SettingsService.instance.liteModeActive})');
       setState(() => _sources = ordered);
       await _playSource(startIndex);
     } catch (e) {
@@ -243,6 +257,92 @@ class _PlayerScreenState extends State<PlayerScreen>
         _isLoading = false;
       });
     }
+  }
+
+  /// Tuning de sincronia A/V e I/O do mpv (ver `core/player/av_sync.dart`).
+  ///
+  /// Sintoma alvo: em aparelho fraco o vídeo atrasa em relação ao áudio sem
+  /// nunca recuperar o sincronismo (mpv renderiza frame atrasado em vez de
+  /// descartar) e o áudio "adianta". `framedrop=vo` + `ao=audiotrack` atacam
+  /// as duas causas conhecidas; falha de qualquer opção é log-only, nunca
+  /// impede o play.
+  Future<void> _applyMpvTuning() async {
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+    final props = AvSync.mpvProperties(
+      android: Platform.isAndroid,
+      lowEnd: SettingsService.instance.liteModeActive,
+    );
+    for (final e in props.entries) {
+      try {
+        await native.setProperty(e.key, e.value);
+      } catch (err) {
+        debugPrint('[Player] mpv ${e.key}=${e.value} falhou: $err');
+      }
+    }
+    await _applyAudioDelay();
+  }
+
+  /// mpv `audio-delay`: positivo atrasa o áudio (corrige áudio adiantado).
+  Future<void> _applyAudioDelay() async {
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+    try {
+      await native.setProperty(
+          'audio-delay', AvSync.delaySeconds(_audioDelayMs));
+    } catch (e) {
+      debugPrint('[Player] audio-delay falhou: $e');
+    }
+  }
+
+  /// Diagnóstico único por fonte: **qual** decodificador o mpv realmente abriu.
+  ///
+  /// Serve para separar "hardware não aguenta 1080p" (`hwdec-current=no` =
+  /// software) de "rede/GPU". Escala de resolução **não** ajuda no primeiro
+  /// caso: ela acontece depois do decode, que já é o gargalo.
+  Future<void> _logVideoPipeline() async {
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+    for (final prop in const [
+      'video-codec',
+      'hwdec-current',
+      'video-params/w',
+      'video-params/h',
+    ]) {
+      try {
+        debugPrint('[Player] $prop=${await native.getProperty(prop)}');
+      } catch (e) {
+        debugPrint('[Player] $prop indisponível: $e');
+      }
+    }
+  }
+
+  /// Ajusta a calibração A/V com feedback imediato e persiste no aparelho.
+  void _setAudioDelay(int ms) {
+    final clamped = AvSync.clampDelay(ms);
+    if (clamped != _audioDelayMs) {
+      setState(() => _audioDelayMs = clamped);
+      // ignore: discarded_futures
+      SettingsService.instance.setAudioDelayMs(clamped);
+      _applyAudioDelay();
+    }
+    _showControls();
+  }
+
+  KeyEventResult _onAvKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent) {
+      final k = event.logicalKey;
+      if (k == LogicalKeyboardKey.arrowLeft) {
+        _setAudioDelay(AvSync.nudge(_audioDelayMs, -AvSync.stepMs));
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.arrowRight) {
+        _setAudioDelay(AvSync.nudge(_audioDelayMs, AvSync.stepMs));
+        return KeyEventResult.handled;
+      }
+    }
+    // Select/Enter reseta para 0 (estado de fábrica).
+    return FocusKeyHandler.handle(node, event, () => _setAudioDelay(0));
   }
 
   Future<void> _playSource(int index) async {
@@ -282,6 +382,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     });
     try {
       await _player.stop();
+      // Sincronia A/V: options de mpv valem por arquivo — reaplica antes de
+      // cada open (troca de qualidade/fonte recria o pipeline de áudio).
+      await _applyMpvTuning();
       // Fase 3: streams adaptativas (HLS/DASH) — mpv parte de uma bitrate
       // conservadora; forçamos a melhor disponível. No-op para mp4 direto.
       final native = _player.platform;
@@ -414,6 +517,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         _showControls();
         _fetchSkips();
         debugPrint('[Player] Video is ready, duration: ${_durationSec}s');
+        // ignore: discarded_futures
+        _logVideoPipeline();
       } else if (_videoReady && _skipFailedWithEstimate) {
         // retry com duração precisa se primeira busca usou estimate e falhou
         _fetchSkips();
@@ -954,10 +1059,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     required VoidCallback onTap,
     required Widget child,
     ValueChanged<bool>? onFocusChange,
+    KeyEventResult Function(FocusNode, KeyEvent)? onKey,
   }) {
     return Focus(
       focusNode: node,
-      onKeyEvent: (n, e) => FocusKeyHandler.handle(n, e, onTap),
+      onKeyEvent: (n, e) =>
+          onKey?.call(n, e) ?? FocusKeyHandler.handle(n, e, onTap),
       onFocusChange: (focused) {
         if (focused) _controlsTimer?.cancel(); // keep overlay visible while focused
         onFocusChange?.call(focused);
@@ -1302,8 +1409,60 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ),
                     ),
                   ),
+                  const SizedBox(width: 24),
+                  // Sincronia A/V (calibração do aparelho): ◀ ▶ ±50 ms,
+                  // Select reseta. Fica no HUD porque o ajuste precisa ser
+                  // feito olhando o vídeo (boca × voz).
+                  _controlButton(
+                    node: _avNode,
+                    onTap: () => _setAudioDelay(0),
+                    onKey: _onAvKey,
+                    child: Semantics(
+                      button: true,
+                      label: 'Sincronia de áudio e vídeo',
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => _setAudioDelay(0),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: _audioDelayMs == 0
+                                  ? Colors.black.withValues(alpha: 0.5)
+                                  : ThemeConstants.primary
+                                      .withValues(alpha: 0.7),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.sync_alt,
+                                    color: Colors.white, size: 20),
+                                const SizedBox(width: 6),
+                                Text(
+                                  AvSync.label(_audioDelayMs),
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 13),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
+              if (_avNode.hasFocus)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    '◀ áudio mais cedo · ▶ áudio mais tarde · OK reseta',
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 13),
+                  ),
+                ),
               const Spacer(),
               // ponytail: sub-árvore isolada. Resolvers de tick só reconstruem
               // este Padding; gradientes full-screen e ícones ficam estáticos.

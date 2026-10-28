@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../player/av_sync.dart';
 import '../storage/local_storage.dart';
 import '../tmdb/tmdb_service.dart';
 import '../utils/device_capability.dart';
@@ -17,6 +18,10 @@ class SettingsService {
   static const _kNsfwFilter = 'settings_nsfw_filter';
   static const _kOnboardingSeen = 'settings_onboarding_seen';
   static const _kAutoSkipIntro = 'settings_auto_skip_intro';
+  // Sincronia A/V do player mpv (ms; positivo atrasa o áudio). É calibração
+  // do APARELHO (latência de saída de áudio), não do conteúdo: vale para
+  // todos os episódios/fontes até ser resetada.
+  static const _kAudioDelayMs = 'settings_audio_delay_ms';
   static const _kSttModel = 'settings_ai_stt'; // 'sensevoice'|'jav03'
   static const _kMtEngine = 'settings_ai_mt'; // 'manga'|'completa'
   // LegendAI (PC) — Fase 3: endereço do servidor na LAN + modo padrão.
@@ -57,6 +62,11 @@ class SettingsService {
   final ValueNotifier<bool> _autoSkipIntroVN = ValueNotifier<bool>(false);
   ValueListenable<bool> get autoSkipIntroListenable => _autoSkipIntroVN;
   bool get autoSkipIntro => _autoSkipIntro;
+
+  /// Sincronia A/V (mpv `audio-delay`): ms somados ao áudio. Positivo = áudio
+  /// mais tarde (corrige "áudio adiantado"). Persistido por aparelho.
+  int _audioDelayMs = 0;
+  int get audioDelayMs => _audioDelayMs;
 
   /// Legenda IA: STT 'sensevoice' (Whisper destilado de anime, leve) ou
   /// 'jav03' (Whisper ja-anime v0.3, melhor CER). Inválidos → 'sensevoice'.
@@ -199,6 +209,7 @@ class SettingsService {
     _nsfwFilterVN.value = _nsfwFilter;
     _autoSkipIntro = prefs.getBool(_kAutoSkipIntro) ?? false;
     _autoSkipIntroVN.value = _autoSkipIntro;
+    _audioDelayMs = AvSync.clampDelay(prefs.getInt(_kAudioDelayMs) ?? 0);
     // Poda Fase 1: whitelist só dos tiers altos. Preferência persistida fora
     // da lista (tiny/base/small/anime-whisper/minima/anime/leve/lmt) migra
     // para o default novo — nunca volta a um tier removido.
@@ -278,6 +289,18 @@ class SettingsService {
     _autoSkipIntroVN.value = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kAutoSkipIntro, v);
+  }
+
+  /// Grava a calibração A/V (clampada a ±[AvSync.maxAbsMs]). Zero apaga a
+  /// chave: "sem ajuste" volta a ser o estado de fábrica no disco.
+  Future<void> setAudioDelayMs(int ms) async {
+    _audioDelayMs = AvSync.clampDelay(ms);
+    final prefs = await SharedPreferences.getInstance();
+    if (_audioDelayMs == 0) {
+      await prefs.remove(_kAudioDelayMs);
+    } else {
+      await prefs.setInt(_kAudioDelayMs, _audioDelayMs);
+    }
   }
 
   Future<void> setSttModel(String v) async {

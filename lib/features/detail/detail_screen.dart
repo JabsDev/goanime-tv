@@ -14,6 +14,7 @@ import '../../core/storage/local_storage.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/utils/nsfw_filter.dart';
+import '../../core/utils/quality_picker.dart';
 import '../../core/utils/episode_airing.dart';
 import '../../core/sources/source_ping_service.dart';
 import '../../shared/widgets/cached_image.dart';
@@ -1866,6 +1867,23 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   Widget _buildQualityStep(List<VideoSource> sources) {
     final visible = _visibleSources(sources);
     final hasAudioStep = _audiosFor(sources).length > 1;
+    // Padrão em modo lite: melhor qualidade até 720p (o painel desses
+    // aparelhos é 720p). Se a fonte só tem 1080p+, o foco cai na menor
+    // disponível — tocar continua funcionando, o teto é preferência.
+    final defaultIdx = defaultQualityIndex(
+      visible,
+      maxHeight: SettingsService.instance.liteModeActive
+          ? kDefaultMaxQualityHeight
+          : null,
+    );
+    final defaultHint = visible.isEmpty ||
+            !SettingsService.instance.liteModeActive ||
+            visible.length <= 1
+        ? null
+        : qualityScore(visible[defaultIdx].quality) <=
+                kDefaultMaxQualityHeight
+            ? 'padrão'
+            : 'menor disponível';
     return KeyedSubtree(
       key: ValueKey('step:$_stepSession'),
       child: Column(
@@ -1880,7 +1898,8 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
             child: _QualityItem(
               quality: q.value.quality,
               selected: _selectedQualityIdx == idx,
-              autofocus: idx == 0,
+              autofocus: idx == defaultIdx,
+              hint: idx == defaultIdx ? defaultHint : null,
               onTap: () {
                 if (_selectedProvider!.language == SourceLanguage.japanese) {
                   setState(() => _selectedQualityIdx = idx);
@@ -1944,6 +1963,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
               episodeList: widget.episodeList,
               provider: _selectedProvider!,
               sources: visible,
+              initialIndex: idx,
             ),
           ),
         _stepBack(() => setState(() {
@@ -2001,11 +2021,16 @@ class _QualityItem extends StatefulWidget {
   /// B-novo: foco inicial no 1º item do passo (o d-pad fica preso sem isso).
   final bool autofocus;
 
+  /// Selo discreto à direita ("padrão" / "menor disponível") — explica por que
+  /// o foco inicial não está na melhor qualidade (teto do modo lite).
+  final String? hint;
+
   const _QualityItem(
       {required this.quality,
       required this.onTap,
       this.selected = false,
-      this.autofocus = false});
+      this.autofocus = false,
+      this.hint});
 
   @override
   State<_QualityItem> createState() => _QualityItemState();
@@ -2076,6 +2101,25 @@ class _QualityItemState extends State<_QualityItem> {
                       ),
                     ),
                   ),
+                  if (widget.hint != null) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: ThemeConstants.surface,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        widget.hint!,
+                        style: const TextStyle(
+                          color: ThemeConstants.textSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
                   Icon(
                     widget.selected ? Icons.check_circle : Icons.play_arrow,
                     color: _isFocused || widget.selected

@@ -89,4 +89,28 @@ void main() {
     }
     expect(AiProviders.mtTiers.values, isNot(contains('hymt-ja-pt-q3km')));
   });
+
+  test('sincronia A/V: default 0 e persiste entre sessões', () async {
+    await SettingsService.instance.init();
+    expect(SettingsService.instance.audioDelayMs, 0);
+
+    await SettingsService.instance.setAudioDelayMs(150);
+    expect(SettingsService.instance.audioDelayMs, 150);
+
+    // Simula restart com o mesmo mock de prefs.
+    await SettingsService.instance.init();
+    expect(SettingsService.instance.audioDelayMs, 150);
+
+    // Reset apaga a chave: próximo init volta a 0.
+    await SettingsService.instance.setAudioDelayMs(0);
+    await SettingsService.instance.init();
+    expect(SettingsService.instance.audioDelayMs, 0);
+  });
+
+  test('sincronia A/V: valor fora do limite é clampado', () async {
+    await SettingsService.instance.init();
+    await SettingsService.instance.setAudioDelayMs(99999);
+    expect(SettingsService.instance.audioDelayMs, 2000);
+    await SettingsService.instance.setAudioDelayMs(0);
+  });
 }

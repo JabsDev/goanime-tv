@@ -10,6 +10,7 @@ import '../../core/anilist/anilist_service.dart';
 import '../../core/device/device_type.dart';
 import '../../core/constants/theme_constants.dart';
 import '../../core/storage/local_storage.dart';
+import '../../core/storage/settings_service.dart';
 import '../../core/sources/source_registry.dart';
 import '../../core/utils/device_codecs.dart';
 import '../../core/utils/quality_picker.dart';
@@ -39,7 +40,11 @@ class ExoDashPlayerScreen extends StatefulWidget {
   final List<CatalogEpisode> episodeList;
   final int episodeIndex;
   final List<VideoSource>? initialSources;
-  final int initialIndex;
+
+  /// Índice da qualidade escolhida explicitamente no diálogo. `null` = não
+  /// houve escolha (auto-next, card de legenda IA): o player aplica o teto do
+  /// modo lite (`kDefaultMaxQualityHeight`).
+  final int? initialIndex;
 
   const ExoDashPlayerScreen({
     super.key,
@@ -48,7 +53,7 @@ class ExoDashPlayerScreen extends StatefulWidget {
     required this.episodeList,
     required this.episodeIndex,
     this.initialSources,
-    this.initialIndex = 0,
+    this.initialIndex,
   });
 
   @override
@@ -130,7 +135,6 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
     });
     try {
       List<VideoSource> sources;
-      int startIndex = widget.initialIndex;
       if (widget.initialSources != null && !_forceReresolve) {
         sources = widget.initialSources!;
         debugPrint('[ExoDash] Using ${sources.length} pre-selected sources');
@@ -150,18 +154,19 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
         });
         return;
       }
-      if (startIndex >= sources.length) startIndex = 0;
-      // O índice explícito vindo do diálogo é remapeado para a ordem nova
-      // (por identidade; após re-resolve do retry, por qualidade+url — o
-      // retry repete a MESMA qualidade, nunca pula para outra sozinho).
-      final chosen = sources[startIndex];
+      // O índice explícito vindo do diálogo é remapeado para a ordem nova (por
+      // identidade; após re-resolve do retry, por qualidade+url — o retry
+      // repete a MESMA qualidade, nunca pula para outra sozinho). Sem escolha
+      // explícita, o modo lite aplica o teto de 720p.
       final ordered = sortBestFirst(sources);
-      var mapped = ordered.indexWhere((s) => identical(s, chosen));
-      mapped = mapped >= 0
-          ? mapped
-          : ordered.indexWhere(
-              (s) => s.quality == chosen.quality && s.url == chosen.url);
-      startIndex = mapped >= 0 ? mapped : 0;
+      final startIndex = resolveStartIndex(
+        ordered,
+        sources,
+        requested: widget.initialIndex,
+        maxHeight: SettingsService.instance.liteModeActive
+            ? kDefaultMaxQualityHeight
+            : null,
+      );
       setState(() => _sources = ordered);
       await _playSource(startIndex);
     } catch (e) {

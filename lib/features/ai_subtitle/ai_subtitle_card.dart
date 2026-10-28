@@ -38,6 +38,10 @@ class AiSubtitleCard extends StatefulWidget {
   final AnimeSource provider;
   final List<VideoSource> sources;
 
+  /// Índice da qualidade que o usuário escolheu no passo anterior. `null` =
+  /// sem escolha: o player aplica o teto do modo lite.
+  final int? initialIndex;
+
   const AiSubtitleCard({
     super.key,
     required this.anime,
@@ -46,6 +50,7 @@ class AiSubtitleCard extends StatefulWidget {
     required this.episodeList,
     required this.provider,
     required this.sources,
+    this.initialIndex,
   });
 
   @override
@@ -324,7 +329,7 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
             episodeIndex: widget.episodeIndex,
             episodeList: widget.episodeList,
             initialSources: withSub,
-            initialIndex: 0,
+            initialIndex: widget.initialIndex,
           )
         : PlayerScreen(
             anime: widget.anime,
@@ -332,7 +337,7 @@ class _AiSubtitleCardState extends State<AiSubtitleCard> {
             episodeIndex: widget.episodeIndex,
             episodeList: widget.episodeList,
             initialSources: withSub,
-            initialIndex: 0,
+            initialIndex: widget.initialIndex,
           );
     nav.push(MaterialPageRoute(builder: (_) => player));
   }

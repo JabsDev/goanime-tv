@@ -325,3 +325,35 @@ Medir banda real (`iperf3` na LAN, speedtest no aparelho). Abaixo de ~5–6 Mbps
 - Relatórios internos: `relatorio-animefire-qualidade-nao-carrega.md` (probe do manifesto AnimeFire: 480p ~2,1 / 720p ~3,6 / 1080p ~8,7 Mbps), `relatorio-animefire-revisao-critica.md` §4.1 (`dash-bitrate` inexistente), `plano-legendai-pc-remoto.md` (arquitetura de PC/HTTP já existente).
 
 > **Nota de método:** os números de bitrate vêm de probes de 10/09/2026 registrados nos relatórios; podem variar por episódio. As conclusões de hardware marcadas como "disputado" (AV1) devem ser confirmadas com o passo §5.2 neste aparelho específico.
+
+## Aplicado em 28/10/2026 — sincronia A/V no caminho mpv (D1, parcial)
+
+**Sintoma no aparelho (pós-debloat):** o episódio começa engasgado, estabiliza, e o **áudio fica adiantado** em relação ao vídeo.
+
+**Causa mais provável:** o decode/render não acompanha o relógio de áudio (`video-sync=audio`, default). O mpv vem com `framedrop=no` (o media_kit não muda isso), então o frame atrasado é **exibido mesmo assim** — o vídeo fica para trás do áudio em vez de descartar o frame. Segundo fator: o media_kit fixa `ao=opensles` (deprecado no Android 13, sem reporte de latência real).
+
+**Implementado**
+- `lib/core/player/av_sync.dart` (novo, lógica pura/testável) — antes de cada `open()`:
+  `video-sync=audio`, `framedrop=vo`, `ao=audiotrack,opensles` (Android; fallback mantém o comportamento antigo), `cache-on-disk=no` e, em modo lite, `demuxer-max-back-bytes=8 MiB` (o media_kit reserva 32 MB de cache "para trás").
+- `lib/features/player/player_screen.dart` — `_applyMpvTuning()` roda depois do `stop()` e antes do `open()` em `_playSource` (troca de qualidade/fonte recria o pipeline de áudio). Botão **A/V** no HUD: ◀ ▶ ajustam `audio-delay` em ±50 ms, Select reseta; o valor é calibração do **aparelho** e persiste.
+- `lib/core/storage/settings_service.dart` — `audioDelayMs` (clamp ±2 s, chave `settings_audio_delay_ms`).
+
+**Como testar no projetor**
+1. Abrir um episódio longo (>2 min) e comparar boca × voz nos primeiros 15 s e depois de 1 min.
+2. Se sobrar offset fixo, focar **A/V** e corrigir: ◀ se o áudio estiver **atrasado**, ▶ se estiver **adiantado** (positivo atrasa o áudio no mpv).
+3. Trocar de qualidade (1080p → 720p) e confirmar que o ajuste continua valendo (é reaplicado a cada `open()`).
+4. `adb logcat -s flutter | grep "\[Player\]"` mostra `falhou` para qualquer opção mpv que o libmpv recusar — se `ao=audiotrack` falhar no build do libmpv, o fallback `opensles` entra sozinho.
+
+**Não coberto:** o caminho **ExoPlayer** (AnimeFire) não expõe offset de sincronia pelo `video_player`; se o desvio aparecer só em AnimeFire, o ataque é outro (manifesto/proxy DASH, ver §3.3).
+
+## Aplicado em 28/10/2026 — qualidade padrão 720p em modo lite (C1)
+
+**Regra:** o teto vale só para o **padrão** (quando ninguém escolheu qualidade). Toda a lista continua visível e selecionável — quem quiser 1080p escolhe 1080p.
+
+- `lib/core/utils/quality_picker.dart` — `kDefaultMaxQualityHeight = 720`, `defaultQualityIndex()` (melhor qualidade **≤ 720**; se a fonte só oferece acima do teto, cai na **menor** disponível) e `resolveStartIndex()` (remapeia a escolha explícita; `null` = sem escolha → aplica o teto).
+- `lib/features/detail/detail_screen.dart` — o foco inicial do passo Qualidade vai para o padrão (selo **padrão** / **menor disponível** no item). O card de legenda IA passou a receber a qualidade escolhida (`initialIndex`).
+- `lib/features/player/player_screen.dart` / `exo_dash_player_screen.dart` — `initialIndex` virou `int?`: `null` (auto-next, card IA sem escolha) aplica o teto; índice explícito é respeitado **mesmo acima do teto**.
+
+**Fonte que só tem 1080p:** não há bloqueio nem transcodificação — o player abre a **menor** qualidade disponível (numa lista `2160p/1080p`, abre 1080p). O teto é preferência de consumo, não restrição de reprodução; a lista mostra todas as opções e o 1080p segue acessível.
+
+**Onde o teto NÃO se aplica:** troca manual de qualidade durante o episódio (é escolha explícita) e aparelho sem modo lite.
