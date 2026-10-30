@@ -85,6 +85,56 @@ void main() {
     expect(UpdateService.instance.pending?.tagName, 'v1.0.1+1000001');
   });
 
+  test('canal beta: oferece pré-release com APK', () async {
+    await UpdateService.instance.setChannel(UpdateChannel.beta);
+    UpdateService.clientOverride = MockClient((req) async {
+      if (req.url.path.endsWith('/releases/latest')) {
+        return okList(releaseJson('v1.0.0+1000000'));
+      }
+      return okList([
+        releaseJson('v1.0.1+1000001', pre: true),
+        releaseJson('v1.0.0+1000000'),
+      ]);
+    });
+    final r = await UpdateService.instance.check(manual: true);
+    expect(r, isTrue);
+    expect(UpdateService.instance.pending?.tagName, 'v1.0.1+1000001');
+    expect(UpdateService.instance.pending?.isPrerelease, isTrue);
+  });
+
+  test('canal stable: pré-release não é oferecida', () async {
+    UpdateService.clientOverride = MockClient((req) async {
+      if (req.url.path.endsWith('/releases/latest')) {
+        return okList(releaseJson('v1.0.0+1000000'));
+      }
+      return okList([
+        releaseJson('v1.0.1+1000001', pre: true),
+        releaseJson('v1.0.0+1000000'),
+      ]);
+    });
+    final r = await UpdateService.instance.check(manual: true);
+    expect(r, isFalse);
+    expect(UpdateService.instance.pending, isNull);
+    expect(UpdateService.instance.lastCheckNotice, contains('beta mais nova'));
+  });
+
+  test('canal persiste e troca limpa throttle/ignorado', () async {
+    UpdateService.clientOverride = MockClient(
+        (req) async => okList(releaseJson('v1.0.1+1000001')));
+    expect(await UpdateService.instance.check(manual: true), isTrue);
+    final rel = UpdateService.instance.pending!;
+    await UpdateService.instance.ignore(rel);
+    await UpdateService.instance.setChannel(UpdateChannel.beta);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('update_channel'), 'beta');
+    expect(prefs.getString('update_ignored_tag'), isNull);
+    expect(prefs.getInt('update_last_check_at'), isNull);
+
+    await UpdateService.instance.init();
+    expect(UpdateService.instance.channel, UpdateChannel.beta);
+  });
+
   test('auto: mesma versão → idle, sem update', () async {
     UpdateService.clientOverride =
         MockClient((req) async => okList(releaseJson('v1.0.0+1000000')));

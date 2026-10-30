@@ -15,6 +15,12 @@ import 'github_release_api.dart';
 import 'update_constants.dart';
 import 'version_compare.dart';
 
+/// Canal de atualização do aparelho.
+/// - [stable]: só releases promovidas (GitHub `/releases/latest` + lista sem
+///   pré-releases).
+/// - [beta]: inclui pré-releases com APK, para um aparelho de teste.
+enum UpdateChannel { stable, beta }
+
 enum UpdateState {
   idle,
   checking,
@@ -54,6 +60,7 @@ class UpdateService {
   static const _kLastCheckAt = 'update_last_check_at';
   static const _kIgnoredTag = 'update_ignored_tag';
   static const _kCheckOnLaunch = 'update_check_on_launch';
+  static const _kChannel = 'update_channel';
 
   final ValueNotifier<UpdateState> _state = ValueNotifier(UpdateState.idle);
   ValueListenable<UpdateState> get state => _state;
@@ -76,6 +83,7 @@ class UpdateService {
   int _installedBuild = 0;
   String _installedVersion = '1.0.0';
   bool _checkOnLaunch = true;
+  UpdateChannel _updateChannel = UpdateChannel.stable;
 
   ReleaseInfo? _pending;
   bool _cancelRequested = false;
@@ -89,6 +97,8 @@ class UpdateService {
   }
 
   bool get checkOnLaunch => _checkOnLaunch;
+  UpdateChannel get channel => _updateChannel;
+  bool get isBetaChannel => _updateChannel == UpdateChannel.beta;
 
   Future<void> init() async {
     try {
@@ -108,6 +118,9 @@ class UpdateService {
     _lastCheckAt = prefs.getInt(_kLastCheckAt);
     _ignoredTag = prefs.getString(_kIgnoredTag);
     _checkOnLaunch = prefs.getBool(_kCheckOnLaunch) ?? true;
+    _updateChannel = prefs.getString(_kChannel) == 'beta'
+        ? UpdateChannel.beta
+        : UpdateChannel.stable;
 
     await _cleanOrphans();
     debugPrint('[updater] installed=$installedVersionLabel');
@@ -142,6 +155,25 @@ class UpdateService {
     _checkOnLaunch = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kCheckOnLaunch, v);
+  }
+
+  /// Troca o canal e libera a próxima checagem na hora. O tag ignorado e o
+  /// throttle são do canal anterior; mantê-los faria o aparelho beta não ver
+  /// a pré-release ou o stable herdar um "ignorar" que não se aplica.
+  Future<void> setChannel(UpdateChannel c) async {
+    if (_updateChannel == c) return;
+    _updateChannel = c;
+    _ignoredTag = null;
+    _lastCheckAt = null;
+    _lastCheckNotice = null;
+    if (_state.value == UpdateState.updateAvailable) {
+      _pending = null;
+      _state.value = UpdateState.idle;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kChannel, c.name);
+    await prefs.remove(_kIgnoredTag);
+    await prefs.remove(_kLastCheckAt);
   }
 
   Future<Directory> _ensureUpdatesDir() async {
@@ -186,6 +218,10 @@ class UpdateService {
         ) <= 0) {
       return null;
     }
+    if (_updateChannel == UpdateChannel.stable && blocked.isPrerelease) {
+      return 'Existe uma versão beta mais nova. Ative o canal Beta nas '
+          'Configurações para instalá-la.';
+    }
     return 'Existe uma versão nova, mas ela ainda não está disponível '
         'para instalação. Tente novamente mais tarde.';
   }
@@ -209,7 +245,10 @@ class UpdateService {
     _state.value = UpdateState.checking;
     _errorMessage = null;
     try {
-      final res = await fetchLatestRelease(client: clientOverride);
+      final res = await fetchLatestRelease(
+        client: clientOverride,
+        includePrerelease: isBetaChannel,
+      );
       if (res.httpOk) {
         // Throttle só em checagem válida (D4): 403/429/erro de rede não
         // "trancam" o app por 24h.
@@ -460,6 +499,7 @@ class UpdateService {
 
   @visibleForTesting
   void debugReset() {
+    _updateChannel = UpdateChannel.stable;
     _ignoredTag = null;
     _lastCheckAt = null;
     _pending = null;

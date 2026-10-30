@@ -30,11 +30,17 @@ class ReleaseInfo {
   });
 
   /// Parse um objeto de release da API do GitHub. Null se a release não deve
-  /// ser considerada (pré/draft) ou não tem asset `.apk`.
-  static ReleaseInfo? tryParse(Map<String, dynamic> json) {
+  /// ser considerada (draft, pré-release fora do canal beta) ou não tem
+  /// asset `.apk`.
+  static ReleaseInfo? tryParse(
+    Map<String, dynamic> json, {
+    bool allowPrerelease = false,
+  }) {
     final tagName = json['tag_name'] as String?;
     if (tagName == null || tagName.isEmpty) return null;
-    if (json['prerelease'] == true || json['draft'] == true) return null;
+    if (json['draft'] == true) return null;
+    final isPrerelease = json['prerelease'] == true;
+    if (isPrerelease && !allowPrerelease) return null;
 
     Map<String, dynamic>? apkAsset;
     final assets = (json['assets'] as List?)?.cast<Map<String, dynamic>>();
@@ -88,12 +94,17 @@ class ReleaseInfo {
 /// NOTA: viola deliberadamente o invariante de [ReleaseInfo] ("só releases
 /// instaláveis") — por isso este tipo só circula em `blockedNewer` e jamais
 /// é passado a `downloadAndInstall`/`pending`.
-ReleaseInfo? _blockedFrom(Map<String, dynamic> json) {
+ReleaseInfo? _blockedFrom(
+  Map<String, dynamic> json, {
+  bool allowPrerelease = false,
+}) {
   final tagName = json['tag_name'] as String?;
   if (tagName == null || tagName.isEmpty) return null;
   if (json['draft'] == true) return null;
-  // Se é instalável, não é "bloqueado".
-  if (ReleaseInfo.tryParse(json) != null) return null;
+  // Se é instalável no canal atual, não é "bloqueado".
+  if (ReleaseInfo.tryParse(json, allowPrerelease: allowPrerelease) != null) {
+    return null;
+  }
   final prerelease = json['prerelease'] == true;
   return ReleaseInfo(
     tagName: tagName,
@@ -133,10 +144,17 @@ class ReleaseCheckResult {
 ///
 /// Então: consulta os dois, junta os candidatos instaláveis e escolhe pelo
 /// **maior build number** (`vX.Y.Z+N`), não pela ordem do JSON.
-/// `prerelease`/`draft` sem APK vão para `blockedNewer` (só feedback).
+/// Releases não instaláveis no canal atual (draft sempre; prerelease fora do
+/// beta; ou qualquer release sem APK) vão para `blockedNewer` (só feedback).
+///
+/// [includePrerelease] = true (canal beta) aceita pré-releases com APK.
+/// Drafts e releases sem APK continuam fora em qualquer canal.
 ///
 /// Nunca lança exceção: erros de rede/HTTP são "sem update" silencioso.
-Future<ReleaseCheckResult> fetchLatestRelease({http.Client? client}) async {
+Future<ReleaseCheckResult> fetchLatestRelease({
+  http.Client? client,
+  bool includePrerelease = false,
+}) async {
   final c = client ?? http.Client();
   try {
     ReleaseInfo? blocked;
@@ -152,11 +170,17 @@ Future<ReleaseCheckResult> fetchLatestRelease({http.Client? client}) async {
       anyOk = true;
       if (latest.$1 is Map<String, dynamic>) {
         final latestRaw = latest.$1 as Map<String, dynamic>;
-        final info = ReleaseInfo.tryParse(latestRaw);
+        final info = ReleaseInfo.tryParse(
+          latestRaw,
+          allowPrerelease: includePrerelease,
+        );
         if (info != null) {
           candidates.add(info);
         } else {
-          blocked ??= _blockedFrom(latestRaw);
+          blocked ??= _blockedFrom(
+            latestRaw,
+            allowPrerelease: includePrerelease,
+          );
         }
       } else if (latest.$1 == null) {
         // 404: repositório sem releases — checagem válida e silenciosa.
@@ -168,12 +192,12 @@ Future<ReleaseCheckResult> fetchLatestRelease({http.Client? client}) async {
     if (list.$2 && list.$1 is List) {
       anyOk = true;
       for (final r in (list.$1 as List).cast<Map<String, dynamic>>()) {
-        final info = ReleaseInfo.tryParse(r);
+        final info = ReleaseInfo.tryParse(r, allowPrerelease: includePrerelease);
         if (info != null) {
           candidates.add(info);
           continue;
         }
-        blocked ??= _blockedFrom(r);
+        blocked ??= _blockedFrom(r, allowPrerelease: includePrerelease);
       }
     }
 

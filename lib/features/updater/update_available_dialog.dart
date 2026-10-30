@@ -55,6 +55,26 @@ class UpdateAvailableDialog extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (release.isPrerelease) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: ThemeConstants.primary.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: ThemeConstants.primary),
+                    ),
+                    child: const Text(
+                      'BETA',
+                      style: TextStyle(
+                        color: ThemeConstants.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 16),

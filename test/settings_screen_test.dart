@@ -53,19 +53,24 @@ void main() {
     UpdateService.instance.debugReset();
   });
 
-  Future<void> pumpSettings(WidgetTester tester) async {
+  Future<void> pumpSettings(
+    WidgetTester tester, {
+    bool scrollToUpdate = true,
+  }) async {
     tester.view.physicalSize = const Size(900, 1800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
     await tester.pump();
-    // Garante que a row "Verificar agora" está dentro da viewport/construída.
-    await tester.scrollUntilVisible(
-      find.text('Verificar agora'),
-      120,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
+    if (scrollToUpdate) {
+      // Garante que a row "Verificar agora" está dentro da viewport/construída.
+      await tester.scrollUntilVisible(
+        find.text('Verificar agora'),
+        120,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+    }
   }
 
   testWidgets('Verificar agora durante checking mostra feedback', (tester) async {
@@ -132,7 +137,7 @@ void main() {
 
   testWidgets('legenda IA: 2 tiers de voz e 2 de tradução, sem auditoria',
       (tester) async {
-    await pumpSettings(tester);
+    await pumpSettings(tester, scrollToUpdate: false);
     // Desce até a seção Legenda IA e verifica as linhas unificadas.
     await tester.scrollUntilVisible(
       find.text('Voz Whisper anime leve'),

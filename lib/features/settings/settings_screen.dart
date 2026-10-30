@@ -350,6 +350,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     const SizedBox(height: 24),
+                    const Text(
+                      'Canal de atualização',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: ThemeConstants.white,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _ModeOption(
+                      label: 'Estável (stable)',
+                      description: 'Só releases promovidas. Recomendado para '
+                          'o aparelho do dia a dia.',
+                      selected: UpdateService.instance.channel ==
+                          UpdateChannel.stable,
+                      onTap: () {
+                        UpdateService.instance
+                            .setChannel(UpdateChannel.stable)
+                            .then((_) {
+                          if (mounted) setState(() {});
+                        });
+                      },
+                    ),
+                    _ModeOption(
+                      label: 'Beta (pre-release)',
+                      description: 'Inclui pré-releases. Use no aparelho de '
+                          'teste; pode conter bugs.',
+                      selected: UpdateService.instance.channel ==
+                          UpdateChannel.beta,
+                      onTap: () {
+                        UpdateService.instance
+                            .setChannel(UpdateChannel.beta)
+                            .then((_) {
+                          if (mounted) setState(() {});
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
                     _UpdateToggle(
                       on: UpdateService.instance.checkOnLaunch,
                       onChanged: (v) =>
@@ -793,11 +831,16 @@ class _CheckNowRowState extends State<_CheckNowRow> {
                   color: ThemeConstants.primary,
                 ),
               )
-            : Text(
-                'Versão instalada: ${UpdateService.instance.installedVersionLabel}',
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: ThemeConstants.textMuted,
+            : Expanded(
+                child: Text(
+                  'Versão instalada: '
+                  '${UpdateService.instance.installedVersionLabel}'
+                  ' · ${UpdateService.instance.isBetaChannel ? 'beta' : 'stable'}',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    color: ThemeConstants.textMuted,
+                  ),
                 ),
               ),
       ],

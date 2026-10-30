@@ -132,6 +132,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   late final FocusNode _playNode = FocusNode();
   late final FocusNode _forwardNode = FocusNode();
   late final FocusNode _skipNode = FocusNode();
+  late final FocusNode _nextNode = FocusNode();
+  late final FocusNode _cancelNextNode = FocusNode();
   List<FocusNode> get _controlNodes => [
         _backNode,
         _qualityNode,
@@ -143,6 +145,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         _playNode,
         _forwardNode,
         _skipNode,
+        _nextNode,
+        _cancelNextNode,
       ];
   bool get _aControlIsFocused =>
       _controlNodes.any((n) => n.hasPrimaryFocus);
@@ -386,11 +390,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       // cada open (troca de qualidade/fonte recria o pipeline de áudio).
       await _applyMpvTuning();
       // Fase 3: streams adaptativas (HLS/DASH) — mpv parte de uma bitrate
-      // conservadora; forçamos a melhor disponível. No-op para mp4 direto.
+      // conservadora. No modo lite NÃO forçamos a melhor: `highest` escolhe
+      // a variante 1080p e joga bitrate/decodificação no aparelho fraco.
+      // No HLS, deixar `auto` permite o ABR do mpv acompanhar a rede.
       final native = _player.platform;
       if (native is NativePlayer) {
-        await native.setProperty('hls-bitrate', 'highest');
-        await native.setProperty('dash-bitrate', 'highest');
+        final lite = SettingsService.instance.liteModeActive;
+        await native.setProperty('hls-bitrate', lite ? 'auto' : 'highest');
+        if (!lite) await native.setProperty('dash-bitrate', 'highest');
       }
       final headers = <String, String>{};
       if (src.headers.isNotEmpty) headers.addAll(src.headers);
@@ -452,8 +459,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       setState(() => _isLoading = false);
       _showControls();
       _restoreProgress();
-      // busca skip com estimate (AniList duration) já, antes do ready
-      _fetchSkips();
+      // busca skip com estimate (AniList duration) já, antes do ready.
+      // Em modo lite espera o vídeo estabilizar: a chamada AniList+AniSkip
+      // disputa rede com o buffer inicial do mpv.
+      if (!SettingsService.instance.liteModeActive) _fetchSkips();
     } catch (e) {
       _loadTimeout?.cancel();
       debugPrint('[Player] Error source $index: $e');
@@ -515,13 +524,13 @@ class _PlayerScreenState extends State<PlayerScreen>
         // tracker via eventos de posição, não por tentativa única aqui.
         _resumeSeek.markVideoReady();
         _showControls();
-        _fetchSkips();
+        _scheduleFetchSkips();
         debugPrint('[Player] Video is ready, duration: ${_durationSec}s');
         // ignore: discarded_futures
         _logVideoPipeline();
       } else if (_videoReady && _skipFailedWithEstimate) {
         // retry com duração precisa se primeira busca usou estimate e falhou
-        _fetchSkips();
+        _scheduleFetchSkips();
       }
     });
     _completedSub = _player.stream.completed.listen((_) {
@@ -616,6 +625,18 @@ class _PlayerScreenState extends State<PlayerScreen>
         .resolveProvidersForEpisode(widget.anime, next, only: {widget.provider})
         .then((_) {}, onError: (e) =>
             debugPrint('[Player] Prefetch next ep $next failed: $e'));
+  }
+
+  /// Em modo lite, adia AniSkip 3 s depois do ready para não competir com o
+  /// buffer inicial (AniList enrich + HTTP do AniSkip).
+  void _scheduleFetchSkips() {
+    if (!SettingsService.instance.liteModeActive) {
+      _fetchSkips();
+      return;
+    }
+    Future<void>.delayed(const Duration(seconds: 3), () {
+      if (mounted) _fetchSkips();
+    });
   }
 
   Future<void> _fetchSkips() async {
@@ -829,6 +850,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       _showNextOverlay = true;
       _countdownSec = 10;
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _showNextOverlay) _nextNode.requestFocus();
+    });
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) { t.cancel(); return; }
       setState(() => _countdownSec--);
@@ -859,6 +883,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _cancelAutoNext() {
     _countdownTimer?.cancel();
     setState(() => _showNextOverlay = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _controlsVisible) _playNode.requestFocus();
+    });
   }
 
   void _togglePlayPause() {
@@ -923,9 +950,13 @@ class _PlayerScreenState extends State<PlayerScreen>
         _togglePlayPause();
         return KeyEventResult.handled;
       case LogicalKeyboardKey.arrowUp:
-        // let focus traversal handle it
-        return KeyEventResult.ignored;
       case LogicalKeyboardKey.arrowDown:
+        // Sem nenhum controle focado, o D-pad não tinha como entrar no HUD.
+        // Dá o foco ao play; daí left/right/up/down navegam normalmente.
+        if (!_aControlIsFocused) {
+          _playNode.requestFocus();
+          return KeyEventResult.handled;
+        }
         return KeyEventResult.ignored;
       default:
         return KeyEventResult.ignored;
@@ -1102,7 +1133,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   Widget _buildControlsOverlay() {
     return Positioned.fill(
       child: Focus(
-        autofocus: true,
+        // O overlay não deve capturar o foco: ele cobre a tela inteira e
+        // prendia o D-pad antes de chegar aos botões (A/V, voltar etc.).
+        canRequestFocus: false,
+        skipTraversal: true,
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -1344,115 +1378,121 @@ class _PlayerScreenState extends State<PlayerScreen>
                   ),
                 ),
               const Spacer(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _controlButton(
-                    node: _replayNode,
-                    onTap: () => _seekRelative(-10),
-                    child: Semantics(
-                      button: true,
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => _seekRelative(-10),
-                          child: Container(
-                            padding: const EdgeInsets.all(12),
-                            child: const Icon(Icons.replay_10,
-                                color: Colors.white70, size: 48),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  _controlButton(
-                    node: _playNode,
-                    onTap: _togglePlayPause,
-                    child: Semantics(
-                      button: true,
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: _togglePlayPause,
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            child: Icon(
-                              _isPlaying
-                                  ? Icons.pause_circle_filled
-                                  : Icons.play_circle_filled,
-                              color: Colors.white70,
-                              size: 72,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _controlButton(
+                        node: _replayNode,
+                        onTap: () => _seekRelative(-10),
+                        child: Semantics(
+                          button: true,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () => _seekRelative(-10),
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                child: const Icon(Icons.replay_10,
+                                    color: Colors.white70, size: 48),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  _controlButton(
-                    node: _forwardNode,
-                    onTap: () => _seekRelative(10),
-                    child: Semantics(
-                      button: true,
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => _seekRelative(10),
-                          child: Container(
-                            padding: const EdgeInsets.all(12),
-                            child: const Icon(Icons.forward_10,
-                                color: Colors.white70, size: 48),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 24),
-                  // Sincronia A/V (calibração do aparelho): ◀ ▶ ±50 ms,
-                  // Select reseta. Fica no HUD porque o ajuste precisa ser
-                  // feito olhando o vídeo (boca × voz).
-                  _controlButton(
-                    node: _avNode,
-                    onTap: () => _setAudioDelay(0),
-                    onKey: _onAvKey,
-                    child: Semantics(
-                      button: true,
-                      label: 'Sincronia de áudio e vídeo',
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => _setAudioDelay(0),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: _audioDelayMs == 0
-                                  ? Colors.black.withValues(alpha: 0.5)
-                                  : ThemeConstants.primary
-                                      .withValues(alpha: 0.7),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.sync_alt,
-                                    color: Colors.white, size: 20),
-                                const SizedBox(width: 6),
-                                Text(
-                                  AvSync.label(_audioDelayMs),
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 13),
+                      const SizedBox(width: 16),
+                      _controlButton(
+                        node: _playNode,
+                        onTap: _togglePlayPause,
+                        child: Semantics(
+                          button: true,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: _togglePlayPause,
+                              child: Container(
+                                padding: const EdgeInsets.all(16),
+                                child: Icon(
+                                  _isPlaying
+                                      ? Icons.pause_circle_filled
+                                      : Icons.play_circle_filled,
+                                  color: Colors.white70,
+                                  size: 72,
                                 ),
-                              ],
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
+                      const SizedBox(width: 16),
+                      _controlButton(
+                        node: _forwardNode,
+                        onTap: () => _seekRelative(10),
+                        child: Semantics(
+                          button: true,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () => _seekRelative(10),
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                child: const Icon(Icons.forward_10,
+                                    color: Colors.white70, size: 48),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 24),
+                      // Sincronia A/V (calibração do aparelho): ◀ ▶ ±50 ms,
+                      // Select reseta. Fica no HUD porque o ajuste precisa ser
+                      // feito olhando o vídeo (boca × voz).
+                      _controlButton(
+                        node: _avNode,
+                        onTap: () => _setAudioDelay(0),
+                        onKey: _onAvKey,
+                        child: Semantics(
+                          button: true,
+                          label: 'Sincronia de áudio e vídeo',
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () => _setAudioDelay(0),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: _audioDelayMs == 0
+                                      ? Colors.black.withValues(alpha: 0.5)
+                                      : ThemeConstants.primary
+                                          .withValues(alpha: 0.7),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.sync_alt,
+                                        color: Colors.white, size: 20),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      AvSync.label(_audioDelayMs),
+                                      style: const TextStyle(
+                                          color: Colors.white, fontSize: 13),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
               if (_avNode.hasFocus)
                 Padding(
@@ -1742,93 +1782,94 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Widget _buildNextOverlay() {
-    return Positioned(
-      bottom: 80,
-      right: 24,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.85),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: ThemeConstants.primary.withValues(alpha: 0.5)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Próximo episódio',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text('Episódio ${widget.episodeIndex + 2}',
-                style: const TextStyle(
-                    color: ThemeConstants.primary, fontSize: 14)),
-            const SizedBox(height: 8),
-            Text('Em $_countdownSec segundos...',
-                style: const TextStyle(
-                    color: ThemeConstants.textSecondary, fontSize: 14)),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // ponytail: Focus + FocusKeyHandler — mesmo race do botão
-                // "Tentar novamente" (Select seguido de ArrowRight ~7ms no
-                // FireTV remote; InkWell.onTap perde). Autofocus puxa o foco
-                // pro "Pular" quando o overlay aparece.
-                Focus(
-                  autofocus: true,
-                  onKeyEvent: (node, event) =>
-                      FocusKeyHandler.handle(node, event, _playNextEpisode),
-                  child: Semantics(
-                    button: true,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: _playNextEpisode,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: ThemeConstants.primary,
-                            borderRadius: BorderRadius.circular(8),
+    return Positioned.fill(
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: ThemeConstants.primary.withValues(alpha: 0.5)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Próximo episódio',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text('Episódio ${widget.episodeIndex + 2}',
+                  style: const TextStyle(
+                      color: ThemeConstants.primary, fontSize: 14)),
+              const SizedBox(height: 8),
+              Text('Em $_countdownSec segundos...',
+                  style: const TextStyle(
+                      color: ThemeConstants.textSecondary, fontSize: 14)),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ponytail: Focus + FocusKeyHandler — mesmo race do botão
+                  // "Tentar novamente" (Select seguido de ArrowRight ~7ms no
+                  // FireTV remote; InkWell.onTap perde). O requestFocus pós-frame
+                  // puxa o foco pro "Pular" quando o overlay aparece.
+                  Focus(
+                    focusNode: _nextNode,
+                    onKeyEvent: (node, event) =>
+                        FocusKeyHandler.handle(node, event, _playNextEpisode),
+                    child: Semantics(
+                      button: true,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: _playNextEpisode,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: ThemeConstants.primary,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text('Pular',
+                                style: TextStyle(
+                                    color: Colors.white, fontSize: 14)),
                           ),
-                          child: const Text('Pular',
-                              style: TextStyle(
-                                  color: Colors.white, fontSize: 14)),
                         ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Focus(
-                  onKeyEvent: (node, event) =>
-                      FocusKeyHandler.handle(node, event, _cancelAutoNext),
-                  child: Semantics(
-                    button: true,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: _cancelAutoNext,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: ThemeConstants.surfaceLight,
-                            borderRadius: BorderRadius.circular(8),
+                  const SizedBox(width: 12),
+                  Focus(
+                    focusNode: _cancelNextNode,
+                    onKeyEvent: (node, event) =>
+                        FocusKeyHandler.handle(node, event, _cancelAutoNext),
+                    child: Semantics(
+                      button: true,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: _cancelAutoNext,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: ThemeConstants.surfaceLight,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text('Cancelar',
+                                style: TextStyle(
+                                    color: Colors.white, fontSize: 14)),
                           ),
-                          child: const Text('Cancelar',
-                              style: TextStyle(
-                                  color: Colors.white, fontSize: 14)),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

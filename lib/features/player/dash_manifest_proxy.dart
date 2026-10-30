@@ -38,6 +38,11 @@ class DashManifestProxy {
   DashManifestProxy({http.Client? client}) : _client = client;
 
   final http.Client? _client;
+  // Client persistente: HLS busca dezenas de segmentos; criar um HttpClient
+  // por segmento refazia DNS/TLS e abria conexão nova a cada 2-6 s.
+  http.Client? _ownedClient;
+
+  http.Client get _httpClient => _client ?? (_ownedClient ??= http.Client());
   HttpServer? _server;
   final _docs = <String, String>{};
   final _upstream = <String, _Upstream>{};
@@ -62,9 +67,7 @@ class DashManifestProxy {
     Map<String, String> headers = const {},
   }) async {
     final uri = Uri.parse(manifestUrl);
-    final res = _client != null
-        ? await _client.get(uri, headers: headers)
-        : await http.get(uri, headers: headers);
+    final res = await _httpClient.get(uri, headers: headers);
     if (res.statusCode != 200) {
       throw HttpException('Manifest fetch failed: ${res.statusCode}');
     }
@@ -140,10 +143,44 @@ class DashManifestProxy {
 
   Future<http.Response> _fetchUpstream(_Upstream up) {
     final uri = Uri.parse(up.url);
-    final fut = _client != null
-        ? _client.get(uri, headers: up.headers)
-        : http.get(uri, headers: up.headers);
-    return fut.timeout(const Duration(seconds: 20));
+    return _httpClient
+        .get(uri, headers: up.headers)
+        .timeout(const Duration(seconds: 20));
+  }
+
+  /// Repassa um segmento HLS do CDN para o player em streaming, mantendo o
+  /// content-type/length quando disponíveis. Fecha o client temporário no fim.
+  Future<void> _pipeUpstreamSegment(HttpRequest req, _Upstream up) async {
+    final client = _httpClient;
+    try {
+      final upstreamReq = http.Request('GET', Uri.parse(up.url));
+      upstreamReq.headers.addAll(up.headers);
+      final res = await client
+          .send(upstreamReq)
+          .timeout(const Duration(seconds: 20));
+      if (res.statusCode != 200) {
+        req.response.statusCode = HttpStatus.badGateway;
+        await res.stream.drain<void>();
+        await req.response.close();
+        return;
+      }
+      final ct = res.headers['content-type'];
+      if (ct != null) {
+        try {
+          req.response.headers.contentType = ContentType.parse(ct);
+        } catch (_) {}
+      }
+      final len = res.contentLength;
+      if (len != null) req.response.contentLength = len;
+      await req.response.addStream(res.stream);
+      await req.response.close();
+    } catch (e) {
+      debugPrint('[DashProxy] segment stream failed ${up.url}: $e');
+      try {
+        req.response.statusCode = HttpStatus.badGateway;
+        await req.response.close();
+      } catch (_) {}
+    }
   }
 
   Future<HttpServer> _serve() async {
@@ -163,21 +200,21 @@ class DashManifestProxy {
           await req.response.close();
           return;
         }
-        http.Response fetched;
-        try {
-          fetched = await _fetchUpstream(up);
-        } catch (e) {
-          debugPrint('[DashProxy] upstream fetch failed ${up.url}: $e');
-          req.response.statusCode = HttpStatus.badGateway;
-          await req.response.close();
-          return;
-        }
-        if (fetched.statusCode != 200) {
-          req.response.statusCode = HttpStatus.badGateway;
-          await req.response.close();
-          return;
-        }
         if (up.isVariant) {
+          http.Response fetched;
+          try {
+            fetched = await _fetchUpstream(up);
+          } catch (e) {
+            debugPrint('[DashProxy] upstream fetch failed ${up.url}: $e');
+            req.response.statusCode = HttpStatus.badGateway;
+            await req.response.close();
+            return;
+          }
+          if (fetched.statusCode != 200) {
+            req.response.statusCode = HttpStatus.badGateway;
+            await req.response.close();
+            return;
+          }
           // Sub-playlist HLS: absolutiza contra o CDN e troca os segmentos
           // por loopback (full-chain), cacheando o resultado.
           final tag = _tagOf(req.uri.path);
@@ -190,17 +227,10 @@ class DashManifestProxy {
           await _serveText(req, sub);
           return;
         }
-        // Segmento: repassa os bytes com o content-type do upstream.
-        final bytes = fetched.bodyBytes;
-        final ct = fetched.headers['content-type'];
-        if (ct != null) {
-          try {
-            req.response.headers.contentType = ContentType.parse(ct);
-          } catch (_) {}
-        }
-        req.response.contentLength = bytes.length;
-        req.response.add(bytes);
-        await req.response.close();
+        // Segmento: repassa em streaming, sem bufferizar o arquivo inteiro
+        // no Dart. Antes cada segmento virava um http.Response + Uint8List,
+        // cópia/GC competindo com o decode no aparelho fraco.
+        await _pipeUpstreamSegment(req, up);
       } catch (e) {
         debugPrint('[DashProxy] serve error: $e');
         try {
@@ -239,6 +269,8 @@ class DashManifestProxy {
   Future<void> close() async {
     _docs.clear();
     _upstream.clear();
+    _ownedClient?.close();
+    _ownedClient = null;
     try {
       await _server?.close(force: true);
     } catch (_) {}

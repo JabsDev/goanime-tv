@@ -7,6 +7,8 @@ import '../../core/anilist/anilist_service.dart';
 import '../../core/navigation/route_observer.dart';
 import '../../core/subtitles/hls_subtitle_probe.dart';
 import '../../core/subtitles/subtitle_store.dart';
+import '../../core/subtitles/legendalivre/legendalivre_client.dart';
+import '../../core/subtitles/legendalivre/legendalivre_subtitle_service.dart';
 import '../../data/models/anime.dart';
 import '../../data/models/episode.dart';
 import '../../data/repositories/anime_repository.dart';
@@ -1205,6 +1207,10 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   /// completa dentro do picker, estudo §3.2).
   bool _aiStepOpen = false;
 
+  /// Busca de legenda existente (LegendaLivre/getsubtitle) em andamento.
+  bool _legendaLivreBusy = false;
+  String? _legendaLivreMessage;
+
   /// Latency (ms) per resolved provider. Absent = still measuring; -1 = timeout.
   final Map<AnimeSource, int> _pings = {};
 
@@ -1924,6 +1930,68 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
     );
   }
 
+  /// Busca uma legenda existente no serviço público do LegendaLivre
+  /// (getsubtitle.com). Sem chave de acesso: o hash do vídeo é calculado
+  /// via Range requests e enviado ao serviço. Funciona melhor com MP4
+  /// direto; em HLS o hash não representa o vídeo.
+  Future<void> _downloadLegendaLivre(List<VideoSource> sources) async {
+    final idx = _selectedQualityIdx;
+    if (idx == null || idx >= sources.length || _legendaLivreBusy) return;
+    final src = sources[idx];
+    setState(() {
+      _legendaLivreBusy = true;
+      _legendaLivreMessage = 'Buscando legenda...';
+    });
+    LegendaLivreResult result;
+    try {
+      result = await LegendaLivreSubtitleService()
+          .fetchBest(
+            videoUrl: src.url,
+            langCode: LegendaLivreClient.langPtBr,
+            headers: src.headers,
+          )
+          .timeout(const Duration(seconds: 45));
+    } catch (_) {
+      result = const LegendaLivreResult(status: LegendaLivreStatus.readError);
+    }
+    if (!mounted) return;
+    if (result.status == LegendaLivreStatus.found && result.path != null) {
+      final sub = SubtitleRef(
+        label: 'PT-BR (LegendaLivre)',
+        lang: 'pt',
+        uri: result.path!,
+      );
+      final withSub = sources.map((s) => s.withSubtitle(sub)).toList();
+      setState(() {
+        _legendaLivreBusy = false;
+        _legendaLivreMessage = null;
+      });
+      _navigateToPlayer(_selectedProvider!, idx, visibleSources: withSub);
+      return;
+    }
+    setState(() {
+      _legendaLivreBusy = false;
+      _legendaLivreMessage = _legendaLivreStatusMessage(result.status);
+    });
+  }
+
+  static String _legendaLivreStatusMessage(LegendaLivreStatus status) {
+    switch (status) {
+      case LegendaLivreStatus.found:
+        return 'Legenda encontrada.';
+      case LegendaLivreStatus.notFound:
+        return 'Nenhuma legenda encontrada para este vídeo.';
+      case LegendaLivreStatus.readError:
+        return 'Não foi possível ler o vídeo (HLS ou sem suporte a Range).';
+      case LegendaLivreStatus.listError:
+        return 'Serviço de legendas indisponível. Tente de novo.';
+      case LegendaLivreStatus.downloadError:
+        return 'Falha ao baixar a legenda. Tente de novo.';
+      case LegendaLivreStatus.saveError:
+        return 'Falha ao salvar a legenda no aparelho.';
+    }
+  }
+
   /// Passo 4 — Legenda (só fonte japonesa): "Sem Legenda" toca direto;
   /// "Legendado por AI" abre o card inline (nada baixa sem toque explícito).
   Widget _buildSubtitleStep(List<VideoSource> sources) {
@@ -1942,6 +2010,21 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
             autofocus: !_aiStepOpen,
             onTap: () => _navigateToPlayer(_selectedProvider!, idx,
                 visibleSources: visible),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: _QualityItem(
+            quality: _legendaLivreBusy
+                ? 'Buscando legenda...'
+                : 'Baixar legenda (LegendaLivre)',
+            hint: _legendaLivreMessage,
+            onTap: _legendaLivreBusy
+                ? () {}
+                : () {
+                    final visible = _visibleSources(sources);
+                    _downloadLegendaLivre(visible);
+                  },
           ),
         ),
         Padding(

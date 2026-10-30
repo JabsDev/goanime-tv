@@ -80,6 +80,10 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
   bool _controlsVisible = true;
   double _positionSec = 0;
   double _durationSec = 0;
+  // Progresso em ValueNotifier: o poll de 500 ms atualizava a tela inteira
+  // (gradiente + overlay 2x/s). Agora só a subárvore da barra reconstruói.
+  final ValueNotifier<double> _positionVN = ValueNotifier<double>(0);
+  final ValueNotifier<double> _durationVN = ValueNotifier<double>(0);
   bool _videoReady = false;
   bool _restoreAttempted = false;
   bool _anilistPushedForThisEp = false;
@@ -99,8 +103,17 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
   late final FocusNode _replayNode = FocusNode();
   late final FocusNode _playNode = FocusNode();
   late final FocusNode _forwardNode = FocusNode();
-  List<FocusNode> get _controlNodes =>
-      [_backNode, _qualityNode, _replayNode, _playNode, _forwardNode];
+  late final FocusNode _nextNode = FocusNode();
+  late final FocusNode _cancelNextNode = FocusNode();
+  List<FocusNode> get _controlNodes => [
+        _backNode,
+        _qualityNode,
+        _replayNode,
+        _playNode,
+        _forwardNode,
+        _nextNode,
+        _cancelNextNode,
+      ];
   bool get _aControlIsFocused =>
       _controlNodes.any((n) => n.hasPrimaryFocus);
 
@@ -193,6 +206,8 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       _restoreAttempted = false;
       _positionSec = 0;
       _durationSec = 0;
+      _positionVN.value = 0;
+      _durationVN.value = 0;
       _subLabel = null;
       _subIsAI = false;
     });
@@ -240,6 +255,7 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       if (!mounted) return;
       final durMs = controller.value.duration.inMilliseconds;
       _durationSec = durMs / 1000.0;
+      _durationVN.value = _durationSec;
       _restoreProgress();
       await controller.play();
       _loadTimeout?.cancel();
@@ -251,7 +267,12 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       });
       _startPolling();
       _showControls();
-      _prefetchNextEpisode();
+      // Em modo lite o prefetch espera os últimos ~2 min do episódio:
+      // resolver 4 fontes no início rouba CPU/rede do buffer do ExoPlayer.
+      if (!SettingsService.instance.liteModeActive) {
+        _prefetchStarted = true;
+        _prefetchNextEpisode();
+      }
       debugPrint('[ExoDash] Playing ${src.quality}, duration=${_durationSec}s');
     } catch (e) {
       _loadTimeout?.cancel();
@@ -332,18 +353,24 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       }
       final pos = c.value.position.inMilliseconds / 1000.0;
       final dur = c.value.duration.inMilliseconds / 1000.0;
-      setState(() {
-        _positionSec = pos;
-        _durationSec = dur;
+      _positionSec = pos;
+      _durationSec = dur;
+      _positionVN.value = pos;
+      _durationVN.value = dur;
+      var needsRebuild = false;
+      if (_isPlaying != c.value.isPlaying) {
         _isPlaying = c.value.isPlaying;
-        if (dur >= 10 && !_videoReady) {
-          _videoReady = true;
-          _loadTimeout?.cancel();
-          _prefetchNextEpisode();
-        }
-      });
+        needsRebuild = true;
+      }
+      if (dur >= 10 && !_videoReady) {
+        _videoReady = true;
+        _loadTimeout?.cancel();
+        needsRebuild = true;
+      }
+      if (needsRebuild) setState(() {});
       if (_videoReady) {
         _saveProgress();
+        _maybePrefetchNext();
         if (dur > 10 && pos / dur > 0.8) _triggerAutoNext();
       }
     });
@@ -424,6 +451,17 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
         .catchError((e) => debugPrint('[ExoDash] AniList push error: $e'));
   }
 
+  bool _prefetchStarted = false;
+
+  /// Prefetch só nos últimos ~2 min e só do provedor atual. No modo lite,
+  /// evita o fan-out de fontes em cima do buffer do player no início.
+  void _maybePrefetchNext() {
+    if (_prefetchStarted || _durationSec < 10) return;
+    if (_durationSec - _positionSec > 120) return;
+    _prefetchStarted = true;
+    _prefetchNextEpisode();
+  }
+
   void _prefetchNextEpisode() {
     if (widget.episodeIndex >= widget.episodeList.length - 1) return;
     final next = widget.episodeIndex + 2;
@@ -439,6 +477,9 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
     setState(() {
       _showNextOverlay = true;
       _countdownSec = 10;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _showNextOverlay) _nextNode.requestFocus();
     });
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) {
@@ -516,6 +557,14 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
         if (_aControlIsFocused) return KeyEventResult.ignored;
         _seekRelative(10);
         return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowUp:
+      case LogicalKeyboardKey.arrowDown:
+        // Sem controle focado o D-pad não entrava no HUD; dá o foco ao play.
+        if (!_aControlIsFocused) {
+          _playNode.requestFocus();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
       case LogicalKeyboardKey.select:
       case LogicalKeyboardKey.enter:
       case LogicalKeyboardKey.mediaPlayPause:
@@ -631,6 +680,8 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
     for (final n in _controlNodes) {
       n.dispose();
     }
+    _positionVN.dispose();
+    _durationVN.dispose();
     if (_videoReady && _durationSec >= 10) _writeProgress();
     _dashProxy.close();
     _disposeController();
@@ -964,24 +1015,41 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      Text(_formatTime(_positionSec),
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 14)),
-                      const Spacer(),
-                      Text(_formatTime(_durationSec),
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 14)),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  LinearProgressIndicator(
-                    value: _durationSec > 0 ? _positionSec / _durationSec : 0,
-                    backgroundColor: Colors.white24,
-                    valueColor: const AlwaysStoppedAnimation(
-                        ThemeConstants.primary),
-                    minHeight: 6,
+                  ValueListenableBuilder<double>(
+                    valueListenable: _positionVN,
+                    builder: (context, pos, _) {
+                      return ValueListenableBuilder<double>(
+                        valueListenable: _durationVN,
+                        builder: (context, dur, _) {
+                          return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(_formatTime(pos),
+                                      style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 14)),
+                                  const Spacer(),
+                                  Text(_formatTime(dur),
+                                      style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 14)),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              LinearProgressIndicator(
+                                value: dur > 0 ? pos / dur : 0,
+                                backgroundColor: Colors.white24,
+                                valueColor: const AlwaysStoppedAnimation(
+                                    ThemeConstants.primary),
+                                minHeight: 6,
+                              ),
+                            ],
+                          );
+                        },
+                      );
+                    },
                   ),
                 ],
               ),
@@ -1012,7 +1080,7 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   ElevatedButton(
-                    autofocus: true,
+                    focusNode: _nextNode,
                     style: ElevatedButton.styleFrom(
                         backgroundColor: ThemeConstants.primary),
                     onPressed: _playNextEpisode,
@@ -1020,9 +1088,15 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
                   ),
                   const SizedBox(width: 12),
                   TextButton(
+                    focusNode: _cancelNextNode,
                     onPressed: () {
                       _countdownTimer?.cancel();
                       setState(() => _showNextOverlay = false);
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted && _controlsVisible) {
+                          _playNode.requestFocus();
+                        }
+                      });
                     },
                     child: const Text('Cancelar',
                         style: TextStyle(color: Colors.white70)),

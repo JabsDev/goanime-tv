@@ -131,4 +131,56 @@ void main() {
       expect(res.httpOk, isFalse);
     });
   });
+
+  group('canal beta — inclui pré-releases com APK', () {
+    test('pré-release mais nova vira candidata', () async {
+      final client = MockClient((req) async {
+        if (req.url.path.endsWith('/releases/latest')) {
+          return one('v1.5.5+1000083');
+        }
+        return many([
+          rel('v1.6.0+1000084', pre: true),
+          rel('v1.5.5+1000083'),
+        ]);
+      });
+      final res = await fetchLatestRelease(
+        client: client,
+        includePrerelease: true,
+      );
+      expect(res.info?.tagName, 'v1.6.0+1000084');
+      expect(res.info?.isPrerelease, isTrue);
+      expect(res.blockedNewer, isNull);
+    });
+
+    test('draft continua fora do canal beta', () async {
+      final client = MockClient((req) async {
+        if (req.url.path.endsWith('/releases/latest')) {
+          return one('v1.5.5+1000083');
+        }
+        final draft = rel('v1.7.0+1000085', pre: true);
+        draft['draft'] = true;
+        return many([draft, rel('v1.5.5+1000083')]);
+      });
+      final res = await fetchLatestRelease(
+        client: client,
+        includePrerelease: true,
+      );
+      expect(res.info?.tagName, 'v1.5.5+1000083');
+    });
+
+    test('pré-release sem APK não é instalável nem no beta', () async {
+      final client = MockClient((req) async {
+        if (req.url.path.endsWith('/releases/latest')) {
+          return one('v1.5.5+1000083');
+        }
+        return many([rel('v1.6.0+1000084', pre: true, apk: false)]);
+      });
+      final res = await fetchLatestRelease(
+        client: client,
+        includePrerelease: true,
+      );
+      expect(res.info?.tagName, 'v1.5.5+1000083');
+      expect(res.blockedNewer?.tagName, 'v1.6.0+1000084');
+    });
+  });
 }

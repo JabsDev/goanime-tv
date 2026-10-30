@@ -357,3 +357,36 @@ Medir banda real (`iperf3` na LAN, speedtest no aparelho). Abaixo de ~5–6 Mbps
 **Fonte que só tem 1080p:** não há bloqueio nem transcodificação — o player abre a **menor** qualidade disponível (numa lista `2160p/1080p`, abre 1080p). O teto é preferência de consumo, não restrição de reprodução; a lista mostra todas as opções e o 1080p segue acessível.
 
 **Onde o teto NÃO se aplica:** troca manual de qualidade durante o episódio (é escolha explícita) e aparelho sem modo lite.
+
+## Aplicado em 30/10/2026 — Fase 1 restante (C3, C4) e HLS no modo lite
+
+**C3 — ExoDash sem `setState` a 2 Hz.** `exo_dash_player_screen.dart` passou a
+guardar posição/duração em `ValueNotifier<double>` e só a subárvore da barra de
+progresso reconstrói a cada poll de 500 ms. `setState` da tela inteira fica
+restrito a mudanças de estado reais (`_videoReady` e play/pause).
+
+**C4 — prefetch e AniSkip fora da abertura.** No ExoDash, o prefetch do próximo
+episódio só roda no modo lite quando faltam ~2 min para o fim (antes resolvia
+todas as fontes no `ready`). No mpv, o AniSkip/AniList espera 3 s depois do
+`ready` em modo lite; fora do lite continua imediato.
+
+**HLS no mpv.** O player deixou de forçar `hls-bitrate=highest` em modo lite.
+Antes o `highest` escolhia a variante 1080p do manifesto HLS, justamente o
+bitrate que o H713 não sustenta. Em lite o valor agora é `auto`; fora do lite o
+comportamento antigo foi mantido.
+
+**HLS proxy em streaming e com conexão persistente.** O `DashManifestProxy`
+deixou de baixar cada segmento HLS inteiro para um `http.Response`/`Uint8List`
+antes de repassar. Agora faz `addStream` do upstream direto para o loopback,
+preservando content-type/length. O client HTTP também passou a ser único por
+player, então os segmentos reaproveitam DNS/TLS/conexão em vez de abrir um
+`http.Client` novo a cada 2-6 s. O segmento continua passando pelo Dart (o CDN
+recusou o cliente do ffmpeg no device), mas sem cópia integral, pico de GC e
+handshake por segmento.
+
+**C2 — render target 720p: não aplicável neste media_kit.** A configuração
+`VideoControllerConfiguration(width/height)` é ignorada no backend Android:
+`AndroidVideoController` não lê `configuration.width/height` e `setSize()` lança
+`UnsupportedError`. O caminho real de escala no Android é a superfície nativa do
+MediaCodec, então o ganho descrito no estudo não existe por essa API. A mudança
+foi descartada para não virar placebo.
