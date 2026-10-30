@@ -1873,8 +1873,8 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   Widget _buildQualityStep(List<VideoSource> sources) {
     final visible = _visibleSources(sources);
     final hasAudioStep = _audiosFor(sources).length > 1;
-    // Padrão em modo lite: melhor qualidade até 720p (o painel desses
-    // aparelhos é 720p). Se a fonte só tem 1080p+, o foco cai na menor
+    // Padrão em modo lite: melhor qualidade até 480p (HY320 Mini).
+    // Se a fonte só tem 720p/1080p+, o foco cai na menor
     // disponível — tocar continua funcionando, o teto é preferência.
     final defaultIdx = defaultQualityIndex(
       visible,

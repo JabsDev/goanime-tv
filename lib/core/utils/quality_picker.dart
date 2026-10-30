@@ -31,9 +31,10 @@ List<VideoSource> sortBestFirst(List<VideoSource> sources) {
   return list;
 }
 
-/// Teto do "padrão" em aparelho fraco (modo lite): 720p. O painel desses
-/// projetores/TV sticks é 720p — 1080p só triplica decode/bitrate.
-const int kDefaultMaxQualityHeight = 720;
+/// Teto do "padrão" em aparelho fraco (modo lite): 480p. O HY320 Mini
+/// decodifica 720p/1080p com folga insuficiente; 480p reduz bitrate e
+/// decodificação sem perda visual relevante no painel 720p do projetor.
+const int kDefaultMaxQualityHeight = 480;
 
 /// Índice da qualidade PADRÃO numa lista de fontes (ordem indiferente).
 ///

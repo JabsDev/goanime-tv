@@ -2,6 +2,8 @@ import 'dart:io';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import 'package:goanime_tv/core/scraper/scraper_result.dart';
 import 'package:goanime_tv/core/sources/archive_jp_adapter.dart';
@@ -79,6 +81,22 @@ void main() {
       expect(ArchiveJpAdapter.pickVideoFiles(body), ['show.mp4']);
     });
 
+    test('includeDerivatives expõe o encode leve _512kb', () {
+      final body = jsonEncode({
+        'files': [
+          {'name': 'show_S01E01_512kb.mp4', 'format': 'h.264', 'size': '100'},
+          {'name': 'show_S01E01_meta.mp4', 'format': 'h.264', 'size': '50'},
+          {'name': 'show_S01E01.mp4', 'format': 'h.264', 'size': '1000'},
+        ]
+      });
+      final files = ArchiveJpAdapter.pickVideoFiles(
+        body,
+        includeDerivatives: true,
+      );
+      expect(files, contains('show_S01E01_512kb.mp4'));
+      expect(files, isNot(contains('show_S01E01_meta.mp4')));
+    });
+
     test('filtra por nome quando pedido, h.264 na frente do mkv', () {
       final files =
           ArchiveJpAdapter.pickVideoFiles(fx('ia_meta.json'), contains: 'S01E01');
@@ -118,6 +136,31 @@ void main() {
       expect(vs.single.quality, '720p');
       // Arquivo cru: entra no workflow de legenda IA (sem track embutida).
       expect(vs.single.subtitleCandidates, isEmpty);
+    });
+
+    test('getVideoSources expõe 480p/512kb e 720p do mesmo episódio', () async {
+      final client = MockClient((req) async {
+        expect(req.url.path, '/metadata/show');
+        return http.Response(jsonEncode({
+          'files': [
+            {'name': 'show_S01E01_512kb.mp4', 'format': 'h.264', 'size': '100'},
+            {'name': 'show_S01E01.mp4', 'format': 'h.264', 'size': '1000'},
+            {'name': 'show_S01E01_720p.mp4', 'format': 'h.264', 'size': '2000'},
+            {'name': 'show_S01E02.mp4', 'format': 'h.264', 'size': '1000'},
+          ],
+        }), 200);
+      });
+      final adapter = ArchiveJpAdapter(client: client);
+      final res = await adapter.getVideoSources(Episode(
+        number: '01',
+        title: 'show_S01E01.mp4',
+        url: 'https://archive.org/download/show/show_S01E01.mp4',
+      ));
+      final vs = (res as Success<List<VideoSource>>).data;
+      final byQuality = {for (final v in vs) v.quality: v.url};
+      expect(byQuality.keys, containsAll(['512kb', 'Auto', '720p']));
+      expect(byQuality['512kb'], endsWith('show_S01E01_512kb.mp4'));
+      expect(vs.every((v) => !v.url.contains('S01E02')), isTrue);
     });
 
     test('getEpisodes monta a grade a partir do /metadata', () async {

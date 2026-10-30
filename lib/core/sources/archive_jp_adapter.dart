@@ -40,7 +40,13 @@ class ArchiveJpAdapter extends AnimeSourceAdapter {
   static const _metaBase = '$_apiBase/metadata';
 
   /// Coleções curadas — o acervo "de verdade", sem os espelhos do YouTube.
-  static const _collections = ['opensource_movies', 'feature_films'];
+  /// `anime` é a coleção específica do acervo (37k+ itens em 30/10/2026);
+  /// as outras duas cobrem filmes/OVAs que não foram marcados como anime.
+  static const _collections = [
+    'anime',
+    'opensource_movies',
+    'feature_films',
+  ];
 
   /// Prefixos de itens que são lixo indexado (espelhos de rede social).
   static const _junkPrefixes = ['youtube-', 'TwitchVod', 'vimeo-'];
@@ -106,7 +112,11 @@ class ArchiveJpAdapter extends AnimeSourceAdapter {
   /// `_meta.xml`, `.txt`, thumbnails `.jpg`, `.gif`, `.png`). O critério de
   /// qualidade é: extensão de vídeo primeiro, depois o `format` preferido
   /// (`h.264`), depois o **maior tamanho** (melhor encode do mesmo item).
-  static List<String> pickVideoFiles(String body, {String? contains}) {
+  static List<String> pickVideoFiles(
+    String body, {
+    String? contains,
+    bool includeDerivatives = false,
+  }) {
     Map<String, dynamic>? meta;
     try {
       final decoded = jsonDecode(body);
@@ -124,10 +134,11 @@ class ArchiveJpAdapter extends AnimeSourceAdapter {
       final name = f['name']?.toString() ?? '';
       if (!videoExt.hasMatch(name)) continue;
       // Derivados do player do IA (`_512kb.mp4`, `_meta.mp4`) e arte.
+      // `_512kb` é o encode leve (~480p) e é justamente o que o projetor
+      // fraco precisa; `_meta`/`_ia` nunca são mídia tocável.
       final base = name.split('.').first.toLowerCase();
-      if (base.endsWith('_meta') || base.endsWith('_512kb') || base.endsWith('_ia')) {
-        continue;
-      }
+      if (base.endsWith('_meta') || base.endsWith('_ia')) continue;
+      if (!includeDerivatives && base.endsWith('_512kb')) continue;
       if (contains != null && contains.isNotEmpty && !name.contains(contains)) {
         continue;
       }
@@ -165,6 +176,13 @@ class ArchiveJpAdapter extends AnimeSourceAdapter {
   static String? identifierOf(String url) {
     final segs = Uri.tryParse(url)?.pathSegments ?? const [];
     if (segs.length < 2 || segs.first != 'details') return null;
+    return segs[1];
+  }
+
+  /// Identifier de uma URL de download (`/download/{id}/{arquivo}`).
+  static String? downloadIdentifier(String url) {
+    final segs = Uri.tryParse(url)?.pathSegments ?? const [];
+    if (segs.length < 3 || segs.first != 'download') return null;
     return segs[1];
   }
 
@@ -298,16 +316,50 @@ class ArchiveJpAdapter extends AnimeSourceAdapter {
       ));
     }
     final fileName = Uri.tryParse(episode.url)?.pathSegments.last ?? '';
-    return ScraperResult.success([
-      VideoSource(
-        url: episode.url,
-        quality: qualityOf(fileName.isEmpty ? episode.url : fileName),
-        headers: _headers,
-        // Acervo em geral é JA/EN cru sem legenda baked — cai no
-        // transcribe L1 do LegendAI quando o usuário pede.
-        audio: null,
-      ),
-    ]);
+    final base = VideoSource(
+      url: episode.url,
+      quality: qualityOf(fileName.isEmpty ? episode.url : fileName),
+      headers: _headers,
+      // Acervo em geral é JA/EN cru sem legenda baked — cai no
+      // transcribe L1 do LegendAI quando o usuário pede.
+      audio: null,
+    );
+
+    // O mesmo episódio costuma existir em vários encodings no item
+    // (`_512kb.mp4` ~480p, `.mp4` original, `_720p.mp4`). [getEpisodes]
+    // mantém UM arquivo por número; aqui reabrimos o metadata e expomos
+    // as variantes como qualidades selecionáveis. Sem título/número
+    // (chamada antiga/teste), mantém o caminho de 1 fonte.
+    final id = downloadIdentifier(episode.url);
+    final title = episode.title;
+    if (id == null || title == null || title.isEmpty) {
+      return ScraperResult.success([base]);
+    }
+    try {
+      final res = await _get(Uri.parse('$_metaBase/$id'));
+      if (res.statusCode != 200) return ScraperResult.success([base]);
+      final files = pickVideoFiles(res.body, includeDerivatives: true);
+      final sameEpisode = files
+          .where((f) => _episodeNumberOf(f) == episode.number)
+          .toList();
+      if (sameEpisode.length <= 1) return ScraperResult.success([base]);
+      final seen = <String>{};
+      final out = <VideoSource>[];
+      for (final f in sameEpisode) {
+        final url = downloadUrl(id, f);
+        if (!seen.add(url)) continue;
+        out.add(VideoSource(
+          url: url,
+          quality: qualityOf(f),
+          headers: _headers,
+          audio: null,
+        ));
+      }
+      return ScraperResult.success(out.isEmpty ? [base] : out);
+    } catch (e) {
+      debugPrint('[Archive] quality variants error: $e');
+      return ScraperResult.success([base]);
+    }
   }
 
   @override

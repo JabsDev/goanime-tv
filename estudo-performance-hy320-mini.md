@@ -348,6 +348,9 @@ Medir banda real (`iperf3` na LAN, speedtest no aparelho). Abaixo de ~5–6 Mbps
 
 ## Aplicado em 28/10/2026 — qualidade padrão 720p em modo lite (C1)
 
+> **Substituído em 30/10/2026:** o teto do modo lite passou de 720p para
+> 480p (ver seção mais abaixo). O histórico fica para rastrear a mudança.
+
 **Regra:** o teto vale só para o **padrão** (quando ninguém escolheu qualidade). Toda a lista continua visível e selecionável — quem quiser 1080p escolhe 1080p.
 
 - `lib/core/utils/quality_picker.dart` — `kDefaultMaxQualityHeight = 720`, `defaultQualityIndex()` (melhor qualidade **≤ 720**; se a fonte só oferece acima do teto, cai na **menor** disponível) e `resolveStartIndex()` (remapeia a escolha explícita; `null` = sem escolha → aplica o teto).
@@ -390,3 +393,27 @@ handshake por segmento.
 `UnsupportedError`. O caminho real de escala no Android é a superfície nativa do
 MediaCodec, então o ganho descrito no estudo não existe por essa API. A mudança
 foi descartada para não virar placebo.
+
+## Aplicado em 30/10/2026 — teto 480p no lite e Archive com encode leve
+
+**Teto do modo lite: 480p.** `kDefaultMaxQualityHeight` passou de 720 para
+480. O HY320 Mini continua recebendo 720p/1080p quando a fonte só oferece
+isso, mas quando existe 480p ele é o padrão. A lista completa segue
+selecionável; a escolha explícita do usuário continua acima do teto.
+
+**Internet Archive como alternativa de 480p.** O `ArchiveJpAdapter` já
+expunha MP4 direto, mas descartava o derivado `_512kb.mp4` (encode leve,
+~480p) e mantinha só um arquivo por episódio. Agora:
+
+- `pickVideoFiles(..., includeDerivatives: true)` aceita o `_512kb` e
+  continua rejeitando `_meta`/`_ia`.
+- `getVideoSources` relê o `/metadata` do item e devolve todas as variantes
+  do mesmo episódio (ex.: `512kb`, `Auto`, `720p`) como qualidades
+  selecionáveis. Se o metadata falhar, mantém o MP4 único de antes.
+- A busca passou a ancorar também na coleção `anime` do Archive (37k+ itens
+  em 30/10/2026), além de `opensource_movies` e `feature_films`.
+
+**Limite:** Archive é acervo JA/EN em boa parte, sem legenda PT-BR baked.
+Ele entra como alternativa de mídia leve, não como substituto das fontes
+PT-BR. O 480p/512kb do Archive é o caminho mais provável de rodar liso no
+projetor quando o AnimeFire só tem 720p/1080p.

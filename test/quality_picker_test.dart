@@ -47,6 +47,15 @@ void main() {
   });
 
   group('defaultQualityIndex (teto do modo lite)', () {
+    test('teto padrão do lite é 480p', () {
+      expect(kDefaultMaxQualityHeight, 480);
+      final s = srcs(['480p', '720p', '1080p']);
+      expect(
+        s[defaultQualityIndex(s, maxHeight: kDefaultMaxQualityHeight)].quality,
+        '480p',
+      );
+    });
+
     test('sem teto continua na melhor qualidade', () {
       final s = srcs(['480p', '1080p', '720p']);
       expect(defaultQualityIndex(s), bestQualityIndex(s));

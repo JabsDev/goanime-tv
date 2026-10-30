@@ -236,7 +236,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
       // Fase 3: auto-seleciona a melhor qualidade quando o usuário não fez
       // escolha explícita (auto-next). Sem escolha, o modo lite aplica o teto
-      // de 720p (com fallback para a menor fonte quando só há 1080p+).
+      // de 480p (com fallback para a menor fonte quando só há 720p/1080p+).
       final ordered = sortBestFirst(sources);
       final startIndex = resolveStartIndex(
         ordered,

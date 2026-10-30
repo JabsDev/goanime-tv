@@ -170,7 +170,7 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       // O índice explícito vindo do diálogo é remapeado para a ordem nova (por
       // identidade; após re-resolve do retry, por qualidade+url — o retry
       // repete a MESMA qualidade, nunca pula para outra sozinho). Sem escolha
-      // explícita, o modo lite aplica o teto de 720p.
+      // explícita, o modo lite aplica o teto de 480p.
       final ordered = sortBestFirst(sources);
       final startIndex = resolveStartIndex(
         ordered,
