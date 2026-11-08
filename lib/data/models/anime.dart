@@ -94,6 +94,7 @@ enum AnimeSource {
   animeGg,
   donghuaNoSekai,
   doramasflix,
+  dattebayoBr,
 }
 
 extension AnimeSourcePriority on AnimeSource {
@@ -117,7 +118,8 @@ extension AnimeSourcePriority on AnimeSource {
       this == AnimeSource.animesOrion ||
       this == AnimeSource.animesHd ||
       this == AnimeSource.animesOnlineIo ||
-      this == AnimeSource.donghuaNoSekai;
+      this == AnimeSource.donghuaNoSekai ||
+      this == AnimeSource.dattebayoBr;
 
   /// Ordering priority for display/selection: lower = higher priority.
   /// PT-BR sources with reliable playback come first; AllAnime (EN, currently
@@ -170,6 +172,8 @@ extension AnimeSourcePriority on AnimeSource {
         return 18;
       case AnimeSource.doramasflix:
         return 19;
+      case AnimeSource.dattebayoBr:
+        return 3;
     }
   }
 }
@@ -223,6 +227,8 @@ extension AnimeSourceDisplay on AnimeSource {
         return 'DonghuaNoSekai';
       case AnimeSource.doramasflix:
         return 'Doramasflix';
+      case AnimeSource.dattebayoBr:
+        return 'Dattebayo BR';
     }
   }
 }
@@ -273,6 +279,7 @@ extension AnimeSourceLanguage on AnimeSource {
       case AnimeSource.animesHd:
       case AnimeSource.animesOnlineIo:
       case AnimeSource.donghuaNoSekai:
+      case AnimeSource.dattebayoBr:
         return SourceLanguage.portuguese;
       case AnimeSource.doramasflix:
         // Acervo Latino (auditoria 10/10/2026: 800 dramas, zero Português).

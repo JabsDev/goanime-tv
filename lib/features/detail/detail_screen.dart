@@ -1297,6 +1297,16 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
 
   String _sourceName(AnimeSource s) => s.displayName;
 
+  /// "Animes Online · Legendado" quando TODAS as resoluções da fonte carregam
+  /// um único áudio (ex.: cluster DooPlay separa dublado/legendado em páginas
+  /// distintas). Fontes com vários áudios mostram só o nome — o passo de áudio
+  /// logo em seguida já pergunta. Sem áudio declarado, nome puro.
+  String _sourceLabel(AnimeSource s, List<VideoSource> sources) {
+    final audios = _audiosFor(sources);
+    if (audios.length != 1) return _sourceName(s);
+    return '${_sourceName(s)} · ${_audioLabel(audios.single)}';
+  }
+
   /// Título do card conforme a etapa atual (mockups: Fontes/Qualidade/Legenda).
   String get _dialogTitle {
     final providers = _providers;
@@ -1811,7 +1821,7 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
         children.add(Padding(
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: _ProviderItem(
-            label: _sourceName(s),
+            label: _sourceLabel(s, providers[s] ?? const <VideoSource>[]),
             ping: _pingLabel(s),
             isSelected: false,
             autofocus: stop,

@@ -194,6 +194,7 @@ static bool isOpenable(Anime a) {
     case AnimeSource.animeGg:
     case AnimeSource.donghuaNoSekai:
     case AnimeSource.doramasflix:
+    case AnimeSource.dattebayoBr:
       return a.url.isNotEmpty;
   }
 }

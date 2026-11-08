@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:html/dom.dart' show Document;
+import 'package:html/dom.dart' show Document, Element;
 import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
 import '../../data/models/anime.dart';
@@ -188,33 +188,8 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
         ));
       }
       final doc = html_parser.parse(res.body);
-      if (_source == AnimeSource.animesOnlineCc) {
-        return _episodesFromOldTheme(doc, anime);
-      }
-      final list = <Episode>[];
-      for (final card in doc.querySelectorAll('.episode-card')) {
-        final numAttr = card.attributes['data-episode-number'];
-        final a = card.querySelector('a[href*="/episodio/"]') ?? card.querySelector('a');
-        final href = a?.attributes['href'] ?? '';
-        if (href.isEmpty) continue;
-        final number = numAttr ?? (_episodeNumber(href)?.toString() ?? '');
-        if (number.isEmpty) continue;
-        list.add(Episode(
-          number: number,
-          url: href,
-          source: source,
-          owner: anime,
-        ));
-      }
-      list.sort((a, b) {
-        final na = int.tryParse(a.number);
-        final nb = int.tryParse(b.number);
-        if (na == null && nb == null) return a.url.compareTo(b.url);
-        if (na == null) return 1;
-        if (nb == null) return -1;
-        if (na != nb) return na.compareTo(nb);
-        return a.url.compareTo(b.url);
-      });
+      final list = _episodesFromTheme(doc, anime);
+      _sortEpisodes(list);
       if (list.isEmpty) {
         return ScraperResult.failure(EmptyResultError(
           message: 'No episodes found in HTML',
@@ -233,47 +208,130 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
     }
   }
 
-  /// Grade do tema ANTIGO (`animesonlinecc.to`): `#seasons .se-c` agrupa uma
-  /// temporada (`.se-t` = número) e `ul.episodios li a[href*="/episodio/"]`
-  /// lista os episódios. O mesmo link aparece duas vezes (capa + título), por
-  /// isso o dedupe por href.
-  ScraperResult<List<Episode>> _episodesFromOldTheme(
-      Document doc, Anime anime) {
+  /// Grade do tema DooPlay atual. Duas variantes convivem no cluster:
+  ///
+  ///  - `#seasons .se-c` agrupa uma temporada e dentro dela os episódios são
+  ///    `div.episode-card[data-episode-number]` (`animesdrive.cloud`,
+  ///    `animeq.cloud`) **ou** `ul.episodios li a[href*="/episodio/"]`
+  ///    (`animesonline.cloud` e o tema antigo `animesonlinecc.to`; o
+  ///    `animesonline.cloud` deixou de emitir `.episode-card` — era por isso
+  ///    que o EP 23 do Slime S4 só voltava pelo AnimeFire).
+  ///  - Documento sem `#seasons`: `.episode-card` solto (fixtures/páginas
+  ///    antigas).
+  ///
+  /// Número: `data-episode-number` > `-episodio-<N>` no href. Temporada:
+  /// `.se-t` ("4") > `.numerando` ("4 - 23"). O mesmo link aparece duas vezes
+  /// (capa + título), então dedupe por href.
+  List<Episode> _episodesFromTheme(Document doc, Anime anime) {
     final list = <Episode>[];
     final seen = <String>{};
+
+    void addCard(Element card, int? season) {
+      final numAttr = card.attributes['data-episode-number']?.toString();
+      final a = card.querySelector('a[href*="/episodio/"]') ??
+          card.querySelector('a[href]');
+      final href = _absolute(a?.attributes['href']);
+      if (href.isEmpty || !seen.add(href)) return;
+      final number = numAttr ?? _episodeNumber(href)?.toString() ?? '';
+      if (number.isEmpty) return;
+      final attrTitle = card.attributes['data-episode-title']?.trim() ?? '';
+      final anchorTitle = a?.text.trim() ?? '';
+      list.add(Episode(
+        number: number,
+        url: href,
+        title: attrTitle.isNotEmpty
+            ? attrTitle
+            : anchorTitle.isNotEmpty
+                ? anchorTitle
+                : null,
+        thumbnail: card.querySelector('img')?.attributes['src'],
+        season: season,
+        owner: anime,
+        source: source,
+      ));
+    }
+
+    void addAnchor(Element a, int? season) {
+      final href = _absolute(a.attributes['href']);
+      if (href.isEmpty || !seen.add(href)) return;
+      final m = RegExp(r'episodio[^/]*?[-]?(\d+)/?$').firstMatch(href);
+      final number = m?.group(1) ?? _episodeNumber(href)?.toString();
+      if (number == null || number.isEmpty) return;
+      final li = a.parent?.parent;
+      // Sem bloco `#seasons` reconhecido, o `.numerando` do próprio item
+      // ("4 - 23") ainda entrega a temporada.
+      var seasonOfItem = season;
+      if (seasonOfItem == null) {
+        final num = li?.querySelector('.numerando')?.text.trim() ?? '';
+        final sm = RegExp(r'^\s*(\d{1,2})\s*[-x]').firstMatch(num);
+        seasonOfItem = sm == null ? null : int.tryParse(sm.group(1)!);
+      }
+      list.add(Episode(
+        number: number,
+        url: href,
+        title: a.text.trim().isEmpty ? null : a.text.trim(),
+        thumbnail: li?.querySelector('img')?.attributes['src'],
+        season: seasonOfItem,
+        owner: anime,
+        source: source,
+      ));
+    }
+
     for (final block in doc.querySelectorAll('#seasons .se-c')) {
-      final season = int.tryParse(block.querySelector('.se-t')?.text.trim() ?? '');
+      final season = _seasonOfBlock(block);
+      for (final card in block.querySelectorAll('.episode-card')) {
+        addCard(card, season);
+      }
       for (final a in block.querySelectorAll('ul.episodios li a[href*="/episodio/"]')) {
-        final href = a.attributes['href'] ?? '';
-        if (href.isEmpty || !seen.add(href)) continue;
-        final m = RegExp(r'-episodio-(\d+)/?$').firstMatch(href);
-        if (m == null) continue;
-        final li = a.parent?.parent;
-        list.add(Episode(
-          number: m.group(1)!,
-          url: href,
-          title: a.text.trim().isEmpty ? null : a.text.trim(),
-          thumbnail: li?.querySelector('img')?.attributes['src'],
-          season: season,
-          owner: anime,
-          source: source,
-        ));
+        addAnchor(a, season);
       }
     }
+    if (list.isEmpty) {
+      for (final card in doc.querySelectorAll('.episode-card')) {
+        addCard(card, _seasonOfBlock(card.parent));
+      }
+      // Variante sem `#seasons .se-c` (alguns espelhos): a lista antiga ainda
+      // aparece solta no documento.
+      for (final a in doc.querySelectorAll('ul.episodios li a[href*="/episodio/"]')) {
+        addAnchor(a, null);
+      }
+    }
+    return list;
+  }
+
+  /// Season number of a `#seasons .se-c` block: header `.se-t` or the first
+  /// episode's `.numerando` ("4 - 23" → 4). Null when the page carries none.
+  int? _seasonOfBlock(Element? block) {
+    if (block == null) return null;
+    final header = int.tryParse(
+        block.querySelector('.se-t')?.text.trim() ?? '');
+    if (header != null && header > 0) return header;
+    final numerando = block.querySelector('.numerando')?.text.trim() ?? '';
+    final m = RegExp(r'^\s*(\d{1,2})\s*[-x]').firstMatch(numerando);
+    return m == null ? null : int.tryParse(m.group(1)!);
+  }
+
+  String _absolute(String? href) {
+    final h = href?.trim() ?? '';
+    if (h.isEmpty) return '';
+    if (h.startsWith('http')) return h;
+    if (h.startsWith('/')) return '$baseUrl$h';
+    return '$baseUrl/$h';
+  }
+
+  void _sortEpisodes(List<Episode> list) {
     list.sort((a, b) {
       final sa = a.season ?? 0;
       final sb = b.season ?? 0;
       if (sa != sb) return sa.compareTo(sb);
-      return (int.tryParse(a.number) ?? 0)
-          .compareTo(int.tryParse(b.number) ?? 0);
+      final na = int.tryParse(a.number);
+      final nb = int.tryParse(b.number);
+      if (na == null && nb == null) return a.url.compareTo(b.url);
+      if (na == null) return 1;
+      if (nb == null) return -1;
+      if (na != nb) return na.compareTo(nb);
+      return a.url.compareTo(b.url);
     });
-    if (list.isEmpty) {
-      return ScraperResult.failure(EmptyResultError(
-        message: 'No episodes found in HTML',
-        source: source,
-      ));
-    }
-    return ScraperResult.success(list);
   }
 
   /// Player do tema antigo: iframes diretos do Blogger. Passa pelo
@@ -328,18 +386,90 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
     return m == null ? null : int.tryParse(m.group(1)!);
   }
 
+  /// Áudio que a página do provedor entrega. O cluster separa as variantes em
+  /// páginas distintas (`…-4th-season` = legendado, `…-dublado` = dublado) e o
+  /// NOME das duas é idêntico (o `normalize` remove "dublado"), então a URL é
+  /// a única fonte de verdade.
+  String _audioTag(Anime? anime, Episode episode) {
+    final url = '${anime?.url ?? ''} ${episode.url}'.toLowerCase();
+    return url.contains('dublado') ? 'dublado' : 'legendado';
+  }
+
+  /// Season-aware resolve: o catálogo AniList divide temporadas em entradas
+  /// ("… 4th Season") e a página do cluster é uma temporada por URL, então o
+  /// número do episódio é relativo à temporada. Páginas combinadas (raro no
+  /// cluster) caem no absoluto; página com ≥2 temporadas e sem hit na
+  /// temporada pedida devolve vazio (nunca S4E23 → S1E23).
+  @override
+  Future<List<VideoSource>> resolveVideo(Anime match, int episodeNumber,
+      {Anime? catalog}) async {
+    final eps = await getEpisodes(match);
+    Episode? target;
+    switch (eps) {
+      case Success(:final data):
+        final hint =
+            (catalog == null ? null : TextUtils.seasonOf(catalog.name)) ??
+                AnimeSourceAdapter.seasonOfCandidateUrl(match.url);
+        if (hint != null) {
+          final inSeason = data
+              .where((e) => e.season == hint)
+              .toList()
+            ..sort((a, b) => (int.tryParse(a.number) ?? 0)
+                .compareTo(int.tryParse(b.number) ?? 0));
+          for (final e in inSeason) {
+            if (int.tryParse(e.number) == episodeNumber) {
+              target = e;
+              break;
+            }
+          }
+          if (target == null) {
+            final seasons =
+                data.map((e) => e.season).whereType<int>().toSet();
+            if (seasons.length >= 2) return const [];
+            debugPrint('[SeasonResolve] AnimesOnline fallback absoluto '
+                'ep=$episodeNumber hint=$hint url=${match.url}');
+          }
+        }
+        target ??= () {
+          for (final e in data) {
+            if (int.tryParse(e.number) == episodeNumber) return e;
+          }
+          return null;
+        }();
+      case Failure():
+      case Loading():
+        return const [];
+    }
+    if (target == null) return const [];
+    final vs = await getVideoSources(target, anime: match);
+    switch (vs) {
+      case Success(:final data):
+        return data;
+      case Failure():
+      case Loading():
+        return const [];
+    }
+  }
+
   @override
   Future<ScraperResult<List<VideoSource>>> getVideoSources(
     Episode episode, {
     Anime? anime,
   }) async {
+    final audio = _audioTag(anime, episode);
     if (_source == AnimeSource.animesOnlineCc) {
-      return _videoFromOldTheme(episode, anime);
+      final result = await _videoFromOldTheme(episode, anime);
+      if (result is Success<List<VideoSource>>) {
+        return ScraperResult.success(
+            result.data.map((s) => s.withAudio(audio)).toList());
+      }
+      return result;
     }
     try {
       final extractor = DooPlayV2Extractor(baseUrl: baseUrl, client: _client);
       final sources = await extractor.extractPlayable(episode.url);
-      return ScraperResult.success(sources);
+      return ScraperResult.success(
+          sources.map((s) => s.withAudio(audio)).toList());
     } on NoPlayableOption catch (e) {
       // Layer B (last resort): probe the CDN directly by title + episode.
       final ctx = anime ?? episode.owner;
@@ -355,6 +485,7 @@ class AnimesOnlineAdapter extends AnimeSourceAdapter {
                 url: url,
                 quality: 'Auto',
                 headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'},
+                audio: audio,
               ),
             ]);
           }

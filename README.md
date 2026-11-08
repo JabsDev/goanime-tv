@@ -61,7 +61,7 @@ GoAnime TV é um app de **Android TV** 100% navegável por **controle remoto** (
 
 Agregador de fontes públicas de anime em português:
 
-AnimeFire · **Animes Digital** · BetterAnime · DooPlay · Animes Online (Cloud/Drive/AnimeQ) · Animes Orion · AnimesHD · AnimePlayer · ArchiveJP · AnimeGG
+AnimeFire · **Animes Digital** · BetterAnime · DooPlay · Animes Online (Cloud/Drive/AnimeQ) · **Dattebayo BR** · Animes Orion · AnimesHD · AnimePlayer · ArchiveJP · AnimeGG
 
 > A disponibilidade das fontes muda sem aviso — o app lida com isso de forma resiliente, priorizando as mais rápidas e estáveis.
 > **1.4.8**: AnimeFire agora sonda o manifest (Range GET) antes de oferecer — links 404 do CDN (catálogo antigo pós-migração) não vão mais para o player; nova fonte **Animes Digital** (episodes->video desembrulhando a cadeia anti-bot do tema "Animes Online", HLS .m3u8 direto).

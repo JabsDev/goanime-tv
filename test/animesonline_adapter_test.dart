@@ -258,4 +258,118 @@ void main() {
     expect(AnimeSource.animesOnlineCloud.priority, greaterThan(AnimeSource.dooPlay.priority));
     expect(AnimeSource.animePlay.priority, lessThan(AnimeSource.animePlayer.priority));
   });
+
+  // Regressão Slime S4E23 (08/11/2026): `animesonline.cloud` deixou de emitir
+  // `.episode-card` e passou a listar `#seasons .se-c ul.episodios li a`. O
+  // parser antigo devolvia "No episodes found in HTML" e a fonte sumia do
+  // seletor — sobrava só o AnimeFire (dublado, legendado 404).
+  test('getEpisodes parses the current #seasons/ul.episodios layout', () async {
+    final adapter = AnimesOnlineAdapter(
+      source: AnimeSource.animesOnlineCloud,
+      client: MockClient(
+          (req) async => _ok(fx('animesonline_seasons_ul.html'))),
+    );
+    final result = await adapter.getEpisodes(Anime(
+      name: 'Tensei shitara Slime Datta Ken 4th Season',
+      url: '$_cloud/anime/tensei-shitara-slime-datta-ken-4th-season',
+    ));
+    expect(result, isA<Success<List<Episode>>>());
+    final eps = (result as Success<List<Episode>>).data;
+    expect(eps.map((e) => e.number).toList(), ['1', '22', '23']);
+    expect(eps.every((e) => e.season == 4), isTrue);
+    expect(eps.last.url, endsWith('-episodio-23'));
+  });
+
+  test('getEpisodes still parses .episode-card inside #seasons (drive/q)',
+      () async {
+    const html = '''
+<html><body><div id="seasons"><div class="se-c">
+<div class="se-t se-o">4</div>
+<div class="se-a"><div class="episodios-grid">
+<div class="episode-card" data-episode-number="23" data-episode-title="Episódio 23 - A esperança de Granville"><a href="https://animesdrive.cloud/episodio/slime-4-episodio-23"><img src="https://x/23.jpg"></a></div>
+<div class="episode-card" data-episode-number="24" data-episode-title="Episódio 24 - O Herói Desperta"><a href="https://animesdrive.cloud/episodio/slime-4-episodio-24"><img src="https://x/24.jpg"></a></div>
+</div></div></div></div></body></html>''';
+    final adapter = AnimesOnlineAdapter(
+      source: AnimeSource.animesDrive,
+      client: MockClient((req) async => _ok(html)),
+    );
+    final result = await adapter.getEpisodes(Anime(
+      name: 'Slime 4',
+      url: 'https://animesdrive.cloud/anime/slime-4',
+    ));
+    final eps = (result as Success<List<Episode>>).data;
+    expect(eps.map((e) => e.number).toList(), ['23', '24']);
+    expect(eps.every((e) => e.season == 4), isTrue);
+    expect(eps.first.title, 'Episódio 23 - A esperança de Granville');
+  });
+
+  // Player novo `animeq-player` (animesdrive/animeq, out/2026): os streams vêm
+  // num <video><source> inline e NÃO existe mais `dooplay_player_option`.
+  test('getVideoSources reads inline animeq-player sources with server labels',
+      () async {
+    final adapter = AnimesOnlineAdapter(
+      source: AnimeSource.animesDrive,
+      client: MockClient((req) async {
+        if (req.url.path == '/episodio/slime-4-episodio-23') {
+          return _ok(fx('animesonline_inline_player.html'));
+        }
+        if (req.url.path.endsWith('/23.mp4')) {
+          // Tamanhos reais: SD ~104 MB, FHD ~269 MB.
+          final total = req.url.host == 'animes.click' ? 104470882 : 269115615;
+          return http.Response('x', 206,
+              headers: {'content-range': 'bytes 0-0/$total'});
+        }
+        return http.Response('nf', 404);
+      }),
+    );
+    final result = await adapter.getVideoSources(
+      Episode(
+        number: '23',
+        url: 'https://animesdrive.cloud/episodio/slime-4-episodio-23',
+      ),
+      anime: Anime(
+        name: 'Slime 4',
+        url: 'https://animesdrive.cloud/anime/slime-4',
+      ),
+    );
+    expect(result, isA<Success<List<VideoSource>>>());
+    final sources = (result as Success<List<VideoSource>>).data;
+    expect(sources.map((s) => s.quality).toSet(), {'SD', 'FHD'});
+    // Maior arquivo primeiro (proxy de qualidade): FHD antes do SD.
+    expect(sources.map((s) => s.url), [
+      'https://aniplay.online/Midias/Animes/Letra-T/Tensei-shitara-Slime-Datta-Ken-4/23.mp4',
+      'https://animes.click/CDN/Midia/Letra-T/Tensei-shitara-Slime-Datta-Ken-4/23.mp4',
+    ]);
+    expect(sources.first.quality, 'FHD');
+    expect(sources.last.quality, 'SD');
+    // A variante é legendado (URL sem "-dublado"); o seletor mostra o idioma.
+    expect(sources.every((s) => s.audio == 'legendado'), isTrue);
+  });
+
+  test('resolveVideo(S4, 23) uses the season hint and hits -episodio-23',
+      () async {
+    final adapter = AnimesOnlineAdapter(
+      source: AnimeSource.animesOnlineCloud,
+      client: MockClient((req) async {
+        if (req.url.path.endsWith('-episodio-23')) {
+          return _ok(fx('animesonline_inline_player.html'));
+        }
+        if (req.url.path.endsWith('/23.mp4')) return _probe(req.url.path);
+        return _ok(fx('animesonline_seasons_ul.html'));
+      }),
+    );
+    final sources = await adapter.resolveVideo(
+      Anime(
+        name: 'Slime S4',
+        url: '$_cloud/anime/tensei-shitara-slime-datta-ken-4th-season',
+      ),
+      23,
+      catalog: Anime(
+        name: 'Tensei Shitara Slime Datta Ken 4th Season',
+        url: '',
+      ),
+    );
+    expect(sources, isNotEmpty);
+    expect(sources.first.audio, 'legendado');
+  });
 }

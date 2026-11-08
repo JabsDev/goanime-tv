@@ -5,6 +5,7 @@ import '../sources/anime_source_adapter.dart';
 import '../sources/anime_fire_adapter.dart';
 import '../sources/animesdigital_adapter.dart';
 import '../sources/sushi_animes_adapter.dart';
+import '../sources/dattebayo_br_adapter.dart';
 import '../sources/animesonline_io_adapter.dart';
 import '../sources/all_anime_adapter.dart';
 import '../sources/anime_gg_adapter.dart';
@@ -28,6 +29,7 @@ class SourceRegistry {
     AnimeFireAdapter(),
     AnimesDigitalAdapter(),
     SushiAnimesAdapter(),
+    DattebayoBrAdapter(),
     GoyabuAdapter(),
     DooPlayAdapter(source: AnimeSource.dooPlay),
     AnimesOnlineAdapter(source: AnimeSource.animesOnlineCloud),
@@ -57,6 +59,7 @@ class SourceRegistry {
       AnimeSource.animeFire,
       AnimeSource.animesDigital,
       AnimeSource.sushiAnimes,
+      AnimeSource.dattebayoBr,
       AnimeSource.goyabu,
       AnimeSource.dooPlay,
       AnimeSource.animesOnlineCloud,
@@ -124,6 +127,8 @@ class SourceRegistry {
         return 18;
       case AnimeSource.doramasflix:
         return 19;
+      case AnimeSource.dattebayoBr:
+        return 3;
     }
   }
 
@@ -135,6 +140,7 @@ class SourceRegistry {
               source == AnimeSource.animeFire && a is AnimeFireAdapter ||
              source == AnimeSource.animesDigital && a is AnimesDigitalAdapter ||
              source == AnimeSource.sushiAnimes && a is SushiAnimesAdapter ||
+             source == AnimeSource.dattebayoBr && a is DattebayoBrAdapter ||
              source == AnimeSource.goyabu && a is GoyabuAdapter ||
              source == AnimeSource.animePlayer && a is AnimePlayerAdapter ||
              source == AnimeSource.allAnime && a is AllAnimeAdapter ||

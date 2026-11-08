@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
 import '../../data/models/episode.dart';
 import 'cdn_resolver.dart' show probeMediaUrl;
@@ -95,19 +96,51 @@ class DooPlayV2Extractor {
     final apiHost = _playerApi(body);
 
     final options = _optionRe.allMatches(body).map((m) {
-      return (nume: int.tryParse(m.group(4) ?? '') ?? 0, type: m.group(2)!, post: m.group(3)!);
+      // O rótulo real (SD/HD/FHD) vive no `<span class='title'>` do mesmo
+      // `<li>`; sem ele o picker mostrava "Auto/Alternativa".
+      final end = body.indexOf('</li>', m.start);
+      final block = body.substring(m.start, end < 0 ? body.length : end);
+      final label = RegExp(r"<span class='title'>([^<]*)</span>")
+              .firstMatch(block)
+              ?.group(1)
+              ?.trim() ??
+          '';
+      return (
+        nume: int.tryParse(m.group(4) ?? '') ?? 0,
+        type: m.group(2)!,
+        post: m.group(3)!,
+        label: label,
+      );
     }).toList()
       ..sort((a, b) => a.nume.compareTo(b.nume));
 
-    final byNume = <int, ({String type, String post})>{};
+    final byNume = <int, ({String type, String post, String label})>{};
     final seenNumes = <int>{};
     for (final o in options) {
-      if (seenNumes.add(o.nume)) byNume[o.nume] = (type: o.type, post: o.post);
+      if (seenNumes.add(o.nume)) {
+        byNume[o.nume] = (type: o.type, post: o.post, label: o.label);
+      }
     }
 
-    final scored = <(String, int)>[]; // (url, content-length)
+    // Player novo (`animeq-player`, visto em animesdrive/animeq desde out/2026):
+    // os streams já vêm no HTML, sem `dooplay_player_option`. Sem isto a
+    // extração antiga não acha nenhuma opção e a fonte "existe" mas não toca.
+    final inline = _inlineSources(body);
+    final scored = <({String url, int size, String? label})>[];
+    for (final s in inline) {
+      final size = await probeMediaUrl(Uri.parse(s.url),
+          headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'});
+      if (size >= 0) scored.add((url: s.url, size: size, label: s.label));
+    }
+
     for (final entry in byNume.entries) {
-      final payload = await _fetchPayload(method, apiHost, entry.value, entry.key, episodeUrl);
+      final payload = await _fetchPayload(
+        method,
+        apiHost,
+        (type: entry.value.type, post: entry.value.post),
+        entry.key,
+        episodeUrl,
+      );
       final embed = payload?['embed_url']?.toString();
       if (embed == null || embed.isEmpty) continue;
       if (payload?['type']?.toString() != 'mp4' && !(embed.toLowerCase().contains('.mp4'))) {
@@ -117,23 +150,65 @@ class DooPlayV2Extractor {
       if (src == null) continue;
       final size = await probeMediaUrl(Uri.parse(src),
           headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'});
-      if (size >= 0) scored.add((src, size));
+      if (size >= 0) {
+        scored.add((
+          url: src,
+          size: size,
+          label: entry.value.label.isEmpty ? null : entry.value.label,
+        ));
+      }
     }
 
-    // Camada C: bigger file first as the primary source (cheap quality proxy).
-    scored.sort((a, b) => b.$2.compareTo(a.$2));
+    // Dedupe por URL (inline ganha o rótulo real SD/HD/FHD) e depois camada C:
+    // arquivo maior primeiro como proxy barato de qualidade.
+    final seenUrls = <String>{};
+    final unique = scored.where((s) => seenUrls.add(s.url)).toList()
+      ..sort((a, b) => b.size.compareTo(a.size));
     final sources = <VideoSource>[];
-    for (final s in scored) {
+    for (final s in unique) {
       sources.add(VideoSource(
-        url: s.$1,
-        quality: sources.isEmpty ? 'Auto' : 'Alternativa',
+        url: s.url,
+        quality: s.label ?? (sources.isEmpty ? 'Auto' : 'Alternativa'),
         headers: {'User-Agent': _ua, 'Referer': '$baseUrl/'},
       ));
     }
     if (sources.isEmpty) {
-      throw NoPlayableOption('no type=mp4 option answered 206');
+      throw NoPlayableOption('no playable stream answered 206');
     }
     return sources;
+  }
+
+  /// Streams do player inline `animeq-player`: cada
+  /// `div[data-animeq-source="N"]` pode ter `<video><source src=…>` (direto) ou
+  /// um iframe (Blogger — ignorado). O rótulo vem do botão
+  /// `[data-animeq-switch="N"]` (`data-source-name="SD|HD|FHD"`), casado pelo
+  /// índice do bloco (não pela ordem dos `<video>`, que pula os iframes).
+  static List<({String url, String label})> _inlineSources(String body) {
+    final doc = html_parser.parse(body);
+    final names = <String, String>{};
+    for (final b in doc.querySelectorAll('[data-animeq-switch]')) {
+      final idx = b.attributes['data-animeq-switch']?.trim();
+      final name = (b.attributes['data-source-name'] ?? b.text).trim();
+      if (idx != null && idx.isNotEmpty && name.isNotEmpty) names[idx] = name;
+    }
+    final out = <({String url, String label})>[];
+    for (final block in doc.querySelectorAll('[data-animeq-source]')) {
+      final idx = block.attributes['data-animeq-source']?.trim();
+      for (final s in block.querySelectorAll('video source[src]')) {
+        final src = s.attributes['src']?.trim() ?? '';
+        if (!src.startsWith('http')) continue;
+        out.add((url: src, label: names[idx] ?? 'Auto'));
+      }
+    }
+    if (out.isEmpty) {
+      // Variante sem o wrapper por servidor: aceita qualquer <video><source>.
+      for (final s in doc.querySelectorAll('video source[src]')) {
+        final src = s.attributes['src']?.trim() ?? '';
+        if (!src.startsWith('http')) continue;
+        out.add((url: src, label: 'Auto'));
+      }
+    }
+    return out;
   }
 
   String? _playMethod(String body) {

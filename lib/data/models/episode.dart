@@ -133,6 +133,19 @@ class VideoSource {
         subtitleCandidates: [...subtitleCandidates, sub],
       );
 
+  /// Cópia carimbando o áudio entregue por este stream ("dublado"/"legendado").
+  /// Usado por fontes cujo catálogo separa as variantes em páginas distintas
+  /// (DooPlay/AnimesOnline/Dattebayo): o seletor passa a mostrar o idioma.
+  VideoSource withAudio(String audio) => VideoSource(
+        url: url,
+        quality: quality,
+        headers: headers,
+        dashHeight: dashHeight,
+        audio: audio,
+        unavailableAudios: unavailableAudios,
+        subtitleCandidates: subtitleCandidates,
+      );
+
   /// Cópia carimbando os áudios que a fonte anunciava mas não entregou.
   VideoSource withUnavailableAudios(List<String> missing) => VideoSource(
         url: url,
