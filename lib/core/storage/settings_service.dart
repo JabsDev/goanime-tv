@@ -1,11 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../device/device_benchmark.dart';
+import '../device/device_profile.dart';
 import '../player/av_sync.dart';
 import '../storage/local_storage.dart';
 import '../tmdb/tmdb_service.dart';
 import '../utils/device_capability.dart';
 import '../utils/nsfw_filter.dart';
+import '../utils/quality_picker.dart';
 
 /// Configurações de runtime + alavancas do "modo lite".
 /// ponytail: um único Inherited-ish service expõe getters — leitura uma vez
@@ -200,6 +203,9 @@ class SettingsService {
     LocalStorage.ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
     _userPref = prefs.getBool(_kLiteMode);
+    // Perfil de hardware (CPU/RAM/decoders) antes do lite: o modo lite segue
+    // a RAM, mas o teto de qualidade usa o nível de potência (tier).
+    await DeviceCapability.load();
     _autoLite = await DeviceCapability.isLowEnd();
     _initialized = true;
     _onboardingSeen = prefs.getBool(_kOnboardingSeen) ?? false;
@@ -240,7 +246,7 @@ class SettingsService {
     _tmdbUseDefault = prefs.getBool(_kTmdbUseDefault);
     _tmdbUseDefaultVN.value = _tmdbUseDefault;
     debugPrint(
-      '[Settings] init user=$_userPref auto=$_autoLite lite=$_liteModeVN.value nsfw=$_nsfwFilter autoSkip=$_autoSkipIntro',
+      '[Settings] init user=$_userPref auto=$_autoLite lite=${_liteModeVN.value} nsfw=$_nsfwFilter autoSkip=$_autoSkipIntro',
     );
   }
 
@@ -252,6 +258,42 @@ class SettingsService {
   bool get liteModeActive => _initialized ? _liteModeVN.value : _resolveLite();
   bool get autoDetectedLowEnd => _autoLite;
   bool? get userPreference => _userPref;
+
+  /// Retrato de hardware coletado no boot (null em desktop/teste).
+  DeviceProfile? get deviceProfile => DeviceCapability.profile;
+
+  /// Nível de potência + score + motivos (fallback "capaz" sem perfil).
+  DeviceAssessment get deviceAssessment => DeviceCapability.assessment;
+
+  /// Último benchmark persistido (null = nunca rodou).
+  BenchmarkSnapshot? get deviceBenchmark => DeviceCapability.benchmark;
+
+  /// Teto de qualidade padrão do aparelho.
+  ///
+  /// O nível manda: limitado → 480p, intermediário → 720p, capaz → sem teto.
+  /// Lite **manual** (usuário escolheu "Modo lite (sempre)") ainda força no
+  /// máximo 480p. O lite automático NÃO mexe no teto: um Fire Stick de 1 GB
+  /// pode ficar com a UI leve e continuar tocando 720p, que é o ponto da
+  /// detecção por capacidade em vez de só RAM.
+  int? get qualityCapHeight {
+    final tierCap = deviceAssessment.tier.maxQualityHeight;
+    if (userPreference != true) return tierCap;
+    if (tierCap == null || tierCap > kDefaultMaxQualityHeight) {
+      return kDefaultMaxQualityHeight;
+    }
+    return tierCap;
+  }
+
+  /// Roda o benchmark (~0,6 s em isolate) e reavalia a potência na hora.
+  Future<DeviceAssessment> runDeviceBenchmark() async {
+    final result = await DeviceBenchmark.run();
+    final assessment = await DeviceCapability.applyBenchmark(result);
+    debugPrint(
+      '[Settings] benchmark ${result.rawLabel} → '
+      '${assessment.tier.name} (${assessment.score})',
+    );
+    return assessment;
+  }
 
   Future<void> setUserPreference(bool? v) async {
     _userPref = v;

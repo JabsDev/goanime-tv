@@ -40,6 +40,9 @@ class GoAnimeApp : Application() {
         // Canais do pipeline de legenda (sem dependência de Activity): vivem
         // na engine, não na tela — continuam respondendo com o app em fundo.
         CodecsChannel(messenger).register()
+        // Perfil de hardware (RAM/CPU/decoders): o Dart consulta no
+        // SettingsService.init, antes de decidir o teto de qualidade.
+        HardwareChannel(this, messenger).register()
         AudioExtractChannel(messenger).register()
         LlmTranslator(messenger).register()
         Jav03Stt(messenger).register()

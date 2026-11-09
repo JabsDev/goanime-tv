@@ -1883,21 +1883,15 @@ class _ProviderQualityDialogState extends State<_ProviderQualityDialog> {
   Widget _buildQualityStep(List<VideoSource> sources) {
     final visible = _visibleSources(sources);
     final hasAudioStep = _audiosFor(sources).length > 1;
-    // Padrão em modo lite: melhor qualidade até 480p (HY320 Mini).
-    // Se a fonte só tem 720p/1080p+, o foco cai na menor
-    // disponível — tocar continua funcionando, o teto é preferência.
-    final defaultIdx = defaultQualityIndex(
-      visible,
-      maxHeight: SettingsService.instance.liteModeActive
-          ? kDefaultMaxQualityHeight
-          : null,
-    );
-    final defaultHint = visible.isEmpty ||
-            !SettingsService.instance.liteModeActive ||
-            visible.length <= 1
+    // Padrão por nível do aparelho: limitado 480p, intermediário 720p, capaz
+    // sem teto. Lite manual força 480p. Se a fonte só tem acima do teto, o
+    // foco cai na menor disponível — tocar continua funcionando.
+    final cap = SettingsService.instance.qualityCapHeight;
+    final defaultIdx = defaultQualityIndex(visible, maxHeight: cap);
+    final defaultHint =
+        visible.isEmpty || cap == null || visible.length <= 1
         ? null
-        : qualityScore(visible[defaultIdx].quality) <=
-                kDefaultMaxQualityHeight
+        : qualityScore(visible[defaultIdx].quality) <= cap
             ? 'padrão'
             : 'menor disponível';
     return KeyedSubtree(

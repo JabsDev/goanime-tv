@@ -30,8 +30,9 @@ class PlayerScreen extends StatefulWidget {
   final List<VideoSource>? initialSources;
 
   /// Índice da qualidade escolhida explicitamente no diálogo. `null` = não
-  /// houve escolha (auto-next, card de legenda IA): o player aplica o teto do
-  /// modo lite (`kDefaultMaxQualityHeight`).
+  /// houve escolha (auto-next, card de legenda IA): o player aplica
+  /// `SettingsService.qualityCapHeight` (teto do nível do aparelho; lite
+  /// manual força 480p).
   final int? initialIndex;
 
   const PlayerScreen({
@@ -235,23 +236,24 @@ class _PlayerScreenState extends State<PlayerScreen>
         return;
       }
       // Fase 3: auto-seleciona a melhor qualidade quando o usuário não fez
-      // escolha explícita (auto-next). Sem escolha, o modo lite aplica o teto
-      // de 480p (com fallback para a menor fonte quando só há 720p/1080p+).
+      // escolha explícita (auto-next). Sem escolha, o teto do aparelho vale:
+      // limitado 480p, intermediário 720p, capaz sem teto (lite manual força
+      // 480p mesmo num aparelho capaz).
       final ordered = sortBestFirst(sources);
+      final cap = SettingsService.instance.qualityCapHeight;
       final startIndex = resolveStartIndex(
         ordered,
         sources,
         requested: widget.initialIndex,
-        maxHeight: SettingsService.instance.liteModeActive
-            ? kDefaultMaxQualityHeight
-            : null,
+        maxHeight: cap,
       );
       debugPrint('[Player] Resolved ${widget.provider} sources: '
           '${ordered.map((s) => '${s.quality}:${Uri.parse(s.url).host}').join(' | ')}');
       debugPrint('[Player] Start index $startIndex '
           '(${ordered[startIndex].quality}, '
           'escolha explícita=${widget.initialIndex != null}, '
-          'lite=${SettingsService.instance.liteModeActive})');
+          'tier=${SettingsService.instance.deviceAssessment.tier.name}, '
+          'cap=$cap)');
       setState(() => _sources = ordered);
       await _playSource(startIndex);
     } catch (e) {

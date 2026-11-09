@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/theme_constants.dart';
+import '../../core/device/device_profile.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/subtitles/ai_providers.dart';
 import '../../core/subtitles/legendai/legendai_connection.dart';
@@ -111,7 +112,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Text(
                       'Reduz animações, sombras, cache paralelo e enriquecimento '
                       'AniList em busca. Mantém todas as funções principais — '
-                      'apenas efeitos visuais pesados são cortados.',
+                      'apenas efeitos visuais pesados são cortados. A qualidade '
+                      'padrão do vídeo segue a potência do aparelho.',
                       style: const TextStyle(
                         fontSize: 16,
                         color: ThemeConstants.textSecondary,
@@ -120,7 +122,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 24),
                     _StatusCard(
-                      autoDetectedLowEnd: auto,
                       liteActive: liteActive,
                       userPreference: user,
                     ),
@@ -128,8 +129,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _ModeOption(
                       label: 'Automático',
                       description: auto
-                          ? 'Dispositivo fraco detectado — ativando modo lite'
-                          : 'Dispositivo capaz — mantendo modo completo',
+                          ? 'Pouca RAM livre — ativando modo lite'
+                          : 'RAM suficiente — mantendo modo completo',
                       selected: user == null,
                       onTap: () =>
                           SettingsService.instance.setUserPreference(null),
@@ -137,7 +138,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _ModeOption(
                       label: 'Modo lite (sempre)',
                       description:
-                          'Corta efeitos visuais pesados em qualquer aparelho',
+                          'Corta efeitos pesados e limita a qualidade padrão a 480p',
                       selected: user == true,
                       onTap: () =>
                           SettingsService.instance.setUserPreference(true),
@@ -145,10 +146,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _ModeOption(
                       label: 'Modo completo (sempre)',
                       description:
-                          'Mantém animações, sombras e paralelismo integral',
+                          'Mantém animações e sombras (a qualidade segue o aparelho)',
                       selected: user == false,
                       onTap: () =>
                           SettingsService.instance.setUserPreference(false),
+                    ),
+                    const SizedBox(height: 24),
+                    _DevicePowerCard(
+                      onAssessmentChanged: () {
+                        if (mounted) setState(() {});
+                      },
                     ),
                     const SizedBox(height: 32),
                     const TmdbSettingsSection(),
@@ -492,21 +499,19 @@ class _AiStorageRowState extends State<_AiStorageRow> {
 }
 
 class _StatusCard extends StatelessWidget {
-  final bool autoDetectedLowEnd;
   final bool liteActive;
   final bool? userPreference;
 
   const _StatusCard({
-    required this.autoDetectedLowEnd,
     required this.liteActive,
     required this.userPreference,
   });
 
   @override
   Widget build(BuildContext context) {
-    final detectorLabel = autoDetectedLowEnd
-        ? 'Dispositivo fraco detectado'
-        : 'Dispositivo capaz detectado';
+    final tier = SettingsService.instance.deviceAssessment.tier;
+    final detectorLabel =
+        'Potência: ${tier.label} · vídeo até ${tier.qualityLabel}';
     final activeLabel = liteActive
         ? 'Modo ativo: Lite'
         : 'Modo ativo: Completo';
@@ -562,6 +567,219 @@ class _StatusCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Diagnóstico de hardware + benchmark rápido.
+///
+/// Fica logo abaixo do seletor de modo lite: mostra por que o aparelho foi
+/// classificado como limitado/intermediário/capaz (RAM, CPU, ABI, decoders) e
+/// deixa rodar a medição que refina o nível.
+class _DevicePowerCard extends StatefulWidget {
+  /// Rebuild da tela inteira: o card de status acima também mostra o tier.
+  final VoidCallback onAssessmentChanged;
+
+  const _DevicePowerCard({required this.onAssessmentChanged});
+
+  @override
+  State<_DevicePowerCard> createState() => _DevicePowerCardState();
+}
+
+class _DevicePowerCardState extends State<_DevicePowerCard> {
+  bool _running = false;
+
+  Future<void> _runBenchmark() async {
+    if (_running) return;
+    setState(() => _running = true);
+    try {
+      final assessment = await SettingsService.instance.runDeviceBenchmark();
+      if (!mounted) return;
+      widget.onAssessmentChanged();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Benchmark: ${assessment.score}/100 · aparelho '
+            '${assessment.tier.label.toLowerCase()} '
+            '(até ${assessment.tier.qualityLabel}).',
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Não foi possível medir o aparelho: $e'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
+
+  static String _formatDate(DateTime at) {
+    final d = at.day.toString().padLeft(2, '0');
+    final m = at.month.toString().padLeft(2, '0');
+    final h = at.hour.toString().padLeft(2, '0');
+    final min = at.minute.toString().padLeft(2, '0');
+    return '$d/$m $h:$min';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = SettingsService.instance;
+    final profile = settings.deviceProfile;
+    final assessment = settings.deviceAssessment;
+    final benchmark = settings.deviceBenchmark;
+
+    final detailLines = <String>[
+      if (profile != null)
+        'RAM ${profile.ramLabel} · ${profile.availableRamLabel}',
+      if (profile != null) 'CPU ${profile.cpuLabel}',
+      if (profile != null) 'Decode ${profile.decodeLabel}',
+      if (profile == null)
+        'Perfil de hardware indisponível neste aparelho — usando o modo completo.',
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: ThemeConstants.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ThemeConstants.surfaceLight),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.memory,
+                color: ThemeConstants.primary,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  profile == null
+                      ? 'Potência do aparelho: indisponível'
+                      : 'Potência do aparelho: ${assessment.tier.label} '
+                          '(${assessment.score}/100)',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    color: ThemeConstants.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              _TierBadge(tier: assessment.tier),
+            ],
+          ),
+          const SizedBox(height: 12),
+          for (final line in detailLines)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Text(
+                line,
+                style: const TextStyle(
+                  fontSize: 15,
+                  color: ThemeConstants.textSecondary,
+                  height: 1.3,
+                ),
+              ),
+            ),
+          const SizedBox(height: 3),
+          Text(
+            benchmark == null
+                ? 'Benchmark: não executado'
+                : 'Benchmark: ${benchmark.detectionScore}/100 · '
+                    '${_formatDate(benchmark.at)}',
+            style: const TextStyle(
+              fontSize: 15,
+              color: ThemeConstants.textMuted,
+            ),
+          ),
+          if (benchmark != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                'Última medição: ${benchmark.intMops.toStringAsFixed(0)} MI/s · '
+                '${benchmark.floatMops.toStringAsFixed(0)} MF/s · '
+                '${benchmark.memMibps.toStringAsFixed(0)} MiB/s',
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: ThemeConstants.textMuted,
+                ),
+              ),
+            ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              TVButton(
+                label: _running ? 'Medindo…' : 'Rodar benchmark',
+                icon: Icons.speed,
+                isPrimary: false,
+                width: 270,
+                onPressed: _running ? () {} : _runBenchmark,
+              ),
+              const SizedBox(width: 16),
+              if (_running)
+                const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: ThemeConstants.primary,
+                  ),
+                )
+              else
+                const Expanded(
+                  child: Text(
+                    'Mede CPU e memória (~1 s) e refina o teto de qualidade.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: ThemeConstants.textMuted,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TierBadge extends StatelessWidget {
+  final DeviceTier tier;
+
+  const _TierBadge({required this.tier});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (tier) {
+      DeviceTier.low => ThemeConstants.accent,
+      DeviceTier.mid => ThemeConstants.primary,
+      DeviceTier.high => const Color(0xFF6BD46B),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.6)),
+      ),
+      child: Text(
+        tier.qualityLabel,
+        style: TextStyle(
+          fontSize: 14,
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }

@@ -42,8 +42,9 @@ class ExoDashPlayerScreen extends StatefulWidget {
   final List<VideoSource>? initialSources;
 
   /// Índice da qualidade escolhida explicitamente no diálogo. `null` = não
-  /// houve escolha (auto-next, card de legenda IA): o player aplica o teto do
-  /// modo lite (`kDefaultMaxQualityHeight`).
+  /// houve escolha (auto-next, card de legenda IA): o player aplica
+  /// `SettingsService.qualityCapHeight` (teto do nível do aparelho; lite
+  /// manual força 480p).
   final int? initialIndex;
 
   const ExoDashPlayerScreen({
@@ -170,15 +171,13 @@ class _ExoDashPlayerScreenState extends State<ExoDashPlayerScreen>
       // O índice explícito vindo do diálogo é remapeado para a ordem nova (por
       // identidade; após re-resolve do retry, por qualidade+url — o retry
       // repete a MESMA qualidade, nunca pula para outra sozinho). Sem escolha
-      // explícita, o modo lite aplica o teto de 480p.
+      // explícita, aplica o teto do aparelho (tier; lite manual força 480p).
       final ordered = sortBestFirst(sources);
       final startIndex = resolveStartIndex(
         ordered,
         sources,
         requested: widget.initialIndex,
-        maxHeight: SettingsService.instance.liteModeActive
-            ? kDefaultMaxQualityHeight
-            : null,
+        maxHeight: SettingsService.instance.qualityCapHeight,
       );
       setState(() => _sources = ordered);
       await _playSource(startIndex);

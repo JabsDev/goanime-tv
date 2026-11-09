@@ -73,6 +73,18 @@ void main() {
     }
   }
 
+  testWidgets('diagnóstico de hardware fica junto do seletor de modo lite',
+      (tester) async {
+    await pumpSettings(tester, scrollToUpdate: false);
+
+    expect(find.textContaining('Potência do aparelho:'), findsOneWidget);
+    expect(find.text('Rodar benchmark'), findsOneWidget);
+    expect(find.text('Benchmark: não executado'), findsOneWidget);
+
+    // Deixa probes assíncronos da tela (modelos IA) terminarem.
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('Verificar agora durante checking mostra feedback', (tester) async {
     UpdateService.instance.debugSetState(UpdateState.checking);
     await pumpSettings(tester);
