@@ -32,6 +32,15 @@
         android:icon="@mipmap/ic_launcher"
         android:banner="@mipmap/ic_launcher"
         android:networkSecurityConfig="@xml/network_security_config">
+        <!-- Fire TV Stick Lite (PowerVR Rogue GE8300): o Impeller não consegue
+             criar o contexto offscreen do backend GLES e o app morre no boot
+             com SIGSEGV na thread 1.raster (libflutter.so), antes de qualquer
+             código Dart. Volta para o Skia (fallback do engine). Só remover
+             quando o engine deixar de oferecer o opt-out OU o driver da GPU
+             for corrigido — validar em aparelho real antes. -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
