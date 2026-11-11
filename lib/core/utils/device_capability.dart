@@ -72,30 +72,37 @@ class DeviceCapability {
     _lowEnd = null; // recalcula com o perfil novo
     _assessment = profile == null
         ? DeviceAssessment.unknown
-        : assessDevice(profile, benchmarkScore: benchmark?.score);
+        : assessDevice(
+            profile,
+            benchmarkScore: benchmark?.score,
+            video: benchmark?.video,
+          );
 
     debugPrint(
       '[DeviceCapability] ${profile?.model ?? 'perfil indisponível'} → '
       '${_assessment!.tier.name} (${_assessment!.score}) '
       'freq=${profile?.cpuMaxFreqMhz} cores=${profile?.cores} '
       'ram=${profile?.totalRamMb}/${profile?.availableRamMb} '
-      'bench=${benchmark?.score.toStringAsFixed(0) ?? '-'}',
+      'bench=${benchmark?.score.toStringAsFixed(0) ?? '-'} '
+      'video=${benchmark?.hasVideo == true ? benchmark!.videoLabel : '-'}',
     );
     return _assessment!;
   }
 
-  /// Grava o benchmark e reavalia na hora. Retorna a avaliação nova.
+  /// Grava o benchmark (CPU + vídeo) e reavalia na hora.
   static Future<DeviceAssessment> applyBenchmark(
-    DeviceBenchmarkResult result,
-  ) async {
-    final snap = await DeviceBenchmarkStore.save(result);
+    DeviceBenchmarkResult result, {
+    VideoBenchmark? video,
+  }) async {
+    final snap = await DeviceBenchmarkStore.save(result, video: video);
     _benchmark = snap;
     final p = _profile;
     _assessment = p == null
         ? DeviceAssessment.unknown
-        : assessDevice(p, benchmarkScore: snap.score);
+        : assessDevice(p, benchmarkScore: snap.score, video: snap.video);
     debugPrint(
-      '[DeviceCapability] benchmark ${result.detectionScore}/100 → '
+      '[DeviceCapability] benchmark ${result.detectionScore}/100 '
+      '${snap.hasVideo ? '· vídeo ${snap.videoLabel} ' : ''}→ '
       '${_assessment!.tier.name} (${_assessment!.score})',
     );
     return _assessment!;

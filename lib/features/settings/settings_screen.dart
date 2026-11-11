@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../core/constants/theme_constants.dart';
+import '../../core/device/device_benchmark.dart';
 import '../../core/device/device_profile.dart';
+import '../../core/device/video_benchmark.dart';
 import '../../core/storage/settings_service.dart';
 import '../../core/subtitles/ai_providers.dart';
 import '../../core/subtitles/legendai/legendai_connection.dart';
@@ -589,22 +592,48 @@ class _DevicePowerCard extends StatefulWidget {
 
 class _DevicePowerCardState extends State<_DevicePowerCard> {
   bool _running = false;
+  String? _stage;
+  VideoController? _preview;
 
   Future<void> _runBenchmark() async {
     if (_running) return;
-    setState(() => _running = true);
+    setState(() {
+      _running = true;
+      _stage = 'Medindo CPU e memória…';
+    });
     try {
-      final assessment = await SettingsService.instance.runDeviceBenchmark();
+      final cpu = await DeviceBenchmark.run();
+      if (!mounted) return;
+
+      setState(() => _stage = 'Preparando teste de vídeo…');
+      final runner = VideoBenchmarkRunner(
+        onStage: (stage) {
+          if (mounted) setState(() => _stage = stage);
+        },
+        onController: (controller) {
+          if (mounted) setState(() => _preview = controller);
+        },
+      );
+      final video = await runner.run();
+
+      final assessment = await SettingsService.instance.applyDeviceBenchmark(
+        cpu,
+        video: video,
+      );
       if (!mounted) return;
       widget.onAssessmentChanged();
+
+      final detail = video == null
+          ? 'teste de vídeo indisponível'
+          : 'vídeo ${video.sustainedHeight == null ? 'não sustentou 480p' : 'até ${video.sustainedHeight}p'}';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             'Benchmark: ${assessment.score}/100 · aparelho '
             '${assessment.tier.label.toLowerCase()} '
-            '(até ${assessment.tier.qualityLabel}).',
+            '(até ${assessment.tier.qualityLabel}) · $detail.',
           ),
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 6),
         ),
       );
     } catch (e) {
@@ -616,7 +645,13 @@ class _DevicePowerCardState extends State<_DevicePowerCard> {
         ),
       );
     } finally {
-      if (mounted) setState(() => _running = false);
+      if (mounted) {
+        setState(() {
+          _running = false;
+          _stage = null;
+          _preview = null;
+        });
+      }
     }
   }
 
@@ -715,6 +750,57 @@ class _DevicePowerCardState extends State<_DevicePowerCard> {
                 ),
               ),
             ),
+          if (benchmark != null && benchmark.hasVideo)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                'Vídeo: ${benchmark.videoLabel}',
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: ThemeConstants.textMuted,
+                ),
+              ),
+            ),
+          if (_running) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (_preview != null)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: SizedBox(
+                      width: 256,
+                      height: 144,
+                      child: Video(
+                        controller: _preview!,
+                        controls: NoVideoControls,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                if (_preview != null) const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    _stage ?? 'Medindo…',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      color: ThemeConstants.textSecondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: ThemeConstants.primary,
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 14),
           Row(
             children: [
@@ -726,19 +812,11 @@ class _DevicePowerCardState extends State<_DevicePowerCard> {
                 onPressed: _running ? () {} : _runBenchmark,
               ),
               const SizedBox(width: 16),
-              if (_running)
-                const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: ThemeConstants.primary,
-                  ),
-                )
-              else
+              if (!_running)
                 const Expanded(
                   child: Text(
-                    'Mede CPU e memória (~1 s) e refina o teto de qualidade.',
+                    'Mede CPU/memória (~1 s) e toca clipes 480p/720p/1080p '
+                    '(~20 s) para medir os fps reais.',
                     style: TextStyle(
                       fontSize: 14,
                       color: ThemeConstants.textMuted,

@@ -1,14 +1,17 @@
+import 'dart:convert';
 import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Benchmark rápido de CPU/RAM (~0,6 s) para calibrar a detecção de hardware.
+import 'device_profile.dart';
+
+/// Benchmark de CPU/RAM (~0,6 s) + benchmark de vídeo (fps real por resolução).
 ///
-/// Não tenta prever fps de vídeo: mede três coisas que, juntas, separam bem um
-/// A53 de 1,3 GHz de um de 1,7 GHz — inteiros, ponto flutuante e banda de
-/// memória (o decode em software depende dos três). O resultado vira um
-/// índice 0–100 que entra no `assessDevice` como substituição/ajuste.
+/// A parte de CPU mede inteiros, ponto flutuante e banda de memória. Ela
+/// sozinha não separa bem aparelhos que decodificam vídeo de forma diferente
+/// — por isso o resultado agora é combinado com o [VideoBenchmark], que toca
+/// clipes locais em 480p/720p/1080p e mede os fps efetivos.
 ///
 /// Os limiares de normalização são **calibráveis**: a tela de diagnóstico
 /// mostra os valores crus para ajustar [intZero]/[intFull] etc. com aparelhos
@@ -17,7 +20,7 @@ class DeviceBenchmark {
   DeviceBenchmark._();
 
   /// Muda quando a fórmula muda; resultado antigo é ignorado.
-  static const int version = 1;
+  static const int version = 2;
 
   static const Duration defaultSample = Duration(milliseconds: 180);
 
@@ -210,6 +213,9 @@ class BenchmarkSnapshot {
     required this.floatMops,
     required this.memMibps,
     required this.at,
+    this.videoFpsByHeight = const {},
+    this.videoContainerFps = 30,
+    this.videoHardwareDecode = false,
   });
 
   final double score;
@@ -218,7 +224,32 @@ class BenchmarkSnapshot {
   final double memMibps;
   final DateTime at;
 
+  /// fps medido por altura no benchmark de vídeo. Vazio = nunca mediu vídeo
+  /// (snapshot antigo ou o aparelho não tocou os clipes).
+  final Map<int, double> videoFpsByHeight;
+  final double videoContainerFps;
+  final bool videoHardwareDecode;
+
   int get detectionScore => score.round();
+
+  bool get hasVideo => videoFpsByHeight.isNotEmpty;
+
+  VideoBenchmark? get video => hasVideo
+      ? VideoBenchmark(
+          fpsByHeight: videoFpsByHeight,
+          containerFps: videoContainerFps,
+          hardwareDecode: videoHardwareDecode,
+        )
+      : null;
+
+  /// "480p 29 fps · 720p 21 fps" para o diagnóstico.
+  String get videoLabel {
+    if (!hasVideo) return '';
+    final heights = videoFpsByHeight.keys.toList()..sort();
+    return heights
+        .map((h) => '${h}p ${videoFpsByHeight[h]!.toStringAsFixed(0)} fps')
+        .join(' · ');
+  }
 }
 
 class DeviceBenchmarkStore {
@@ -230,6 +261,9 @@ class DeviceBenchmarkStore {
   static const _kFloat = 'device_benchmark_float';
   static const _kMem = 'device_benchmark_mem';
   static const _kAt = 'device_benchmark_at';
+  static const _kVideoJson = 'device_benchmark_video';
+  static const _kVideoTarget = 'device_benchmark_video_target';
+  static const _kVideoHwdec = 'device_benchmark_video_hwdec';
 
   /// `null` quando nunca rodou ou quando a fórmula mudou de versão.
   static Future<BenchmarkSnapshot?> read() async {
@@ -247,6 +281,9 @@ class DeviceBenchmarkStore {
         floatMops: prefs.getDouble(_kFloat) ?? 0,
         memMibps: prefs.getDouble(_kMem) ?? 0,
         at: DateTime.fromMillisecondsSinceEpoch(atMs),
+        videoFpsByHeight: _decodeVideo(prefs.getString(_kVideoJson)),
+        videoContainerFps: prefs.getDouble(_kVideoTarget) ?? 30,
+        videoHardwareDecode: prefs.getBool(_kVideoHwdec) ?? false,
       );
     } catch (e) {
       debugPrint('[DeviceBenchmark] leitura falhou: $e');
@@ -254,14 +291,24 @@ class DeviceBenchmarkStore {
     }
   }
 
-  static Future<BenchmarkSnapshot> save(DeviceBenchmarkResult result) async {
+  /// Grava CPU + vídeo. [video] `null` apaga a medição de vídeo anterior:
+  /// manter um resultado antigo ao lado de um teste novo que falhou daria um
+  /// nível que o aparelho não provou.
+  static Future<BenchmarkSnapshot> save(
+    DeviceBenchmarkResult result, {
+    VideoBenchmark? video,
+  }) async {
     final now = DateTime.now();
+    final videoFps = video?.fpsByHeight ?? const <int, double>{};
     final snap = BenchmarkSnapshot(
       score: result.score,
       intMops: result.intMops,
       floatMops: result.floatMops,
       memMibps: result.memMibps,
       at: now,
+      videoFpsByHeight: videoFps,
+      videoContainerFps: video?.containerFps ?? 30,
+      videoHardwareDecode: video?.hardwareDecode ?? false,
     );
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_kVersion, DeviceBenchmark.version);
@@ -270,7 +317,34 @@ class DeviceBenchmarkStore {
     await prefs.setDouble(_kFloat, result.floatMops);
     await prefs.setDouble(_kMem, result.memMibps);
     await prefs.setInt(_kAt, now.millisecondsSinceEpoch);
+    if (videoFps.isEmpty) {
+      await prefs.remove(_kVideoJson);
+      await prefs.remove(_kVideoTarget);
+      await prefs.remove(_kVideoHwdec);
+    } else {
+      await prefs.setString(
+        _kVideoJson,
+        jsonEncode(videoFps.map((k, v) => MapEntry(k.toString(), v))),
+      );
+      await prefs.setDouble(_kVideoTarget, video!.containerFps);
+      await prefs.setBool(_kVideoHwdec, video.hardwareDecode);
+    }
     return snap;
+  }
+
+  static Map<int, double> _decodeVideo(String? raw) {
+    if (raw == null || raw.isEmpty) return const {};
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      return {
+        for (final e in map.entries)
+          if (int.tryParse(e.key) != null && e.value is num)
+            int.parse(e.key): (e.value as num).toDouble(),
+      };
+    } catch (e) {
+      debugPrint('[DeviceBenchmark] vídeo inválido no cache: $e');
+      return const {};
+    }
   }
 
   static Future<void> clear() async {
@@ -281,5 +355,8 @@ class DeviceBenchmarkStore {
     await prefs.remove(_kFloat);
     await prefs.remove(_kMem);
     await prefs.remove(_kAt);
+    await prefs.remove(_kVideoJson);
+    await prefs.remove(_kVideoTarget);
+    await prefs.remove(_kVideoHwdec);
   }
 }

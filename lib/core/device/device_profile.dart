@@ -215,6 +215,96 @@ class DeviceProfile {
   }
 }
 
+/// Resultado do benchmark de vídeo: fps efetivo tocado em cada resolução.
+///
+/// Diferente do [DeviceBenchmark] (microbenchmark de CPU), este mede o
+/// caminho real do player (decode + render do mpv) com clipes H.264 locais
+/// em 480p/720p/1080p. É a evidência mais forte para decidir o teto de
+/// qualidade, porque reproduz o cenário que o usuário vê: "toca 720p sem
+/// travar?".
+@immutable
+class VideoBenchmark {
+  const VideoBenchmark({
+    required this.fpsByHeight,
+    this.containerFps = 30,
+    this.hardwareDecode = false,
+    this.elapsed = Duration.zero,
+  });
+
+  /// fps medido por altura (480/720/1080). Resoluções não medidas — porque o
+  /// teste parou quando a anterior não sustentou, ou porque o aparelho não
+  /// abriu o clipe — simplesmente não aparecem.
+  final Map<int, double> fpsByHeight;
+
+  /// fps da fonte dos clipes (30). O alvo de tempo real é
+  /// `containerFps × kVideoFpsRatio`.
+  final double containerFps;
+
+  /// O decode usou aceleração de hardware (`hwdec-current` ≠ `no`).
+  final bool hardwareDecode;
+
+  final Duration elapsed;
+
+  bool get isEmpty => fpsByHeight.isEmpty;
+
+  double? fpsFor(int height) => fpsByHeight[height];
+
+  /// Resolução mais alta que rodou em tempo real, ou `null` se nem 480p.
+  int? get sustainedHeight => videoSustainedHeight(this);
+}
+
+/// fps mínimo para dizer que uma resolução "roda": 85% do fps da fonte, com
+/// piso de [kVideoFpsFloor]. Abaixo disso o olho vê engasgo mesmo que o vídeo
+/// não pare por completo.
+const double kVideoFpsRatio = 0.85;
+const double kVideoFpsFloor = 20;
+
+double videoRequiredFps(double containerFps) {
+  final scaled = containerFps * kVideoFpsRatio;
+  return scaled > kVideoFpsFloor ? scaled : kVideoFpsFloor;
+}
+
+bool videoSustainsFps(double fps, double containerFps) =>
+    fps >= videoRequiredFps(containerFps);
+
+/// Maior altura cujo fps medido sustenta tempo real. `null` = limitação.
+int? videoSustainedHeight(VideoBenchmark video) {
+  var best = 0;
+  for (final entry in video.fpsByHeight.entries) {
+    if (entry.key > best && videoSustainsFps(entry.value, video.containerFps)) {
+      best = entry.key;
+    }
+  }
+  return best == 0 ? null : best;
+}
+
+/// Divisor de nível a partir do que o vídeo provou rodar.
+DeviceTier videoTier(VideoBenchmark video) {
+  final sustained = videoSustainedHeight(video);
+  if (sustained == null || sustained < 720) return DeviceTier.low;
+  if (sustained < 1080) return DeviceTier.mid;
+  return DeviceTier.high;
+}
+
+/// Score 0–100 coerente com o nível: a base vem da resolução sustentada e o
+/// resto da folga de fps (0–8 pts) na melhor resolução medida.
+double videoScore(VideoBenchmark video) {
+  final sustained = videoSustainedHeight(video);
+  final base = sustained == null
+      ? 18.0
+      : sustained >= 1080
+      ? 88.0
+      : sustained >= 720
+      ? 66.0
+      : 42.0;
+  final measured = sustained == null
+      ? video.fpsByHeight.values.fold<double>(0, (a, b) => a > b ? a : b)
+      : video.fpsByHeight[sustained] ?? 0;
+  final ratio = video.containerFps > 0 ? measured / video.containerFps : 0.0;
+  final headroom = ((ratio - 1) / 0.2).clamp(0.0, 1.0) * 8;
+  return (base + headroom).clamp(0.0, 100.0);
+}
+
 /// Resultado da avaliação: nível + score 0–100 + porquês (diagnóstico).
 @immutable
 class DeviceAssessment {
@@ -223,12 +313,17 @@ class DeviceAssessment {
     required this.score,
     this.reasons = const [],
     this.benchmarkUsed = false,
+    this.videoBenchmarkUsed = false,
   });
 
   final DeviceTier tier;
   final int score;
   final List<String> reasons;
   final bool benchmarkUsed;
+
+  /// O nível foi decidido pelo benchmark de vídeo (fps real), não só pelo
+  /// perfil estático de hardware.
+  final bool videoBenchmarkUsed;
 
   int? get maxQualityHeight => tier.maxQualityHeight;
 
@@ -256,13 +351,20 @@ const double _benchmarkWeight = 10;
 const double kLowTierMaxScore = 62;
 const double kHighTierMinScore = 80;
 
-/// Combina hardware estático + benchmark opcional num nível acionável.
+/// Combina hardware estático + benchmarks opcionais num nível acionável.
 ///
-/// [benchmarkScore] é o índice 0–100 do `DeviceBenchmark` (persistido após o
-/// usuário rodar a medição). Sem ele, o benchmark entra como neutro (5 pts).
-DeviceAssessment assessDevice(DeviceProfile profile, {double? benchmarkScore}) {
+/// [benchmarkScore] é o índice 0–100 do `DeviceBenchmark` (CPU). [video] é o
+/// resultado do benchmark de vídeo: quando existe, ele **manda** no nível,
+/// porque mede o caminho real de decode/render — é o que corrige o caso de um
+/// aparelho que pontua bem no microbenchmark e engasga em 720p.
+DeviceAssessment assessDevice(
+  DeviceProfile profile, {
+  double? benchmarkScore,
+  VideoBenchmark? video,
+}) {
   final reasons = <String>[];
   final bench = benchmarkScore?.clamp(0.0, 100.0).toDouble();
+  final hasVideo = video != null && !video.isEmpty;
 
   var score = 0.0;
 
@@ -325,8 +427,37 @@ DeviceAssessment assessDevice(DeviceProfile profile, {double? benchmarkScore}) {
     score += _benchmarkWeight / 2;
   }
 
-  var total = score.round().clamp(0, 100);
-  var tier = total >= kHighTierMinScore
+  DeviceTier tier;
+  if (hasVideo) {
+    tier = videoTier(video);
+    reasons.add('Vídeo: ${_videoFpsLabel(video)}');
+    if (video.hardwareDecode) reasons.add('Decode de vídeo por hardware');
+    final total = videoScore(video).round().clamp(0, 100);
+    // RAM ainda limita o "capaz": o teste de poucos segundos não reproduz a
+    // pressão de memória de uma sessão inteira (buffers + cache + Flutter).
+    if (tier == DeviceTier.high &&
+        profile.totalRamMb > 0 &&
+        profile.totalRamMb <= 1536) {
+      tier = DeviceTier.mid;
+      reasons.add('RAM ≤ 1,5 GB limita o teto a 720p');
+    } else if (tier == DeviceTier.high &&
+        profile.lowRamDevice &&
+        profile.totalRamMb > 0 &&
+        profile.totalRamMb <= 2048) {
+      tier = DeviceTier.mid;
+      reasons.add('Aparelho marcado como low-RAM pelo Android');
+    }
+    return DeviceAssessment(
+      tier: tier,
+      score: total,
+      reasons: reasons,
+      benchmarkUsed: bench != null,
+      videoBenchmarkUsed: true,
+    );
+  }
+
+  final total = score.round().clamp(0, 100);
+  tier = total >= kHighTierMinScore
       ? DeviceTier.high
       : total >= kLowTierMaxScore
       ? DeviceTier.mid
@@ -369,6 +500,26 @@ DeviceAssessment assessDevice(DeviceProfile profile, {double? benchmarkScore}) {
     reasons: reasons,
     benchmarkUsed: bench != null,
   );
+}
+
+/// "480p 30 fps · 720p 21 fps ✗ · teto medido 480p".
+String _videoFpsLabel(VideoBenchmark video) {
+  const heights = [480, 720, 1080];
+  final parts = <String>[];
+  for (final h in heights) {
+    final fps = video.fpsByHeight[h];
+    if (fps == null) break;
+    final mark = videoSustainsFps(fps, video.containerFps) ? '' : ' ✗';
+    parts.add('${h}p ${fps.toStringAsFixed(0)} fps$mark');
+  }
+  final measured = video.fpsByHeight.keys.reduce((a, b) => a > b ? a : b);
+  final sustained = videoSustainedHeight(video);
+  if (sustained == null) {
+    parts.add('não sustentou 480p');
+  } else if (sustained < 1080) {
+    parts.add('teto medido ${measured}p');
+  }
+  return parts.join(' · ');
 }
 
 double _decodeScore(DeviceProfile p) {

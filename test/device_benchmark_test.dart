@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goanime_tv/core/device/device_benchmark.dart';
+import 'package:goanime_tv/core/device/device_profile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -47,6 +48,52 @@ void main() {
       expect(read!.score, closeTo(63.4, 0.001));
       expect(read.intMops, closeTo(21.5, 0.001));
       expect(read.at.millisecondsSinceEpoch, saved.at.millisecondsSinceEpoch);
+      expect(read.hasVideo, isFalse);
+      expect(read.video, isNull);
+    });
+
+    test('save/read persiste o fps por resolução do vídeo', () async {
+      const result = DeviceBenchmarkResult(
+        intMops: 20,
+        floatMops: 19,
+        memMibps: 1200,
+        score: 60,
+        elapsed: Duration(milliseconds: 540),
+      );
+      const video = VideoBenchmark(
+        fpsByHeight: {480: 29.9, 720: 21.4},
+        containerFps: 30,
+        hardwareDecode: true,
+        elapsed: Duration(seconds: 11),
+      );
+      await DeviceBenchmarkStore.save(result, video: video);
+      final read = await DeviceBenchmarkStore.read();
+      expect(read!.hasVideo, isTrue);
+      expect(read.video!.fpsFor(480), closeTo(29.9, 0.001));
+      expect(read.video!.fpsFor(720), closeTo(21.4, 0.001));
+      expect(read.video!.fpsFor(1080), isNull);
+      expect(read.videoContainerFps, 30);
+      expect(read.videoHardwareDecode, isTrue);
+      expect(read.videoLabel, '480p 30 fps · 720p 21 fps');
+    });
+
+    test('novo save sem vídeo apaga a medição anterior', () async {
+      const result = DeviceBenchmarkResult(
+        intMops: 20,
+        floatMops: 19,
+        memMibps: 1200,
+        score: 60,
+        elapsed: Duration(milliseconds: 540),
+      );
+      await DeviceBenchmarkStore.save(
+        result,
+        video: const VideoBenchmark(fpsByHeight: {480: 30}),
+      );
+      expect((await DeviceBenchmarkStore.read())!.hasVideo, isTrue);
+      await DeviceBenchmarkStore.save(result);
+      final read = await DeviceBenchmarkStore.read();
+      expect(read!.hasVideo, isFalse);
+      expect(read.videoLabel, isEmpty);
     });
 
     test('versão antiga da fórmula é ignorada', () async {

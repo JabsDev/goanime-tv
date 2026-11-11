@@ -1,7 +1,7 @@
 name: goanime_tv
 description: "GoAnime TV - Android TV anime streaming app"
 publish_to: 'none'
-version: 1.9.0-rc+1000095
+version: 1.9.0-rc+1000096
 
 environment:
   sdk: ^3.12.0
@@ -49,3 +49,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # Clipes do benchmark de vídeo (480p/720p/1080p, H.264, 7 s, sem áudio).
+    - assets/bench/

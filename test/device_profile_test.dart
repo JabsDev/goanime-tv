@@ -192,4 +192,94 @@ void main() {
     );
     expect(const CodecSupport(hardware: false).shortLabel, '—');
   });
+
+  group('benchmark de vídeo (fps real) define o nível', () {
+    VideoBenchmark video(
+      Map<int, double> fps, {
+      double target = 30,
+      bool hw = true,
+    }) => VideoBenchmark(
+      fpsByHeight: fps,
+      containerFps: target,
+      hardwareDecode: hw,
+      elapsed: const Duration(seconds: 14),
+    );
+
+    test('clipes de 30 fps: 25,5 fps é o piso de tempo real', () {
+      expect(videoRequiredFps(30), closeTo(25.5, 0.001));
+      expect(videoSustainsFps(26, 30), isTrue);
+      expect(videoSustainsFps(24, 30), isFalse);
+      // Piso de 20 fps vale para fontes lentas (24 fps).
+      expect(videoRequiredFps(24), closeTo(20.4, 0.001));
+    });
+
+    test('sustenta 1080p → capaz, sem teto', () {
+      final a = assessDevice(
+        profile(freq: 1900, cores: 8, is64Bit: true, totalRamMb: 3072),
+        video: video({480: 30, 720: 29.5, 1080: 28.8}),
+      );
+      expect(a.tier, DeviceTier.high);
+      expect(a.maxQualityHeight, isNull);
+      expect(a.videoBenchmarkUsed, isTrue);
+      expect(a.reasons.any((r) => r.contains('1080p')), isTrue);
+    });
+
+    test('sustenta 720p e falha 1080p → intermediário', () {
+      final a = assessDevice(
+        profile(freq: 1700),
+        video: video({480: 29.9, 720: 28.2, 1080: 12.0}),
+      );
+      expect(a.tier, DeviceTier.mid);
+      expect(a.maxQualityHeight, 720);
+    });
+
+    test('só 480p → limitado', () {
+      final a = assessDevice(profile(), video: video({480: 29, 720: 9}));
+      expect(a.tier, DeviceTier.low);
+      expect(a.maxQualityHeight, 480);
+      expect(a.score, lessThan(kLowTierMaxScore));
+    });
+
+    test('nem 480p → limitado com score baixo', () {
+      final a = assessDevice(profile(), video: video({480: 8}));
+      expect(a.tier, DeviceTier.low);
+      expect(a.score, lessThan(40));
+    });
+
+    test('vídeo manda sobre a trava estática do projetor', () {
+      // Antes, 1 GB + 1,3 GHz virava limitado mesmo tocando 720p. A medição
+      // real substitui a heurística.
+      final a = assessDevice(
+        profile(freq: 1300),
+        video: video({480: 29.5, 720: 27.0}),
+      );
+      expect(a.tier, DeviceTier.mid);
+      expect(a.reasons.any((r) => r.contains('1,4 GHz')), isFalse);
+    });
+
+    test('RAM de 1 GB ainda impede "capaz" mesmo tocando 1080p', () {
+      final a = assessDevice(
+        profile(freq: 1900, totalRamMb: 1024),
+        video: video({480: 30, 720: 30, 1080: 29}),
+      );
+      expect(a.tier, DeviceTier.mid);
+      expect(a.reasons.any((r) => r.contains('1,5 GB')), isTrue);
+    });
+
+    test('benchmark de vídeo vazio cai no perfil estático', () {
+      final a = assessDevice(
+        profile(freq: 1300),
+        video: const VideoBenchmark(fpsByHeight: {}),
+      );
+      expect(a.tier, DeviceTier.low);
+      expect(a.videoBenchmarkUsed, isFalse);
+    });
+
+    test('sustainedHeight/videoTier resumem o mapa de fps', () {
+      final v = video({480: 30, 720: 26.0, 1080: 20});
+      expect(v.sustainedHeight, 720);
+      expect(videoTier(v), DeviceTier.mid);
+      expect(videoScore(v), inInclusiveRange(62, 79));
+    });
+  });
 }

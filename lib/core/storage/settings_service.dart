@@ -284,12 +284,18 @@ class SettingsService {
     return tierCap;
   }
 
-  /// Roda o benchmark (~0,6 s em isolate) e reavalia a potência na hora.
-  Future<DeviceAssessment> runDeviceBenchmark() async {
-    final result = await DeviceBenchmark.run();
-    final assessment = await DeviceCapability.applyBenchmark(result);
+  /// Grava o benchmark (CPU + vídeo) e reavalia a potência na hora.
+  Future<DeviceAssessment> applyDeviceBenchmark(
+    DeviceBenchmarkResult result, {
+    VideoBenchmark? video,
+  }) async {
+    final assessment = await DeviceCapability.applyBenchmark(
+      result,
+      video: video,
+    );
     debugPrint(
-      '[Settings] benchmark ${result.rawLabel} → '
+      '[Settings] benchmark ${result.rawLabel} '
+      '${video != null ? '· vídeo ${video.fpsByHeight} ' : ''}→ '
       '${assessment.tier.name} (${assessment.score})',
     );
     return assessment;
