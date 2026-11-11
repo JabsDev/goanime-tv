@@ -41,6 +41,9 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Anime> _recent = [];
   List<Anime> _tomorrow = [];
   List<Anime> _drama = [];
+  List<Anime> _recommendations = [];
+  String? _recommendationSeedKey;
+  String? _recommendationSeedTitle;
   bool _isLoading = true;
   bool _anilistLoggedIn = false;
   AniListUser? _anilistUser;
@@ -81,6 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // Timeout or error – show whatever we have
     }
     if (mounted) setState(() => _isLoading = false);
+    _loadRecommendations();
   }
 
   Future<void> _checkAnilist() async {
@@ -98,6 +102,9 @@ class _HomeScreenState extends State<HomeScreen> {
           _anilistLoggedIn = false;
           _anilistUser = null;
           _anilistLists = [];
+          _recommendations = [];
+          _recommendationSeedTitle = null;
+          _recommendationSeedKey = null;
         });
         return;
       }
@@ -108,6 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _anilistUser = user;
       _anilistLists = cached;
     });
+    _loadRecommendations();
     final lists = await AniListService.getUserAnimeList();
     if (!mounted) return;
     // ponytail: não deixa falha de rede (429/offline/Cloudflare/5xx) apagar o
@@ -116,7 +124,108 @@ class _HomeScreenState extends State<HomeScreen> {
     // entries (lastErrorStatus == ok), i.e. o usuário zerou a lista.
     if (lists.isNotEmpty || AniListService.lastErrorStatus == AniListStatus.ok) {
       setState(() => _anilistLists = lists);
+      _loadRecommendations();
     }
+  }
+
+  /// Último anime assistido — compara o "Continue assistindo" do AniList
+  /// (entry CURRENT/REPEATING mais recente por `updatedAt`) com o topo do
+  /// histórico local (sempre inserido na posição 0 e atualizado no player) e
+  /// fica com o evento mais novo. Assim assistir por uma fonte que não
+  /// sincronizou com o AniList ainda escolhe o título certo.
+  ///
+  /// Devolve o seed da linha "Porque você assistiu X", ou null quando não há
+  /// nada assistido ainda.
+  ({String title, int? anilistId})? _recommendationSeed() {
+    final nsfw = SettingsService.instance.nsfwFilterLevel;
+    final watching = _anilistLists
+        .expand((g) => g.entries)
+        .where((e) =>
+            (e.status == 'CURRENT' || e.status == 'REPEATING') &&
+            NsfwFilter.shouldShowMedia(e.media, nsfw))
+        .toList()
+      ..sort((a, b) => (b.updatedAt ?? 0).compareTo(a.updatedAt ?? 0));
+
+    final history = LocalStorage.getHistory().where(_storedAllowed).toList();
+    final historyTitle =
+        history.isEmpty ? '' : (history.first['title']?.toString() ?? '');
+    final historyAt = history.isEmpty
+        ? 0
+        : int.tryParse(history.first['timestamp']?.toString() ?? '') ?? 0;
+
+    if (watching.isNotEmpty) {
+      final anilistAt = (watching.first.updatedAt ?? 0) * 1000;
+      if (historyTitle.isEmpty || anilistAt >= historyAt) {
+        return (
+          title: watching.first.media.title,
+          anilistId: watching.first.media.id,
+        );
+      }
+    }
+    if (historyTitle.isNotEmpty) {
+      return (
+        title: historyTitle,
+        anilistId: history.first['anilistId'] as int?,
+      );
+    }
+    return null;
+  }
+
+  /// Busca (ou reaproveita do cache) as recomendações do último assistido.
+  /// Chamado quando as listas AniList chegam e no fim do load inicial; o
+  /// [_recommendationSeedKey] evita repetir a mesma consulta a cada rebuild.
+  void _loadRecommendations() {
+    final seed = _recommendationSeed();
+    if (seed == null) return;
+    final key = '${seed.anilistId}|${seed.title}';
+    if (_recommendationSeedKey == key) return;
+    _recommendationSeedKey = key;
+    _fetchRecommendations(key: key, seed: seed);
+  }
+
+  Future<void> _fetchRecommendations({
+    required String key,
+    required ({String title, int? anilistId}) seed,
+  }) async {
+    try {
+      var mediaId = seed.anilistId;
+      if (mediaId == null) {
+        // Histórico local só guarda o título (nem toda entrada tem anilistId).
+        // O enrich resolve o id canônico buscando por nome no AniList.
+        final resolved = Anime(name: seed.title, url: '');
+        await AniListService.enrich(resolved);
+        mediaId = resolved.anilistId;
+      }
+      if (mediaId == null) {
+        _recommendationSeedKey = null;
+        return;
+      }
+      final recs = await AniListService.getRecommendations(mediaId);
+      if (!mounted || _recommendationSeedKey != key) return;
+      final filtered = NsfwFilter.filter(recs, SettingsService.instance.nsfwFilterLevel);
+      setState(() {
+        _recommendationSeedTitle = seed.title;
+        _recommendations = filtered;
+      });
+    } catch (e) {
+      debugPrint('[Home] recommendations error: $e');
+      // libera o seed para uma próxima tentativa (refresh, volta do perfil…)
+      if (_recommendationSeedKey == key) _recommendationSeedKey = null;
+    }
+  }
+
+  /// Classificação NSFW de um item salvo (favorito/histórico), que não guarda
+  /// gêneros/isAdult — usa o cache de enrichment quando existir, senão cai na
+  /// keyword do título (fail-open).
+  bool _storedAllowed(Map<String, dynamic> item) {
+    final title = item['title']?.toString() ?? '';
+    final detail = title.isEmpty
+        ? null
+        : AppCaches.enrichment.get<AniListMediaDetail>(TextUtils.cleanTitle(title));
+    return NsfwFilter.levelAllowed(
+      NsfwFilter.classifyStoredItem(title: title, detail: detail),
+      SettingsService.instance.nsfwFilterLevel,
+    );
   }
 
   /// Catálogo TMDB (drama/dorama/donghua/novela). Só carrega com a chave
@@ -231,6 +340,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _anilistLoggedIn = false;
         _anilistUser = null;
         _anilistLists = [];
+        _recommendations = [];
+        _recommendationSeedTitle = null;
+        _recommendationSeedKey = null;
       });
       await _loadDataWithTimeout();
     }
@@ -460,6 +572,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       _anilistLoggedIn = false;
                       _anilistUser = null;
                       _anilistLists = [];
+                      _recommendations = [];
+                      _recommendationSeedTitle = null;
+                      _recommendationSeedKey = null;
                     });
                   },
                 ),
@@ -513,22 +628,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final nsfwSetting = SettingsService.instance.nsfwFilterLevel;
 
-    // ponytail: itens salvos (favoritos/histórico) não guardam gêneros/
-    // isAdult — classifica via cache de enrichment AniList quando existir,
-    // senão por keyword de título (fail-open).
-    bool storedAllowed(Map<String, dynamic> item) {
-      final title = item['title']?.toString() ?? '';
-      final detail = title.isEmpty
-          ? null
-          : AppCaches.enrichment
-              .get<AniListMediaDetail>(TextUtils.cleanTitle(title));
-      return NsfwFilter.levelAllowed(
-          NsfwFilter.classifyStoredItem(title: title, detail: detail),
-          nsfwSetting);
-    }
-
-    final historyFiltered = history.where(storedAllowed).toList();
-    final favoritesFiltered = favorites.where(storedAllowed).toList();
+    final historyFiltered = history.where(_storedAllowed).toList();
+    final favoritesFiltered = favorites.where(_storedAllowed).toList();
 
     final watching = _anilistLists
         .expand((g) => g.entries.where((e) =>
@@ -664,6 +765,20 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () => openFromMap(context, m),
             );
           }, subtitle: '${historyFiltered.length} no histórico'),
+        // "Porque você assistiu X" — logo abaixo de Continue assistindo, como
+        // na Netflix. Alimentada pelas recomendações do AniList para o último
+        // título assistido (AniList CURRENT/REPEATING ou topo do histórico).
+        if (_recommendations.isNotEmpty && _recommendationSeedTitle != null)
+          ...section(
+              'Porque você assistiu "${_recommendationSeedTitle!}"',
+              _recommendations.take(20).toList(), cardHeight,
+              (item) => FocusableCard(
+                    imageUrl: (item as Anime).imageUrl,
+                    title: item.name,
+                    width: cardWidth,
+                    height: cardHeight,
+                    onTap: () => openDetail(context, item),
+                  )),
         if (_trending.isNotEmpty)
           ...section('Em Alta', _trending.take(10).toList(), bannerHeight,
               (item) => FocusableBannerCard(

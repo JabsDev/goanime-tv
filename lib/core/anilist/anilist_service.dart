@@ -719,6 +719,90 @@ class AniListService {
     }
   }
 
+  /// Recomendações do próprio AniList para um media — alimenta a linha
+  /// "Porque você assistiu X" da Home (estilo Netflix). O `Media.recommendations`
+  /// devolve um mix de animes/mangás; aqui só entram nós do tipo ANIME, sem
+  /// duplicatas e sem títulos vazios.
+  ///
+  /// Cache em memória + disco por mediaId: a Home abre instantânea em visitas
+  /// seguintes e a linha continua aparecendo offline com o último resultado.
+  static Future<List<Anime>> getRecommendations(
+    int mediaId, {
+    int perPage = 15,
+  }) async {
+    if (mediaId <= 0) return const [];
+    final cacheKey = 'anilist_reco:${mediaId}_$perPage';
+    final cached = AppCaches.search.get<List<Anime>>(cacheKey);
+    if (cached != null) return cached;
+
+    final diskKey = 'reco_${mediaId}_$perPage';
+    const query = '''
+      query (\$mediaId: Int, \$perPage: Int) {
+        Media(id: \$mediaId) {
+          recommendations(sort: RATING_DESC, perPage: \$perPage) {
+            nodes {
+              rating
+              mediaRecommendation {
+                id
+                idMal
+                duration
+                type
+                isAdult
+                title { romaji english native }
+                coverImage { extraLarge large medium }
+                bannerImage
+                description
+                episodes
+                status
+                averageScore
+                genres
+              }
+            }
+          }
+        }
+      }
+    ''';
+    try {
+      final res = await _anilistPost(
+        query,
+        variables: {'mediaId': mediaId, 'perPage': perPage},
+      );
+      if (res.statusCode != 200) {
+        debugPrint('[AniList] Recommendations error ${res.statusCode}: ${res.body}');
+        _classifyFailure(TimeoutException(''), res.statusCode, res.body);
+        return await _readCatalogDisk(diskKey) ?? const [];
+      }
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+      if (json.containsKey('errors')) {
+        debugPrint('[AniList] Recommendations error: ${json['errors']}');
+        lastErrorStatus = AniListStatus.serverError;
+        return await _readCatalogDisk(diskKey) ?? const [];
+      }
+      lastErrorStatus = AniListStatus.ok;
+      final nodes =
+          json['data']?['Media']?['recommendations']?['nodes'] as List? ?? [];
+
+      final seen = <int>{};
+      final animes = <Anime>[];
+      for (final node in nodes) {
+        final media = (node as Map)['mediaRecommendation'] as Map<String, dynamic>?;
+        if (media == null) continue;
+        if (media['type'] != null && media['type'] != 'ANIME') continue;
+        final anime = _mediaToAnime(media);
+        if (anime.name.isEmpty || anime.anilistId == null) continue;
+        if (!seen.add(anime.anilistId!)) continue;
+        animes.add(anime);
+      }
+      AppCaches.search.set<List<Anime>>(cacheKey, animes);
+      await _writeCatalogDisk(diskKey, animes);
+      return animes;
+    } catch (e) {
+      debugPrint('[AniList] Recommendations fetch error: $e');
+      _classifyFailure(e, null, '');
+      return await _readCatalogDisk(diskKey) ?? const [];
+    }
+  }
+
   /// Página arbitrária do catálogo, ordenada por popularidade.
   ///
   /// Existe para a **varredura do índice alfabético**
@@ -876,6 +960,7 @@ class AniListService {
         'status': a.status,
         'averageScore': a.averageScore,
         'genres': a.genres,
+        'isAdult': a.isAdult,
       };
 
   static Anime _animeFromJson(Map<String, dynamic> m) => Anime(
@@ -892,6 +977,7 @@ class AniListService {
         episodes: m['episodes'] as int?,
         status: m['status']?.toString(),
         averageScore: (m['averageScore'] as num?)?.toDouble(),
+        isAdult: m['isAdult'] as bool?,
         genres: (m['genres'] as List?)?.map((e) => e.toString()).toList() ??
             const [],
       );
@@ -922,6 +1008,7 @@ class AniListService {
       episodes: m['episodes'] as int?,
       status: m['status']?.toString(),
       averageScore: (m['averageScore'] as num?)?.toDouble(),
+      isAdult: m['isAdult'] as bool?,
       genres:
           (m['genres'] as List?)?.map((e) => e.toString()).toList() ?? const [],
     );
