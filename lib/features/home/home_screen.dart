@@ -23,6 +23,7 @@ import '../browse/browse_screen.dart';
 import '../profiles/profile_switcher_screen.dart';
 import '../profiles/widgets/profile_avatar.dart';
 import 'anilist_banner.dart';
+import 'anilist_rows.dart';
 import 'home_navigation.dart';
 import 'anilist_login_dialog.dart';
 import 'favorites_screen.dart';
@@ -44,6 +45,10 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Anime> _recommendations = [];
   String? _recommendationSeedKey;
   String? _recommendationSeedTitle;
+  // Recomendações dos 2 animes concluídos mais recentes (status COMPLETED no
+  // AniList, ordenados por `updatedAt`). Cada item vira uma linha
+  // "Porque você terminou X", logo abaixo da linha do último assistido.
+  List<({String title, List<Anime> items})> _completedRecommendations = [];
   bool _isLoading = true;
   bool _anilistLoggedIn = false;
   AniListUser? _anilistUser;
@@ -103,6 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _anilistUser = null;
           _anilistLists = [];
           _recommendations = [];
+          _completedRecommendations = [];
           _recommendationSeedTitle = null;
           _recommendationSeedKey = null;
         });
@@ -171,16 +177,26 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
-  /// Busca (ou reaproveita do cache) as recomendações do último assistido.
-  /// Chamado quando as listas AniList chegam e no fim do load inicial; o
-  /// [_recommendationSeedKey] evita repetir a mesma consulta a cada rebuild.
+  /// Busca (ou reaproveita do cache) as recomendações do último assistido e
+  /// dos 2 últimos concluídos. Chamado quando as listas AniList chegam e no fim
+  /// do load inicial; o [_recommendationSeedKey] evita repetir a mesma
+  /// consulta a cada rebuild.
   void _loadRecommendations() {
     final seed = _recommendationSeed();
-    if (seed == null) return;
-    final key = '${seed.anilistId}|${seed.title}';
+    final completedSeeds = recentCompletedSeeds(
+      _anilistLists,
+      nsfw: SettingsService.instance.nsfwFilterLevel,
+      exclude: seed,
+    );
+    if (seed == null && completedSeeds.isEmpty) return;
+    final key = '${seed?.anilistId}|${seed?.title}|'
+        '${completedSeeds.map((s) => s.mediaId).join(',')}';
     if (_recommendationSeedKey == key) return;
     _recommendationSeedKey = key;
-    _fetchRecommendations(key: key, seed: seed);
+    if (seed != null) _fetchRecommendations(key: key, seed: seed);
+    if (completedSeeds.isNotEmpty) {
+      _fetchCompletedRecommendations(key: key, seeds: completedSeeds);
+    }
   }
 
   Future<void> _fetchRecommendations({
@@ -212,6 +228,29 @@ class _HomeScreenState extends State<HomeScreen> {
       // libera o seed para uma próxima tentativa (refresh, volta do perfil…)
       if (_recommendationSeedKey == key) _recommendationSeedKey = null;
     }
+  }
+
+  /// Dispara as consultas dos 2 concluídos em paralelo (o [getRecommendations]
+  /// já cacheia em memória/disco, então a segunda visita é instantânea).
+  Future<void> _fetchCompletedRecommendations({
+    required String key,
+    required List<({String title, int mediaId})> seeds,
+  }) async {
+    final nsfw = SettingsService.instance.nsfwFilterLevel;
+    final results = await Future.wait(seeds.map((seed) async {
+      try {
+        final recs = await AniListService.getRecommendations(seed.mediaId);
+        return (title: seed.title, items: NsfwFilter.filter(recs, nsfw));
+      } catch (e) {
+        debugPrint('[Home] completed recommendations error: $e');
+        return (title: seed.title, items: <Anime>[]);
+      }
+    }));
+    if (!mounted || _recommendationSeedKey != key) return;
+    setState(() {
+      _completedRecommendations =
+          results.where((r) => r.items.isNotEmpty).toList();
+    });
   }
 
   /// Classificação NSFW de um item salvo (favorito/histórico), que não guarda
@@ -341,6 +380,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _anilistUser = null;
         _anilistLists = [];
         _recommendations = [];
+        _completedRecommendations = [];
         _recommendationSeedTitle = null;
         _recommendationSeedKey = null;
       });
@@ -573,6 +613,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       _anilistUser = null;
                       _anilistLists = [];
                       _recommendations = [];
+                      _completedRecommendations = [];
                       _recommendationSeedTitle = null;
                       _recommendationSeedKey = null;
                     });
@@ -647,20 +688,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 NsfwFilter.shouldShowMedia(e.media, nsfwSetting)))
         .toList();
 
-    final otherGroups = _anilistLists
-        .where((g) => g.entries.any((e) =>
-            e.status != 'CURRENT' &&
-            e.status != 'REPEATING' &&
-            e.status != 'PLANNING' &&
-            NsfwFilter.shouldShowMedia(e.media, nsfwSetting)))
-        .map((g) => AniListGroup(
-              name: g.name,
-              entries: g.entries
-                  .where((e) => NsfwFilter.shouldShowMedia(e.media, nsfwSetting))
-                  .toList(),
-            ))
-        .where((g) => g.entries.isNotEmpty)
-        .toList();
+    final otherGroups = inactiveGroups(
+      _anilistLists,
+      nsfw: nsfwSetting,
+    );
 
     List<Widget> section(
         String title, List<dynamic> items, double h, Widget Function(dynamic) cardBuilder,
@@ -772,6 +803,18 @@ class _HomeScreenState extends State<HomeScreen> {
           ...section(
               'Porque você assistiu "${_recommendationSeedTitle!}"',
               _recommendations.take(20).toList(), cardHeight,
+              (item) => FocusableCard(
+                    imageUrl: (item as Anime).imageUrl,
+                    title: item.name,
+                    width: cardWidth,
+                    height: cardHeight,
+                    onTap: () => openDetail(context, item),
+                  )),
+        // Uma linha por concluído recente, na ordem: último finalizado primeiro.
+        for (final row in _completedRecommendations)
+          ...section(
+              'Porque você terminou "${row.title}"',
+              row.items.take(20).toList(), cardHeight,
               (item) => FocusableCard(
                     imageUrl: (item as Anime).imageUrl,
                     title: item.name,
